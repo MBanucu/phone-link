@@ -19,7 +19,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gio, Gtk
+from gi.repository import Adw, Gio, GObject, Gtk
 
 from phone_link import actions as registry
 
@@ -35,6 +35,40 @@ PAGES = (("doctor", "Status"),) + tuple(
 )
 
 
+def action_row(
+    window, action: registry.Action, subtitle: str | None = None
+) -> Adw.ActionRow:
+    """One action as a row: run button, and a menu for its check and variants."""
+    row = Adw.ActionRow(
+        title=action.title,
+        subtitle=action.summary if subtitle is None else subtitle,
+    )
+    row.set_subtitle_selectable(True)
+
+    run = Gtk.Button(label="Run", valign=Gtk.Align.CENTER)
+    if action.destructive:
+        run.add_css_class("destructive-action")
+    run.connect("clicked", lambda _b, a=action: window.start_action(a))
+    row.add_suffix(run)
+
+    if action.supports_check or action.variants:
+        more = Gtk.MenuButton(icon_name="view-more-symbolic", valign=Gtk.Align.CENTER)
+        more.add_css_class("flat")
+        more.set_tooltip_text("More ways to run this")
+        more.set_menu_model(action_menu(action))
+        row.add_suffix(more)
+    return row
+
+
+def action_menu(action: registry.Action) -> Gio.Menu:
+    menu = Gio.Menu()
+    if action.supports_check:
+        menu.append("Check only", f"win.check-{action.id}")
+    for index, variant in enumerate(action.variants):
+        menu.append(variant.label, f"win.variant-{action.id}-{index}")
+    return menu
+
+
 class ActionsPage(Adw.PreferencesPage):
     """Every action of one group, with its check and variants in a menu."""
 
@@ -43,35 +77,76 @@ class ActionsPage(Adw.PreferencesPage):
         group = Adw.PreferencesGroup(title=title)
         self.add(group)
         for action in registry.actions_in(group_id):
-            group.add(self._row(window, action))
+            group.add(action_row(window, action))
 
-    def _row(self, window, action: registry.Action) -> Adw.ActionRow:
-        row = Adw.ActionRow(title=action.title, subtitle=action.summary)
-        row.set_subtitle_selectable(True)
 
-        run = Gtk.Button(label="Run", valign=Gtk.Align.CENTER)
-        if action.destructive:
-            run.add_css_class("destructive-action")
-        run.connect("clicked", lambda _b, a=action: window.start_action(a))
-        row.add_suffix(run)
+class SearchPage(Gtk.Box):
+    """Every action matching the header's search, as one list."""
 
-        if action.supports_check or action.variants:
-            more = Gtk.MenuButton(
-                icon_name="view-more-symbolic", valign=Gtk.Align.CENTER
+    def __init__(self, window):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self._window = window
+        self._group: Adw.PreferencesGroup | None = None
+
+        self._results = Adw.PreferencesPage()
+        self._placeholder = Adw.StatusPage(
+            icon_name="system-search-symbolic", title="Search the actions"
+        )
+        self._stack = Gtk.Stack(
+            transition_type=Gtk.StackTransitionType.CROSSFADE, vexpand=True
+        )
+        self._stack.add_named(self._results, "results")
+        self._stack.add_named(self._placeholder, "placeholder")
+        self._stack.set_visible_child_name("placeholder")
+        self.append(self._stack)
+
+    def search(self, query: str) -> int:
+        """Fill the results for `query`; returns how many actions matched."""
+        if self._group is not None:
+            self._results.remove(self._group)
+            self._group = None
+
+        words = query.lower().split()
+        if not words:
+            self._show(
+                "Search the actions",
+                f"Filter the {len(registry.ACTIONS)} actions by name or summary.",
             )
-            more.add_css_class("flat")
-            more.set_tooltip_text("More ways to run this")
-            more.set_menu_model(self._menu(action))
-            row.add_suffix(more)
-        return row
+            return 0
 
-    def _menu(self, action: registry.Action) -> Gio.Menu:
-        menu = Gio.Menu()
-        if action.supports_check:
-            menu.append("Check only", f"win.check-{action.id}")
-        for index, variant in enumerate(action.variants):
-            menu.append(variant.label, f"win.variant-{action.id}-{index}")
-        return menu
+        groups = dict(registry.GROUPS)
+        matches = []
+        for action in registry.ACTIONS:
+            haystack = " ".join(
+                (action.title, action.summary, action.id, groups.get(action.group, ""))
+            ).lower()
+            if all(word in haystack for word in words):
+                matches.append(action)
+        if not matches:
+            self._show("No matching action", f"Nothing matches “{query.strip()}”.")
+            return 0
+
+        group = Adw.PreferencesGroup(
+            title=f"{len(matches)} matching action" + ("" if len(matches) == 1 else "s")
+        )
+        for action in matches:
+            group.add(
+                action_row(
+                    self._window,
+                    action,
+                    subtitle=f"{groups.get(action.group, action.group)} "
+                    f"· {action.summary}",
+                )
+            )
+        self._results.add(group)
+        self._group = group
+        self._stack.set_visible_child_name("results")
+        return len(matches)
+
+    def _show(self, title: str, description: str) -> None:
+        self._placeholder.set_title(title)
+        self._placeholder.set_description(description)
+        self._stack.set_visible_child_name("placeholder")
 
 
 class Window(Adw.ApplicationWindow):
@@ -88,6 +163,10 @@ class Window(Adw.ApplicationWindow):
         for group_id, title in registry.GROUPS:
             self._stack.add_named(ActionsPage(self, group_id, title), group_id)
 
+        self._search_page = SearchPage(self)
+        self._stack.add_named(self._search_page, "search")
+        self._last_page = PAGES[0][0]
+
         self._title = Adw.WindowTitle(title="Status")
         self._spinner = Gtk.Spinner()
 
@@ -96,20 +175,39 @@ class Window(Adw.ApplicationWindow):
         refresh.connect("clicked", lambda _b: self.refresh_status())
 
         menu = Gio.Menu()
+        menu.append("Search actions", "win.search")
         menu.append("Refresh status", "win.refresh")
         menu.append("Quit", "app.quit")
         menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic")
         menu_button.set_menu_model(menu)
+
+        self._search_button = Gtk.ToggleButton(icon_name="system-search-symbolic")
+        self._search_button.set_tooltip_text("Search the actions (Ctrl+F)")
+        self._search_entry = Gtk.SearchEntry(placeholder_text="Search actions")
+        self._search_entry.set_hexpand(True)
+        self._search_bar = Gtk.SearchBar()
+        self._search_bar.set_child(self._search_entry)
+        self._search_bar.connect_entry(self._search_entry)
+        self._search_button.bind_property(
+            "active",
+            self._search_bar,
+            "search-mode-enabled",
+            GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE,
+        )
+        self._search_bar.connect("notify::search-mode-enabled", self._on_search_mode)
+        self._search_entry.connect("search-changed", self._on_search_changed)
 
         header = Adw.HeaderBar()
         header.set_title_widget(self._title)
         header.pack_start(self._spinner)
         header.pack_end(menu_button)
         header.pack_end(refresh)
+        header.pack_end(self._search_button)
 
         self._toasts = Adw.ToastOverlay()
         content = Adw.ToolbarView()
         content.add_top_bar(header)
+        content.add_top_bar(self._search_bar)
         content.set_content(self._stack)
         self._toasts.set_child(content)
 
@@ -138,7 +236,13 @@ class Window(Adw.ApplicationWindow):
                     registry.GROUP_ICONS.get(page_id, "dialog-information-symbolic")
                 )
             )
-            box.append(Gtk.Label(label=title, xalign=0.0))
+            box.append(Gtk.Label(label=title, xalign=0.0, hexpand=True))
+            if page_id == "doctor":
+                # A count next to the sidebar entry, so the window shows at a
+                # glance that the setup needs attention from any page.
+                self._badge = Gtk.Label(visible=False, xalign=1.0)
+                self._badge.add_css_class("caption")
+                box.append(self._badge)
             self._list.append(Gtk.ListBoxRow(child=box))
 
         scroller = Gtk.ScrolledWindow(
@@ -173,22 +277,50 @@ class Window(Adw.ApplicationWindow):
 
     def show_page(self, page_id: str) -> None:
         self._stack.set_visible_child_name(page_id)
-        self._title.set_title(dict(PAGES).get(page_id, page_id))
+        title = "Search" if page_id == "search" else dict(PAGES).get(page_id, page_id)
+        self._title.set_title(title)
+        if page_id != "search":
+            self._last_page = page_id
         if self._split.get_collapsed():
             self._split.set_show_content(True)
+
+    def search(self, query: str) -> int:
+        """Open the search and fill it; returns how many actions matched."""
+        if not self._search_bar.get_search_mode():
+            self._search_button.set_active(True)
+        self._search_entry.set_text(query)
+        return self._search_page.search(query)
+
+    def _on_search_mode(self, bar, _pspec) -> None:
+        if bar.get_search_mode():
+            self.show_page("search")
+            self._search_entry.grab_focus()
+            self._search_page.search(self._search_entry.get_text())
+        else:
+            self._search_entry.set_text("")
+            self.show_page(self._last_page)
+
+    def _on_search_changed(self, entry) -> None:
+        if self._search_bar.get_search_mode():
+            self._search_page.search(entry.get_text())
 
     def _on_row_selected(self, _listbox, row) -> None:
         if row is None:
             return
         index = row.get_index()
-        if 0 <= index < len(PAGES):
-            self.show_page(PAGES[index][0])
+        if not 0 <= index < len(PAGES):
+            return
+        if self._search_bar.get_search_mode():
+            self._search_button.set_active(False)
+        self.show_page(PAGES[index][0])
 
     def _on_map(self, _window) -> None:
         if self._autostart:
             self._status.refresh()
 
     def refresh_status(self) -> None:
+        if self._search_bar.get_search_mode():
+            self._search_button.set_active(False)
         self.show_page("doctor")
         self._status.refresh()
 
@@ -201,12 +333,29 @@ class Window(Adw.ApplicationWindow):
 
     def report_status(self, data: dict) -> None:
         counts = data.get("counts", {})
+        fails = counts.get("fail", 0)
+        warns = counts.get("warn", 0)
         if data.get("ready"):
             self._title.set_subtitle("ready")
         else:
-            self._title.set_subtitle(
-                f"not ready ({counts.get('fail', 0)} failing)"
-            )
+            self._title.set_subtitle(f"not ready ({fails} failing)")
+        self._set_badge(fails, warns)
+
+    def _set_badge(self, fails: int, warns: int) -> None:
+        for css in ("error", "warning"):
+            self._badge.remove_css_class(css)
+        if fails:
+            self._badge.set_label(str(fails))
+            self._badge.set_tooltip_text(f"{fails} failing checks")
+            self._badge.add_css_class("error")
+            self._badge.set_visible(True)
+        elif warns:
+            self._badge.set_label(str(warns))
+            self._badge.set_tooltip_text(f"{warns} warning" + ("" if warns == 1 else "s"))
+            self._badge.add_css_class("warning")
+            self._badge.set_visible(True)
+        else:
+            self._badge.set_visible(False)
 
     def report_error(self, heading: str, body: str) -> None:
         self._toasts.add_toast(Adw.Toast(title=f"{heading}: {body}", timeout=8))
@@ -216,6 +365,12 @@ class Window(Adw.ApplicationWindow):
         refresh = Gio.SimpleAction.new("refresh", None)
         refresh.connect("activate", lambda _a, _p: self.refresh_status())
         self.add_action(refresh)
+
+        search = Gio.SimpleAction.new("search", None)
+        search.connect(
+            "activate", lambda _a, _p: self._search_button.set_active(True)
+        )
+        self.add_action(search)
 
         for action in registry.ACTIONS:
             if action.supports_check:
@@ -305,6 +460,12 @@ class PhoneLinkApp(Adw.Application):
         super().__init__(
             application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS
         )
+        for action, accels in (
+            ("win.refresh", ["<Primary>r"]),
+            ("win.search", ["<Primary>f"]),
+            ("app.quit", ["<Primary>q"]),
+        ):
+            self.set_accels_for_action(action, accels)
 
     def do_activate(self) -> None:
         window = self.props.active_window
@@ -351,6 +512,8 @@ def selftest() -> int:
             window.present()
             for name in window.page_names():
                 window.show_page(name)
+            if window.search("tunnel") < 1:
+                raise RuntimeError("the search found nothing for 'tunnel'")
             probe_window = RunWindow(window, "selftest", ["true"], autostart=False)
             probe_window.destroy()
             window.close()
@@ -367,7 +530,7 @@ def selftest() -> int:
     if not state["ok"]:
         print(f"selftest failed: {state['error']}", file=sys.stderr)
         return 1
-    print("selftest ok: window, every page and the log window construct")
+    print("selftest ok: window, every page, search and the log window construct")
     return 0
 
 

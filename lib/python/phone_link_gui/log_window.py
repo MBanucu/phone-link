@@ -95,12 +95,17 @@ class RunWindow(Adw.Window):
         self._outcome = outcome
         self._spinner.stop()
         self._stop.set_sensitive(False)
+        for css in ("success", "error"):
+            self._status.remove_css_class(css)
         if outcome.cancelled:
             self._status.set_text("stopped")
         elif outcome.error:
             self._status.set_text(f"could not run: {outcome.error}")
+            self._status.add_css_class("error")
         else:
             self._status.set_text(f"exit {outcome.exit_code} · {outcome.duration:.1f} s")
+            # A failed run should not read like a successful one at a glance.
+            self._status.add_css_class("success" if outcome.exit_code == 0 else "error")
         if self._on_finished is not None:
             self._on_finished(outcome)
         return False

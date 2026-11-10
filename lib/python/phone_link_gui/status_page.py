@@ -79,7 +79,25 @@ class StatusPage(Gtk.Box):
 
         self._page = Adw.PreferencesPage()
         self._page.set_vexpand(True)
-        self.append(self._page)
+
+        # A blank page while the first probe runs reads as "broken"; a failed
+        # probe used to leave the page empty with only a toast behind it.
+        self._placeholder = Adw.StatusPage(
+            icon_name="utilities-system-monitor-symbolic",
+            title="Checking the setup",
+        )
+        self._spinner = Gtk.Spinner()
+        self._retry = Gtk.Button(label="Try again", halign=Gtk.Align.CENTER)
+        self._retry.add_css_class("pill")
+        self._retry.connect("clicked", lambda _b: self.refresh())
+        self._placeholder.set_child(self._spinner)
+
+        self._view = Gtk.Stack(
+            transition_type=Gtk.StackTransitionType.CROSSFADE, vexpand=True
+        )
+        self._view.add_named(self._placeholder, "placeholder")
+        self._view.add_named(self._page, "page")
+        self.append(self._view)
 
     # -- probing -------------------------------------------------------
     def refresh(self, *, escalate: bool = False) -> None:
@@ -87,8 +105,20 @@ class StatusPage(Gtk.Box):
             return
         self._busy = True
         self._banner.set_revealed(False)
+        self._show_progress()
         self._window.set_status_busy(True)
         threading.Thread(target=self._probe, args=(escalate,), daemon=True).start()
+
+    def _show_progress(self) -> None:
+        self._placeholder.set_title("Checking the setup")
+        self._placeholder.set_description(
+            "phone-doctor is looking at the flake, the host and the phone."
+        )
+        self._placeholder.set_icon_name("utilities-system-monitor-symbolic")
+        if self._placeholder.get_child() is not self._spinner:
+            self._placeholder.set_child(self._spinner)
+        self._spinner.start()
+        self._view.set_visible_child_name("placeholder")
 
     def refresh_if_idle(self) -> None:
         if not self._busy:
@@ -106,10 +136,17 @@ class StatusPage(Gtk.Box):
     def _apply(self, data, error) -> bool:
         self._busy = False
         self._window.set_status_busy(False)
+        self._spinner.stop()
         if error:
+            self._placeholder.set_title("Could not check the setup")
+            self._placeholder.set_description(error)
+            self._placeholder.set_icon_name("dialog-error-symbolic")
+            self._placeholder.set_child(self._retry)
+            self._view.set_visible_child_name("placeholder")
             self._window.report_error("Status probe failed", error)
             return False
         self._render(data)
+        self._view.set_visible_child_name("page")
         self._window.report_status(data)
         self._show_auth_banner(data)
         return False
@@ -125,13 +162,15 @@ class StatusPage(Gtk.Box):
 
         counts = data.get("counts", {})
         ready = bool(data.get("ready"))
+        warns = counts.get("warn", 0)
         summary = Adw.PreferencesGroup(title="Verdict")
         row = Adw.ActionRow(
             title="ready" if ready else "not ready",
             subtitle=(
                 f"{counts.get('ok', 0)} ok · {counts.get('fail', 0)} failed · "
-                f"{counts.get('warn', 0)} warnings · {counts.get('skip', 0)} skipped"
-            ),
+                f"{warns} warning" + ("" if warns == 1 else "s")
+            )
+            + f" · {counts.get('skip', 0)} skipped",
         )
         icon = Gtk.Image.new_from_icon_name(
             "object-select-symbolic" if ready else "dialog-error-symbolic"
@@ -150,9 +189,18 @@ class StatusPage(Gtk.Box):
 
         for section in data.get("sections", []):
             name = section.get("name", "")
+            results = section.get("results", [])
             title = SECTION_TITLES.get(name) or name.strip("[]").title()
+            # Say in the heading itself which sections need attention, so a
+            # long report can be skimmed without reading every row.
+            fails = sum(1 for result in results if result.get("status") == "fail")
+            warns = sum(1 for result in results if result.get("status") == "warn")
+            if fails:
+                title = f"{title} · {fails} failing"
+            elif warns:
+                title = f"{title} · {warns} warning" + ("" if warns == 1 else "s")
             group = Adw.PreferencesGroup(title=title)
-            for result in section.get("results", []):
+            for result in results:
                 group.add(self._row(result))
             self._page.add(group)
             self._groups.append(group)

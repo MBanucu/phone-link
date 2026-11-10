@@ -151,7 +151,9 @@ environment.systemPackages = [ phone-link.packages.${pkgs.system}.phone-link-gui
 Every action has its `--check` preview plus its variants (F-Droid install,
 tunnel through `adb reverse`, legacy adb port, keep-cache uninstall, …) in the
 row's menu, and the output streams into a log window exactly as the script
-printed it, exit status included. Nothing is reimplemented: `phone_link.actions`
+printed it, exit status included. The header searches every action by name or
+summary (Ctrl+F), the sidebar badges the number of failing checks, and Ctrl+R
+re-checks the setup. Nothing is reimplemented: `phone_link.actions`
 decides the argv and `phone_link.runner` streams it for both the GUI and
 `phone-link run`, and the `registry` check fails when a script exists in `bin/`
 without an action entry.
