@@ -29,6 +29,7 @@
         "phone-proxy-uninstall"
         "phone-tunnel-run"
         "phone-unlock"
+        "phone-usb-tether-check"
         "phone-wifi-concurrency"
       ];
 
