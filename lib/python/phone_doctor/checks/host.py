@@ -53,7 +53,7 @@ def check(ctx: Context) -> list[Result]:
             warn(
                 "ap_profile",
                 "ap profile",
-                f"{ctx.ap_con} missing (hotspot mode)",
+                f"{ctx.ap_con} missing (run phone-ap-create, or hotspot mode)",
             )
         )
 

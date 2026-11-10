@@ -59,9 +59,9 @@ if [ -z "$doctor" ]; then doctor=$here/phone-doctor; fi
 
 has_fix() {
   case $1 in
-    apk_cache | ip_forward | ap_address | phone_unlocked | phone_address | \
-      phone_default | proxy_app | proxy_request | phone_tun | tunnel_route | \
-      rndis0 | network_transport | https) return 0 ;;
+    apk_cache | ip_forward | ap_profile | ap_address | phone_unlocked | \
+      phone_address | phone_default | proxy_app | proxy_request | phone_tun | \
+      tunnel_route | rndis0 | network_transport | https) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -70,6 +70,7 @@ describe_fix() {
   case $1 in
     apk_cache) printf 'phone-fix-apk' ;;
     ip_forward) printf 'phone-fix-forwarding' ;;
+    ap_profile) printf 'phone-ap-create' ;;
     ap_address) printf 'phone-ap-up' ;;
     phone_unlocked) printf 'phone-unlock' ;;
     phone_address) printf 'phone-wifi-connect' ;;
@@ -122,6 +123,7 @@ run_fix() {
   case $1 in
     apk_cache) run_cmd phone-fix-apk ;;
     ip_forward) run_cmd phone-fix-forwarding ;;
+    ap_profile) run_cmd phone-ap-create ;;
     ap_address) run_cmd phone-ap-up ;;
     phone_unlocked) run_cmd phone-unlock ;;
     phone_address) run_cmd phone-wifi-connect ;;
@@ -167,7 +169,7 @@ printf 'problems:\n%s\n' "$(printf '%s\n' "$problems" | sed 's/^/  /')"
 # The AP and the phone's link to it come last: bringing the AP up moves the
 # phone's address, so every proxy/tunnel fix runs while the phone is still
 # reachable over USB tether or its current address.
-fix_order="apk_cache ip_forward phone_unlocked phone_default proxy_app proxy_request phone_tun tunnel_route rndis0 network_transport ap_address phone_address https"
+fix_order="apk_cache ip_forward ap_profile phone_unlocked phone_default proxy_app proxy_request phone_tun tunnel_route rndis0 network_transport ap_address phone_address https"
 actions=""
 manual=""
 for id in $fix_order; do

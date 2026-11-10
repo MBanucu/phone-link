@@ -18,6 +18,7 @@
         "adb-wifi-connect"
         "net-check"
         "phone-adb-wifi"
+        "phone-ap-create"
         "phone-ap-delete"
         "phone-ap-down"
         "phone-ap-up"

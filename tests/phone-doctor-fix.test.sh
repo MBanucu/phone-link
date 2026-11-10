@@ -44,6 +44,7 @@ make_stub phone-unlock
 make_stub phone-proxy-start
 make_stub phone-proxy-setup
 make_stub phone-fix-apk
+make_stub phone-ap-create
 
 cat >"$STUBS/phone-proxy-install" <<'EOF'
 #!/usr/bin/env bash
@@ -149,7 +150,14 @@ if run --yes --required; then ok "cached proxy install exits 0"; else bad "cache
 grep -q "phone-proxy-install $PHONE_APK_CACHE/" "$LOG/actions" \
   && ok "installs from the ambulance box" || bad "installs from the ambulance box" "$(cat "$LOG/actions" 2>/dev/null)"
 
-# 11. --help and unknown arguments.
+# 11. A missing AP profile is created from the secret.
+printf 'warn ap_profile phonelink missing (run phone-ap-create, or hotspot mode)\n' >"$LOG/problems"
+rm -f "$LOG/actions"
+if run --yes; then ok "ap_profile fix exits 0"; else bad "ap_profile fix exits 0" "$(cat "$LOG/out")"; fi
+grep -qx 'phone-ap-create' "$LOG/actions" && ok "runs phone-ap-create" \
+  || bad "runs phone-ap-create" "$(cat "$LOG/actions" 2>/dev/null)"
+
+# 12. --help and unknown arguments.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 if run --bogus; then bad "unknown argument exits 1"; else ok "unknown argument exits 1"; fi
 

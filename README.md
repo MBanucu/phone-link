@@ -96,6 +96,7 @@ Or straight from the checkout: `./bin/phone-net-status`.
 | `phone-wifi-forget` | forget a saved network, default PhoneLink (`--check`, `--yes`) |
 | `phone-wifi-concurrency` | report whether Wi-Fi client and hotspot can run together (STA+AP), read-only; exit 2 if the phone does not say |
 | `phone-unlock` | unlock the lock screen with `PHONE_PIN` from the secrets file (`--check` only reports locked/unlocked) |
+| `phone-ap-create` | create the `phonelink` AP profile from the root-only `PHONE_AP_PASS` secret (`--refresh` rewrites it after a PSK change, `--check` reports) |
 | `phone-ap-delete` | delete the `phonelink` AP profile from NetworkManager, bringing it down first if active (`--check` reports, `--yes` skips the prompt) |
 | `phone-ap-up` | preflight the radio, then `nmcli connection up phonelink` |
 | `phone-ap-down` | drop the AP and rejoin the phone's hotspot |
@@ -128,8 +129,9 @@ place.
 The `script` check also covers `phone-doctor --analyze` (problem ids, AP down and
 an empty ambulance box, warnings-only, no headers or `ok` lines),
 `phone-doctor-fix` (dry run, ordered application, cached-APK install,
-manual-only and failed-fix paths) and the fix scripts (ambulance APK,
-forwarding, mobile data, tunnel: apply, no-op and read-only `--check`).
+manual-only and failed-fix paths) and the fix scripts (ambulance APK, AP
+profile creation from the secret, forwarding, mobile data, tunnel: apply,
+no-op and read-only `--check`).
 
 ### Live end-to-end test
 
@@ -171,20 +173,22 @@ set `phoneLink.proxyHost = "10.244.108.165"`.
 
 ## One-time setup
 
-The AP profile contains the Wi-Fi PSK, so it is created by hand and stays out of
-the store:
+The AP profile needs the Wi-Fi PSK, so it is built from the same root-only
+secrets file as the PIN and never enters the Nix store:
 
 ```sh
-nmcli connection add type wifi ifname wlp110s0 con-name phonelink \
-  autoconnect no ssid PhoneLink 802-11-wireless.mode ap \
-  802-11-wireless.band bg 802-11-wireless.channel 1 \
-  wifi-sec.key-mgmt wpa-psk wifi-sec.psk '<psk>' \
-  ipv4.method shared ipv4.addresses 192.168.77.1/24
-
 install -m600 /dev/null /etc/nixos/phone-socks-secrets
-printf 'PHONE_SOCKS_PASS=%s\nPHONE_PIN=%s\n' '<proxy password>' '<phone PIN>' \
+printf 'PHONE_SOCKS_PASS=%s\nPHONE_PIN=%s\nPHONE_AP_PASS=%s\n' \
+  '<proxy password>' '<phone PIN>' '<Wi-Fi PSK>' \
   | sudo tee /etc/nixos/phone-socks-secrets
+
+sudo phone-ap-create     # builds phonelink from PHONE_AP_PASS
+sudo phone-ap-up         # activates it (creates the profile if still missing)
 ```
+
+`phone-ap-create --refresh` rewrites the profile after rotating the PSK.
+NetworkManager stores the profile root-only; it is never part of a Nix store
+path or the flake's closure.
 
 The proxy APK is not vendored (it is not ours to ship), but the app is on
 F-Droid, so the script can use F-Droid as its update channel:

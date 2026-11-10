@@ -12,9 +12,12 @@ iw list 2>/dev/null | grep -q '\* AP' || die "driver reports no AP mode"
 [ "$(nmcli -g wifi.backend 2>/dev/null || true)" != iwd ] \
   || die "NetworkManager uses iwd; AP mode needs wpa_supplicant"
 [ "$(sysctl -n net.ipv4.ip_forward)" = 1 ] || die "net.ipv4.ip_forward is 0"
-nmcli -t -f NAME con show | grep -qx "$PHONE_AP_CON" \
-  || die "profile $PHONE_AP_CON missing (see phone-ap.nix for the nmcli command)"
+if ! nmcli -t -f NAME con show | grep -qx "$PHONE_AP_CON"; then
+  log "profile $PHONE_AP_CON missing; creating it from $PHONE_SECRETS"
+  "$(dirname -- "$(readlink -f -- "$0")")/phone-ap-create" \
+    || die "could not create profile $PHONE_AP_CON (run phone-ap-create)"
+fi
 
 nmcli connection up "$PHONE_AP_CON"
-ip -4 -br addr show wlp110s0
+ip -4 -br addr show "$PHONE_AP_IF"
 log "AP up. The phone must have Wi-Fi (client) on, not the hotspot."
