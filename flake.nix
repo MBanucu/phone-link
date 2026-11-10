@@ -174,6 +174,14 @@
                   -type d -exec rm -rf {} +
                 install -Dm755 ${./bin}/phone-link-gui "$out/bin/phone-link-gui"
                 patchShebangs "$out/bin/phone-link-gui"
+                # nixpkgs keeps schemas under share/gsettings-schemas/<pkg>,
+                # and GLib only finds them when that directory is on
+                # XDG_DATA_DIRS. Without it GtkSettings gets no schema source
+                # at all, so the app loses the user's fonts and dark mode.
+                schema_dirs=$(find -L \
+                  ${pkgs.gtk4}/share/gsettings-schemas \
+                  ${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas \
+                  -mindepth 1 -maxdepth 1 -type d | sort | paste -sd:)
                 wrapProgram "$out/bin/phone-link-gui" \
                   --prefix PATH : ${
                     lib.makeBinPath [
@@ -182,7 +190,7 @@
                     ]
                   } \
                   --prefix GI_TYPELIB_PATH : ${typelibs} \
-                  --prefix XDG_DATA_DIRS : ${dataDirs}
+                  --prefix XDG_DATA_DIRS : "$schema_dirs:${dataDirs}"
                 install -Dm644 ${./gui}/phone-link-gui.desktop \
                   "$out/share/applications/phone-link-gui.desktop"
                 install -Dm644 ${./gui}/phone-link-gui.svg \
