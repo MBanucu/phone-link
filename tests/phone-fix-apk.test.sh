@@ -38,6 +38,10 @@ run() {
   "$BASH_BIN" "$SCRIPT" "$@" >"$LOG/out" 2>&1
 }
 
+run_no_home() {
+  env -u HOME -u XDG_CACHE_HOME "$BASH_BIN" "$SCRIPT" "$@" >"$LOG/out" 2>&1
+}
+
 # 1. Empty cache: --check reports it without downloading.
 rm -rf "$PHONE_APK_CACHE"
 if run --check; then bad "empty --check exits 1"; else ok "empty --check exits 1"; fi
@@ -62,7 +66,15 @@ if run --refresh; then ok "--refresh exits 0"; else bad "--refresh exits 0" "$(c
 grep -q 'phone-proxy-install --fdroid --check' "$LOG/actions" \
   && ok "--refresh downloads" || bad "--refresh downloads"
 
-# 5. --help.
+# 5. Activation runs without HOME: the ambulance box is still found.
+rm -f "$LOG/actions"
+if run_no_home --check; then ok "works without HOME"; else bad "works without HOME" "$(cat "$LOG/out")"; fi
+grep -q 'unbound variable' "$LOG/out" && bad "works without HOME: no unbound variable" \
+  || ok "works without HOME: no unbound variable"
+[ -s "$LOG/actions" ] && bad "works without HOME downloads nothing" \
+  || ok "works without HOME downloads nothing"
+
+# 6. --help.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"

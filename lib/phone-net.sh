@@ -87,8 +87,16 @@ phone_proxy_check() {
 # phone_apk_cached -> newest proxy APK in the ambulance box or a user cache
 phone_apk_cached() {
   local dir f newest=""
-  for dir in "$PHONE_APK_CACHE" "${PHONE_APK_DIR:-}" \
-    "${XDG_CACHE_HOME:-$HOME/.cache}/phone-link"; do
+  # Activation can run with HOME unset, so only add the user cache when a
+  # directory is actually available.
+  local dirs=("$PHONE_APK_CACHE")
+  [ -n "${PHONE_APK_DIR:-}" ] && dirs+=("$PHONE_APK_DIR")
+  if [ -n "${XDG_CACHE_HOME:-}" ]; then
+    dirs+=("$XDG_CACHE_HOME/phone-link")
+  elif [ -n "${HOME:-}" ]; then
+    dirs+=("$HOME/.cache/phone-link")
+  fi
+  for dir in "${dirs[@]}"; do
     [ -n "$dir" ] && [ -d "$dir" ] || continue
     for f in "$dir"/*.apk; do
       [ -f "$f" ] || continue
