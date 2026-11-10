@@ -16,7 +16,7 @@ cable.
 ```nix
 # flake.nix
 {
-  inputs.phone-link.url = "path:/home/michi/dev/phone-link";
+  inputs.phone-link.url = "github:MBanucu/phone-link";
 
   outputs = { self, nixpkgs, phone-link, ... }: {
     nixosConfigurations.nixos = nixpkgs.lib.nixosSystem {
