@@ -6,6 +6,8 @@ cable.
 
 - `packages.<system>.phone-link` — the diagnostic/control scripts, with every
   runtime tool wrapped onto their `PATH`
+- `packages.<system>.phone-link-gui` — the GTK4/libadwaita control panel (since
+  0.2.0)
 - `nixosModules.default` — the tunnel, the declarative access-point profile and
   its firewall holes
 - `devShells.default`, `formatter`, `checks`
@@ -16,7 +18,7 @@ cable.
 ```nix
 # flake.nix
 {
-  inputs.phone-link.url = "github:MBanucu/phone-link";
+  inputs.phone-link.url = "github:MBanucu/phone-link/v0.2.0";
 
   outputs = { self, nixpkgs, phone-link, ... }: {
     nixosConfigurations.nixos = nixpkgs.lib.nixosSystem {
@@ -36,6 +38,10 @@ cable.
   };
 }
 ```
+
+Pinning the tag, as above, keeps the machine on a reviewed revision; use the
+bare `github:MBanucu/phone-link` to track `main`, and `nix flake update
+phone-link` to move from one tag to the next.
 
 The module never starts the tunnel at boot. A 5 s timer probes the proxy port and
 keeps `phone-tun.service` running only while it answers, so a missing phone or a
@@ -125,11 +131,21 @@ place.
 ## GUI
 
 `packages.<system>.phone-link-gui` is a GTK4/libadwaita control panel for the
-same setup. It reads the doctor's `--json` report for its status page and runs
-the scripts with the flags declared in `lib/python/phone_link/actions.py`:
+same setup, new in **0.2.0**. It reads the doctor's `--json` report for its
+status page and runs the scripts with the flags declared in
+`lib/python/phone_link/actions.py`:
 
 ```sh
-nix run .#gui            # or: nix build .#phone-link-gui, then phone-link-gui
+nix run .#gui                                 # from a checkout
+nix run github:MBanucu/phone-link/v0.2.0#gui  # straight from the tag
+nix build .#phone-link-gui                    # or build it and run the binary
+```
+
+The module installs the scripts but not the panel; add the package to get the
+desktop entry and icon as well:
+
+```nix
+environment.systemPackages = [ phone-link.packages.${pkgs.system}.phone-link-gui ];
 ```
 
 Every action has its `--check` preview plus its variants (F-Droid install,
