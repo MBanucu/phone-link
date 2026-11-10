@@ -39,6 +39,10 @@ case "${args[0]:-}" in
           getFunctions) cat "$LOG/functions" ;;
           setFunctions)
             printf 'setFunctions %s\n' "${args[3]:-}" >>"$LOG/actions"
+            if [ -f "$LOG/fail_once" ]; then
+              rm -f "$LOG/fail_once"
+              exit 137
+            fi
             printf 'rndis,adb\n' >"$LOG/usbconfig"
             ;;
           setScreenUnlockedFunctions)
@@ -54,6 +58,7 @@ EOF
 sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/adb"
 chmod +x "$STUBS/adb"
 export PATH="$STUBS:$PATH"
+export PHONE_TETHER_TRIES=1
 
 reset_state() {
   printf 'List of devices attached\nXPLO2EEA0001541\tdevice\n' >"$LOG/devices"
@@ -124,6 +129,22 @@ grep -q 'setFunctions' "$LOG/actions" && bad "does not touch current functions" 
   || ok "does not touch current functions"
 grep -q 'setScreenUnlockedFunctions rndis,adb' "$LOG/actions" && ok "sets the default action" \
   || bad "sets the default action"
+
+# 5b. An adb abort during the setter is retried.
+reset_state
+printf 'none\n' >"$LOG/functions"
+printf 'adb\n' >"$LOG/usbconfig"
+printf 'none\n' >"$LOG/screen"
+: >"$LOG/fail_once"
+if run; then
+  ok "survives an adb abort while setting the tether"
+else
+  bad "survives an adb abort while setting the tether" "$(cat "$LOG/out")"
+fi
+grep -q 'USB tethering is now the default USB action' "$LOG/out" && ok "reports success after the abort" \
+  || bad "reports success after the abort" "$(cat "$LOG/out")"
+[ "$(grep -c 'setFunctions rndis,adb' "$LOG/actions")" -ge 2 ] && ok "reissues the setter" \
+  || bad "reissues the setter" "$(cat "$LOG/actions")"
 
 # 5. Setters that do not take effect are an error.
 reset_state

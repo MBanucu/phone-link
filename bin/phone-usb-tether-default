@@ -9,7 +9,8 @@
 #   setScreenUnlockedFunctions rndis,adb-> tether automatically on unlock
 #
 # The framework may drop adb from the reported function list; sys.usb.config is
-# the authoritative check that both rndis and adb are active.
+# the authoritative check that both rndis and adb are active. It also ignores
+# data functions while the keyguard is up, so unlock the phone first.
 set -eu
 . "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
 
@@ -62,14 +63,38 @@ fi
 
 if [ "$current" != yes ]; then
   log "setting current USB functions to rndis,adb"
-  adb -s "$serial" shell svc usb setFunctions rndis,adb >/dev/null
+  adb -s "$serial" shell svc usb setFunctions rndis,adb >/dev/null 2>&1 || true
 fi
 if [ "$default" != yes ]; then
   log "setting screen-unlocked USB functions to rndis,adb"
-  adb -s "$serial" shell svc usb setScreenUnlockedFunctions rndis,adb >/dev/null
+  adb -s "$serial" shell svc usb setScreenUnlockedFunctions rndis,adb \
+    >/dev/null 2>&1 || true
 fi
 
-read_state
+# Changing functions makes the adb client abort while the gadget re-enumerates,
+# so a setter can be lost. Re-read and re-issue only what is still missing.
+settle=${PHONE_TETHER_TRIES:-5}
+tries=0
+while :; do
+  read_state
+  current=no
+  default=no
+  if printf '%s' "$usb_config" | grep -qi rndis; then current=yes; fi
+  if printf '%s' "$screen_unlocked" | grep -qi rndis; then default=yes; fi
+  if [ "$current" = yes ] && [ "$default" = yes ]; then break; fi
+  [ "$tries" -lt "$settle" ] || break
+  if [ "$current" != yes ]; then
+    adb -s "$serial" shell svc usb setFunctions rndis,adb \
+      >/dev/null 2>&1 || true
+  fi
+  if [ "$default" != yes ]; then
+    adb -s "$serial" shell svc usb setScreenUnlockedFunctions rndis,adb \
+      >/dev/null 2>&1 || true
+  fi
+  tries=$((tries + 1))
+  sleep 1
+done
+
 printf '%s' "$usb_config" | grep -qi rndis \
   || die "USB tethering did not become current (sys.usb.config=$usb_config)"
 printf '%s' "$screen_unlocked" | grep -qi rndis \
