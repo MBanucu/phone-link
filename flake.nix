@@ -20,6 +20,8 @@
         "phone-ap-up"
         "phone-net-status"
         "phone-proxy-check"
+        "phone-proxy-install"
+        "phone-proxy-uninstall"
         "phone-tunnel-run"
       ];
 
@@ -192,6 +194,29 @@
                 ${pkgs.writeText "phone-tun-exec-start" on.systemd.services.phone-tun.serviceConfig.ExecStart}
               touch $out
             '';
+
+          # Hermetic CLI tests: stub adb/curl first on PATH, no phone, no network.
+          # The source script is used (not the wrapper), because wrapProgram
+          # prepends its own PATH and would shadow the stubs.
+          script =
+            pkgs.runCommand "phone-link-script-check"
+              {
+                nativeBuildInputs = [
+                  pkgs.bash
+                  pkgs.coreutils
+                  pkgs.gnugrep
+                  pkgs.gnused
+                ];
+              }
+              ''
+                # Run every suite from the flake source root, so each test's
+                # ../bin and ../lib lookups resolve; interpolating ./bin alone
+                # would give a store path without its siblings.
+                for t in ${self.outPath}/tests/*.test.sh; do
+                  bash "$t"
+                done
+                touch $out
+              '';
         }
       );
 

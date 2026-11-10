@@ -1,3 +1,7 @@
 result
 result-*
 .direnv/
+
+# proxy APK backups (not ours to redistribute)
+apk/
+*.apk

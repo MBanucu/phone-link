@@ -71,6 +71,8 @@ Or straight from the checkout: `./bin/phone-net-status`.
 |---|---|
 | `phone-net-status` | links, routes, resolver, proxy probes, adb transports, phone state |
 | `phone-proxy-check` | request through the proxy on the hotspot and AP addresses (needs root for the secret) |
+| `phone-proxy-install` | install/update the proxy app from an APK; `--fdroid` fetches F-Droid's suggested version, `--pull` copies it off the phone, `--status` reports the version |
+| `phone-proxy-uninstall` | remove the proxy app (`--check` previews, `--keep-data` keeps app data, `--yes` skips the prompt) |
 | `phone-ap-up` | preflight the radio, then `nmcli connection up phonelink` |
 | `phone-ap-down` | drop the AP and rejoin the phone's hotspot |
 | `adb-wifi-connect` | connect adb to the phone over TCP |
@@ -84,7 +86,7 @@ place.
 
 ## Checks
 
-`nix flake check` runs four checks per system:
+`nix flake check` runs five checks per system:
 
 | check | what it proves |
 |---|---|
@@ -92,6 +94,7 @@ place.
 | `shellcheck` | every script and `lib/phone-net.sh` is clean at shellcheck warning level |
 | `format` | `flake.nix` and `modules/phone-link.nix` are nixfmt-clean |
 | `module` | the module generates the expected sing-box config and units (5 s probe, 20 s first run, AP DHCP/DNS holes, pinned resolver, never started at boot) and defines nothing when disabled |
+| `script` | hermetic tests with stub `adb`/`curl`: for `phone-proxy-install` the F-Droid version selection, cache keying and reuse, `--check` staying read-only, the exact install argv and `--pull` naming; for `phone-proxy-uninstall` the confirm/`--yes` guard, `--keep-data`, idempotence and the exact uninstall argv |
 
 The `module` check evaluates a NixOS configuration with non-default options, so
 it catches option or unit regressions without building a system or a VM.
@@ -125,6 +128,27 @@ nmcli connection add type wifi ifname wlp110s0 con-name phonelink \
 install -m600 /dev/null /etc/nixos/phone-socks-secrets
 printf 'PHONE_SOCKS_PASS=%s\n' '<proxy password>' | sudo tee /etc/nixos/phone-socks-secrets
 ```
+
+The proxy APK is not vendored (it is not ours to ship), but the app is on
+F-Droid, so the script can use F-Droid as its update channel:
+
+```sh
+phone-proxy-install --fdroid            # download the suggested version, install
+phone-proxy-install --fdroid --check    # download only, cache it, install nothing
+```
+
+Downloads are cached under `$PHONE_APK_DIR` (default
+`$XDG_CACHE_HOME/phone-link`, i.e. `~/.cache/phone-link`) and named after the
+version, so a repeat run installs from the cache. Without F-Droid access, back
+the app up from a phone that has it and install from the copy:
+
+```sh
+phone-proxy-install --pull ~/dev/phone-link/apk
+phone-proxy-install ~/dev/phone-link/apk/*.apk
+```
+
+`--pull` names a single-APK backup `com.tokyoxpa3.androidproxy-<version>.apk`;
+installs use `adb install -r -g`, so updating keeps the app's settings.
 
 Requirements: `NetworkManager` on `wpa_supplicant` (iwd cannot do AP mode),
 `net.ipv4.ip_forward = 1`, and the phone's proxy listening on the reachable
