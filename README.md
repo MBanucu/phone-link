@@ -73,6 +73,10 @@ Or straight from the checkout: `./bin/phone-net-status`.
 | `phone-proxy-check` | request through the proxy on the hotspot and AP addresses (needs root for the secret) |
 | `phone-proxy-install` | install/update the proxy app from an APK; `--fdroid` fetches F-Droid's suggested version, `--pull` copies it off the phone, `--status` reports the version |
 | `phone-proxy-uninstall` | remove the proxy app (`--check` previews, `--keep-data` keeps app data, `--yes` skips the prompt) |
+| `phone-proxy-data-clear` | wipe the proxy app's data, back to port 1080 with no auth (`--check` previews, `--yes` skips the prompt) |
+| `phone-proxy-battery-whitelist` | add the proxy app to the device-idle (Doze) whitelist so the proxy is not killed with the screen off (`--check` only reports) |
+| `phone-proxy-setup` | write port, credentials and auto-start through the app's settings screen, start the proxy and verify a request through it (`--check` only reports) |
+| `phone-unlock` | unlock the lock screen with `PHONE_PIN` from the secrets file (`--check` only reports locked/unlocked) |
 | `phone-ap-up` | preflight the radio, then `nmcli connection up phonelink` |
 | `phone-ap-down` | drop the AP and rejoin the phone's hotspot |
 | `adb-wifi-connect` | connect adb to the phone over TCP |
@@ -94,7 +98,7 @@ place.
 | `shellcheck` | every script and `lib/phone-net.sh` is clean at shellcheck warning level |
 | `format` | `flake.nix` and `modules/phone-link.nix` are nixfmt-clean |
 | `module` | the module generates the expected sing-box config and units (5 s probe, 20 s first run, AP DHCP/DNS holes, pinned resolver, never started at boot) and defines nothing when disabled |
-| `script` | hermetic tests with stub `adb`/`curl`: for `phone-proxy-install` the F-Droid version selection, cache keying and reuse, `--check` staying read-only, the exact install argv and `--pull` naming; for `phone-proxy-uninstall` the confirm/`--yes` guard, `--keep-data`, idempotence and the exact uninstall argv |
+| `script` | hermetic tests with stub `adb`/`curl`: for `phone-proxy-install` the F-Droid version selection, cache keying and reuse, `--check` staying read-only, the exact install argv and `--pull` naming; for `phone-proxy-uninstall` the confirm/`--yes` guard, `--keep-data`, idempotence and the exact uninstall argv; for `phone-proxy-data-clear` the prompt guard, `--check` staying read-only and the `pm clear` argv; for `phone-proxy-setup` the field order, values typed, auto-start toggle and Start tap against a stub settings screen; for `phone-unlock` the keyguard check, PIN entry and wrong-PIN failure; for `phone-proxy-battery-whitelist` the idempotent add, `--check` and the device-idle argv |
 
 The `module` check evaluates a NixOS configuration with non-default options, so
 it catches option or unit regressions without building a system or a VM.
@@ -126,7 +130,8 @@ nmcli connection add type wifi ifname wlp110s0 con-name phonelink \
   ipv4.method shared ipv4.addresses 192.168.77.1/24
 
 install -m600 /dev/null /etc/nixos/phone-socks-secrets
-printf 'PHONE_SOCKS_PASS=%s\n' '<proxy password>' | sudo tee /etc/nixos/phone-socks-secrets
+printf 'PHONE_SOCKS_PASS=%s\nPHONE_PIN=%s\n' '<proxy password>' '<phone PIN>' \
+  | sudo tee /etc/nixos/phone-socks-secrets
 ```
 
 The proxy APK is not vendored (it is not ours to ship), but the app is on

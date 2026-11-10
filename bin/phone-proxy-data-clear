@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# Delete the phone proxy app's data (port, credentials, auto-start flag).
+#
+#   phone-proxy-data-clear           ask, then clear
+#   phone-proxy-data-clear --yes     clear without asking
+#   phone-proxy-data-clear --check   show what would run, change nothing
+#
+# `pm clear` force-stops the app and resets it to its defaults: port 1080, no
+# auth, auto-start off. The proxy therefore disappears, and the 5 s probe stops
+# the tunnel. Run phone-proxy-setup afterwards to write the credentials back.
+set -eu
+. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
+
+usage() {
+  cat >&2 <<'EOF'
+usage: phone-proxy-data-clear [--yes] [--check]
+
+Deletes the proxy app's data over adb (pm clear). Without --yes it asks first
+and refuses in a non-interactive shell. --check only reports what would run.
+EOF
+}
+
+assume_yes=0
+check_only=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    -y | --yes) assume_yes=1 ;;
+    --check) check_only=1 ;;
+    -h | --help) usage; exit 0 ;;
+    *)
+      usage
+      die "unknown argument: $1"
+      ;;
+  esac
+  shift
+done
+
+# Two adb transports (USB and Wi-Fi) are normal here, so pin every command.
+serial=$(phone_serial) || die "no phone attached (see adb devices)"
+log "phone: $serial"
+
+if ! adb -s "$serial" shell pm path "$PHONE_PROXY_PKG" 2>/dev/null | grep -q .; then
+  log "$PHONE_PROXY_PKG: not installed, nothing to clear"
+  log "data left behind by a --keep-data uninstall is only removed by a full"
+  log "uninstall, or by reinstalling and running this script"
+  exit 0
+fi
+
+if [ "$check_only" = 1 ]; then
+  log "would run: adb -s $serial shell pm clear $PHONE_PROXY_PKG"
+  exit 0
+fi
+
+if [ "$assume_yes" = 0 ]; then
+  if [ -t 0 ]; then
+    printf 'Delete all data of %s on %s (port, credentials, auto-start)? [y/N] ' \
+      "$PHONE_PROXY_PKG" "$serial" >&2
+    read -r answer
+    case $answer in
+      y | Y | yes | YES) ;;
+      *)
+        log "aborted"
+        exit 1
+        ;;
+    esac
+  else
+    die "refusing to clear data without --yes (not a terminal)"
+  fi
+fi
+
+out=$(adb -s "$serial" shell pm clear "$PHONE_PROXY_PKG" 2>&1 | tr -d '\r')
+case $out in
+  *Success*) ;;
+  *) die "pm clear failed: ${out:-no output}" ;;
+esac
+
+# The app is force-stopped, so no LAN address should still accept connections.
+left=0
+for _ in 1 2 3 4 5; do
+  left=0
+  while read -r ip; do
+    [ -n "$ip" ] || continue
+    tcp_open "$ip" 1 && left=1
+  done <<<"$(phone_ips)"
+  [ "$left" = 0 ] && break
+  sleep 1
+done
+
+log "cleared $PHONE_PROXY_PKG data (port back to 1080, auth disabled, auto-start off)"
+if [ "$left" = 1 ]; then
+  log "warning: a LAN address still accepts connections; the app may have restarted"
+fi
+log "the proxy is gone: the tunnel stops within 5 s; run phone-proxy-setup to restore it"

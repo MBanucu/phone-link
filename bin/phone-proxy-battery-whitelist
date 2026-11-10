@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Exempt the proxy app from battery optimisation (Doze).
+#
+#   phone-proxy-battery-whitelist            add it to the device-idle whitelist
+#   phone-proxy-battery-whitelist --check    report only, change nothing
+#
+# Doze can kill the foreground proxy service once the screen is off, which
+# takes the tunnel down with it. Whitelisting is the same device-idle list the
+# app's own "battery settings" dialog asks for, set here over adb so no tap is
+# needed. It survives reboots and app updates.
+set -eu
+. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
+
+usage() {
+  cat >&2 <<'EOF'
+usage: phone-proxy-battery-whitelist [--check]
+
+Adds the proxy app to the device-idle (Doze) whitelist with
+`cmd deviceidle whitelist +<package>`. --check only reports the state.
+EOF
+}
+
+check_only=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --check) check_only=1 ;;
+    -h | --help) usage; exit 0 ;;
+    *)
+      usage
+      die "unknown argument: $1"
+      ;;
+  esac
+  shift
+done
+
+# Two adb transports (USB and Wi-Fi) are normal here, so pin every command.
+serial=$(phone_serial) || die "no phone attached (see adb devices)"
+log "phone: $serial"
+
+if ! adb -s "$serial" shell pm path "$PHONE_PROXY_PKG" 2>/dev/null | grep -q '^package:'; then
+  die "$PHONE_PROXY_PKG is not installed; run phone-proxy-install first"
+fi
+
+# Each whitelist line looks like "user,com.tokyoxpa3.androidproxy,10300".
+whitelisted() {
+  adb -s "$serial" shell dumpsys deviceidle whitelist 2>/dev/null \
+    | tr -d '\r' | grep -q ",$PHONE_PROXY_PKG,"
+}
+
+if whitelisted; then
+  log "$PHONE_PROXY_PKG: already whitelisted from battery optimisation"
+  exit 0
+fi
+
+if [ "$check_only" = 1 ]; then
+  log "$PHONE_PROXY_PKG: not whitelisted (Doze may stop the proxy)"
+  exit 1
+fi
+
+out=$(adb -s "$serial" shell cmd deviceidle whitelist "+$PHONE_PROXY_PKG" 2>&1 | tr -d '\r')
+if ! whitelisted; then
+  die "whitelisting failed: ${out:-no output}"
+fi
+
+log "whitelisted $PHONE_PROXY_PKG from battery optimisation"
+log "Doze will now leave the proxy service alone"

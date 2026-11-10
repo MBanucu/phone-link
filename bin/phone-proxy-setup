@@ -1,0 +1,374 @@
+#!/usr/bin/env bash
+# Configure the phone's SOCKS proxy app and start it.
+#
+#   phone-proxy-setup                 write port/credentials/auto-start, start
+#   phone-proxy-setup --check         print the app's settings, change nothing
+#   phone-proxy-setup --port 1080 --user proxy
+#   phone-proxy-setup --no-auto-start
+#
+# The app is not debuggable, so its SharedPreferences cannot be written over
+# adb; this drives its own settings screen with uiautomator instead. The phone
+# must be unlocked (phone-unlock does that) and the proxy password comes from
+# $PHONE_SECRETS, so run this with sudo.
+set -eu
+. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
+
+usage() {
+  cat >&2 <<'EOF'
+usage: phone-proxy-setup [--check] [--port N] [--user NAME] [--no-auto-start]
+
+Sets the proxy port, username and password (from $PHONE_SECRETS), enables
+"start after reboot" unless --no-auto-start is given, then starts the proxy
+and verifies a request through it. --check only reports the current settings.
+EOF
+}
+
+port=$PHONE_PROXY_PORT
+user=$PHONE_PROXY_USER
+auto_start=1
+check_only=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --check) check_only=1 ;;
+    --port)
+      shift
+      [ $# -gt 0 ] || die "--port needs a value"
+      port=$1
+      ;;
+    --user)
+      shift
+      [ $# -gt 0 ] || die "--user needs a value"
+      user=$1
+      ;;
+    --no-auto-start) auto_start=0 ;;
+    -h | --help) usage; exit 0 ;;
+    *)
+      usage
+      die "unknown argument: $1"
+      ;;
+  esac
+  shift
+done
+
+case $port in
+  '' | *[!0-9]*) die "port must be numeric: $port" ;;
+esac
+{ [ "$port" -ge 1 ] && [ "$port" -le 65535 ]; } || die "port out of range: $port"
+# `adb shell input text` types these literally; anything exotic gets mangled.
+case $user in
+  '' | *[!A-Za-z0-9._-]*) die "username must match [A-Za-z0-9._-]+: $user" ;;
+esac
+
+pass=$(phone_proxy_pass) || exit 1
+case $pass in
+  '' | *[!A-Za-z0-9._-]*) die "password must match [A-Za-z0-9._-]+ (adb input text cannot type it safely)" ;;
+esac
+
+# Two adb transports (USB and Wi-Fi) are normal here, so pin every command.
+serial=$(phone_serial) || die "no phone attached (see adb devices)"
+
+if ! adb -s "$serial" shell pm path "$PHONE_PROXY_PKG" 2>/dev/null | grep -q '^package:'; then
+  die "$PHONE_PROXY_PKG is not installed; run phone-proxy-install first"
+fi
+
+keyguard_showing() {
+  adb -s "$serial" shell dumpsys window policy 2>/dev/null \
+    | tr -d '\r' | sed -n 's/^ *showing=\(true\|false\)$/\1/p' | head -1 | grep -qx true
+}
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+remote=/sdcard/phone-proxy-setup.xml
+
+# Read back the app's settings screen. The app builds its views in code, so the
+# fields are found by class and top-to-bottom order, not by resource id.
+read_ui() {
+  # uiautomator can block while a dialog animates, so bound the dump.
+  timeout 20 adb -s "$serial" shell uiautomator dump "$remote" >/dev/null 2>&1 || return 1
+  adb -s "$serial" pull "$remote" "$tmp/ui.xml" >/dev/null 2>&1 || return 1
+  [ -s "$tmp/ui.xml" ] || return 1
+  grep -q "$PHONE_PROXY_PKG" "$tmp/ui.xml" || return 1
+  printf '%s' "$tmp/ui.xml"
+}
+
+parse_ui() {
+  python3 - "$1" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+tree = ET.parse(sys.argv[1])
+edits, checks, buttons = [], [], []
+status = []
+
+def centre(bounds):
+    if not (bounds.startswith("[") and "][" in bounds):
+        return None
+    left, right = bounds.strip("[]").split("][")
+    try:
+        x1, y1 = (int(v) for v in left.split(","))
+        x2, y2 = (int(v) for v in right.split(","))
+    except ValueError:
+        return None
+    return (x1 + x2) // 2, (y1 + y2) // 2
+
+for node in tree.iter("node"):
+    pkg = node.get("package") or ""
+    cls = (node.get("class") or "").rsplit(".", 1)[-1]
+    text = (node.get("text") or "").replace("\t", " ")
+    point = centre(node.get("bounds") or "")
+    if point is None:
+        continue
+    x, y = point
+    if pkg == "com.tokyoxpa3.androidproxy":
+        if cls == "EditText":
+            # uiautomator reports the hint of an empty field as its text.
+            if text == "Empty = auth disabled":
+                text = ""
+            edits.append((y, x, y, text))
+        elif cls == "CheckBox":
+            checks.append((x, y, "true" if node.get("checked") == "true" else "false", text))
+        elif cls == "TextView" and any(
+            k in text
+            for k in ("Proxy Running", "Failed to Start", "Proxy Stopped", "Starting", "Stopped")
+        ):
+            status.append(text)
+    # Buttons from every package, so permission and battery dialogs are visible.
+    if cls == "Button":
+        buttons.append((x, y, text))
+
+for _, x, y, text in sorted(edits):
+    print("FIELD\t%d\t%d\t%s" % (x, y, text))
+for x, y, checked, text in checks:
+    print("CHECKBOX\t%d\t%d\t%s\t%s" % (x, y, checked, text))
+for x, y, text in buttons:
+    print("BUTTON\t%d\t%d\t%s" % (x, y, text))
+for text in status:
+    print("STATUS\t%s" % text)
+PY
+}
+
+# Count the masking bullets without depending on the locale: under LC_ALL=C a
+# bullet is three bytes, so ${#text} would be three times the real length.
+bullet_count() {
+  printf '%s' "$1" | grep -o '•' | wc -l | tr -d ' '
+}
+
+snapshot() {
+  local ui
+  ui=$(read_ui) || return 1
+  parse_ui "$ui" >"$tmp/nodes"
+}
+
+# Tap a dialog that covers the settings screen (battery optimisation, battery
+# whitelisting, notification permission). "Continue Anyway" lets the start
+# proceed; it is preferred over Cancel because cancelling starts nothing.
+dismiss_blockers() {
+  local tries=0 line pat ax ay
+  while [ $tries -lt 3 ]; do
+    snapshot || return 1
+    line=""
+    for pat in '^Continue Anyway' '^Allow' '^OK' '^Got it' '^While using'; do
+      line=$(awk -F'\t' -v p="$pat" \
+        '$1 == "BUTTON" && $4 ~ p { print $2 " " $3; exit }' "$tmp/nodes")
+      [ -n "$line" ] && break
+    done
+    [ -n "$line" ] || return 1
+    ax=${line%% *}
+    ay=${line##* }
+    log "dismissing a dialog to continue"
+    adb -s "$serial" shell input tap "$ax" "$ay"
+    sleep 2
+    tries=$((tries + 1))
+  done
+  return 0
+}
+
+# Load the nodes into FIELD/CHECKBOX/BUTTON/STATUS variables; false when the
+# app is not on screen yet.
+load_state() {
+  local f1 f2 f3 cb btn
+  snapshot || return 1
+  f1=$(awk -F'\t' '$1 == "FIELD" { n++; if (n == 1) print }' "$tmp/nodes")
+  f2=$(awk -F'\t' '$1 == "FIELD" { n++; if (n == 2) print }' "$tmp/nodes")
+  f3=$(awk -F'\t' '$1 == "FIELD" { n++; if (n == 3) print }' "$tmp/nodes")
+  cb=$(awk -F'\t' '$1 == "CHECKBOX" && tolower($5) ~ /automatically/ { print; exit }' "$tmp/nodes")
+  btn=$(awk -F'\t' '$1 == "BUTTON" && ($4 ~ /Start|Stop/) { print; exit }' "$tmp/nodes")
+  [ -n "$f1" ] && [ -n "$f2" ] && [ -n "$f3" ] && [ -n "$cb" ] && [ -n "$btn" ] || return 1
+  read -r _ f1x f1y cur_port <<<"$f1"
+  read -r _ f2x f2y cur_user <<<"$f2"
+  read -r _ f3x f3y cur_pass <<<"$f3"
+  read -r _ cbx cby cbstate _ <<<"$cb"
+  read -r _ bx by btext <<<"$btn"
+  status=$(awk -F'\t' '$1 == "STATUS" { print $2; exit }' "$tmp/nodes")
+  case $btext in
+    *Stop*) running=1 ;;
+    *) running=0 ;;
+  esac
+  return 0
+}
+
+launch_app() {
+  adb -s "$serial" shell monkey -p "$PHONE_PROXY_PKG" \
+    -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
+}
+
+unlock_bin=""
+if [ "$check_only" = 0 ]; then
+  unlock_bin=$(command -v phone-unlock 2>/dev/null || true)
+  if [ -z "$unlock_bin" ]; then
+    unlock_bin=$(dirname -- "$(readlink -f -- "$0")")/phone-unlock
+  fi
+  [ -x "$unlock_bin" ] || die "phone-unlock not found next to this script or in PATH"
+  "$unlock_bin"
+
+  # Grant what the app would otherwise stop and ask for in a dialog: the
+  # notification permission and the Doze exemption.
+  adb -s "$serial" shell pm grant "$PHONE_PROXY_PKG" \
+    android.permission.POST_NOTIFICATIONS >/dev/null 2>&1 || true
+  adb -s "$serial" shell cmd deviceidle whitelist "+$PHONE_PROXY_PKG" >/dev/null 2>&1 || true
+fi
+
+# --check is read-only and does not unlock, so fail fast instead of timing out
+# on every dump of a keyguard-covered screen.
+if [ "$check_only" = 1 ] && keyguard_showing; then
+  die "phone is locked; run phone-unlock, then this again"
+fi
+
+# Waking the screen and unlocking again keeps a display timeout from pulling
+# the settings screen out from under a run.
+recover_ui() {
+  adb -s "$serial" shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
+  if [ -n "$unlock_bin" ]; then
+    "$unlock_bin" >/dev/null 2>&1 || true
+  fi
+  launch_app
+  sleep 1
+}
+
+launch_app
+dismiss_blockers || true
+tries=0
+while [ $tries -lt 10 ]; do
+  load_state && break
+  tries=$((tries + 1))
+  sleep 1
+  dismiss_blockers || true
+  recover_ui
+done
+if [ $tries -ge 10 ]; then
+  if [ "$check_only" = 1 ] && keyguard_showing; then
+    die "phone is locked; run phone-unlock, then this again"
+  fi
+  die "cannot read the app UI (unlock with phone-unlock and install the app)"
+fi
+
+if [ "$check_only" = 1 ]; then
+  want_checked=false
+  [ "$auto_start" = 1 ] && want_checked=true
+  cur_pass_chars=$(bullet_count "$cur_pass")
+  printf 'port       %s (want %s)\n' "${cur_port:-?}" "$port" >&2
+  printf 'username   %s (want %s)\n' "${cur_user:-<empty>}" "$user" >&2
+  printf 'password   %s chars (want %s)\n' "$cur_pass_chars" "${#pass}" >&2
+  printf 'auto-start %s (want %s)\n' "$cbstate" "$want_checked" >&2
+  printf 'proxy      %s (want running)\n' "$([ "$running" = 1 ] && echo running || echo stopped)" >&2
+  [ "$cur_port" = "$port" ] \
+    && [ "$cur_user" = "$user" ] \
+    && [ "$cur_pass_chars" -eq "${#pass}" ] \
+    && [ "$cbstate" = "$want_checked" ] \
+    && [ "$running" = 1 ]
+  exit
+fi
+
+# A changed port only takes effect on a restart; auth is applied live.
+if [ "$running" = 1 ] && [ "$cur_port" != "$port" ]; then
+  log "stopping the running proxy to apply port $port"
+  adb -s "$serial" shell input tap "$bx" "$by"
+  tries=0
+  while [ $tries -lt 10 ]; do
+    sleep 1
+    load_state || continue
+    [ "$running" = 0 ] && break
+    tries=$((tries + 1))
+  done
+fi
+
+# Replacing a field: tap it, move to the end, delete a generous number of
+# characters, then type the value. `input keyevent` takes several codes at once.
+keystrokes=(KEYCODE_MOVE_END)
+for _ in $(seq 1 64); do
+  keystrokes+=(67)
+done
+
+set_field() {
+  local x=$1 y=$2 value=$3
+  adb -s "$serial" shell input tap "$x" "$y"
+  adb -s "$serial" shell input keyevent "${keystrokes[@]}"
+  adb -s "$serial" shell input text "$value"
+}
+
+set_field "$f1x" "$f1y" "$port"
+set_field "$f2x" "$f2y" "$user"
+set_field "$f3x" "$f3y" "$pass"
+
+# Hide the keyboard so the rest of the screen is addressable again.
+adb -s "$serial" shell input keyevent KEYCODE_BACK >/dev/null 2>&1 || true
+sleep 1
+if ! load_state; then
+  recover_ui
+  load_state || die "lost the app UI after typing the settings"
+fi
+
+want_checked=false
+[ "$auto_start" = 1 ] && want_checked=true
+if [ "$cbstate" != "$want_checked" ]; then
+  adb -s "$serial" shell input tap "$cbx" "$cby"
+  sleep 1
+  load_state || die "lost the app UI after toggling auto-start"
+fi
+
+cur_pass_chars=$(bullet_count "$cur_pass")
+if [ "$cur_port" != "$port" ] || [ "$cur_user" != "$user" ] \
+  || [ "$cur_pass_chars" -ne "${#pass}" ] || [ "$cbstate" != "$want_checked" ]; then
+  die "settings did not stick (port $cur_port, user '$cur_user', $cur_pass_chars password chars, auto-start $cbstate)"
+fi
+log "settings written: port $port, user $user, password ${#pass} chars, auto-start $want_checked"
+
+start_and_wait() {
+  local tries=0
+  adb -s "$serial" shell input tap "$bx" "$by"
+  while [ $tries -lt 25 ]; do
+    sleep 1
+    if ! load_state; then
+      if dismiss_blockers; then
+        continue
+      fi
+      recover_ui
+      continue
+    fi
+    [ "$running" = 1 ] && return 0
+    case $status in
+      *"Failed to Start"*) die "proxy failed to start: $status" ;;
+    esac
+    # "Continue Anyway" on the battery dialog starts the proxy by itself.
+    if dismiss_blockers; then
+      continue
+    fi
+    tries=$((tries + 1))
+  done
+  die "proxy did not start (last status: ${status:-unknown})"
+}
+
+if [ "$running" = 0 ]; then
+  start_and_wait
+else
+  log "proxy already running on port $port"
+fi
+
+ok=0
+for ip in $(phone_ips); do
+  if phone_proxy_check "$ip"; then
+    ok=1
+  fi
+done
+[ "$ok" = 1 ] || die "the proxy is running but no LAN address answered with 200"
+log "phone proxy configured and verified"

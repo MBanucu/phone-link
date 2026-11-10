@@ -19,10 +19,14 @@
         "phone-ap-down"
         "phone-ap-up"
         "phone-net-status"
+        "phone-proxy-battery-whitelist"
         "phone-proxy-check"
+        "phone-proxy-data-clear"
         "phone-proxy-install"
+        "phone-proxy-setup"
         "phone-proxy-uninstall"
         "phone-tunnel-run"
+        "phone-unlock"
       ];
 
       # Everything the scripts call at runtime.  The wrappers put these on PATH,
@@ -40,6 +44,7 @@
           iproute2
           iw
           networkmanager
+          python3
           sing-box
           systemd
           util-linux
@@ -206,6 +211,7 @@
                   pkgs.coreutils
                   pkgs.gnugrep
                   pkgs.gnused
+                  pkgs.python3
                 ];
               }
               ''
