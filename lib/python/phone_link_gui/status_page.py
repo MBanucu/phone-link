@@ -160,9 +160,12 @@ class StatusPage(Gtk.Box):
     def _row(self, result: dict) -> Adw.ActionRow:
         status = result.get("status", "skip")
         icon_name, css = STATUS_ICONS.get(status, STATUS_ICONS["skip"])
+        # AdwActionRow renders title and subtitle as Pango markup, and the
+        # doctor's details contain "<" ("minSdk 26 <= phone SDK 35"), which
+        # would make Pango drop the whole string and log a warning.
         row = Adw.ActionRow(
-            title=result.get("label", ""),
-            subtitle=result.get("detail", ""),
+            title=GLib.markup_escape_text(result.get("label", "")),
+            subtitle=GLib.markup_escape_text(result.get("detail", "")),
         )
         row.set_subtitle_selectable(True)
         icon = Gtk.Image.new_from_icon_name(icon_name)
