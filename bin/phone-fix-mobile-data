@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Turn the phone's mobile data on when it has no default route.
+#
+#   phone-fix-mobile-data            # enable mobile data and wait for the route
+#   phone-fix-mobile-data --check    # report only
+#
+# The phone's Wi-Fi client link has no uplink in AP mode, so mobile data is what
+# gives the phone (and the proxy) the internet.
+set -eu
+. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
+
+usage() {
+  cat >&2 <<'EOF'
+usage: phone-fix-mobile-data [--check]
+
+Enables mobile data with `svc data enable` and waits for a default route.
+--check only reports the route.
+EOF
+}
+
+check_only=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --check) check_only=1 ;;
+    -h | --help) usage; exit 0 ;;
+    *)
+      usage
+      die "unknown argument: $1"
+      ;;
+  esac
+  shift
+done
+
+serial=$(phone_serial) || die "no phone attached (see adb devices)"
+
+default_route() {
+  adb -s "$serial" shell ip route show default 2>/dev/null | tr -d '\r' | head -1 || true
+}
+
+route=$(default_route)
+if [ "$check_only" = 1 ]; then
+  log "default route: ${route:-none}"
+  if [ -n "$route" ]; then exit 0; fi
+  exit 1
+fi
+
+if [ -n "$route" ]; then
+  log "the phone already has a default route ($route)"
+  exit 0
+fi
+
+log "enabling mobile data"
+adb -s "$serial" shell svc data enable >/dev/null 2>&1 || die "svc data enable failed"
+
+tries=0
+while [ $tries -lt 10 ]; do
+  sleep 1
+  tries=$((tries + 1))
+  if route=$(default_route) && [ -n "$route" ]; then
+    log "mobile data is up ($route)"
+    exit 0
+  fi
+done
+
+die "mobile data was enabled but no default route appeared"

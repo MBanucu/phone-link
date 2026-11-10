@@ -4,26 +4,29 @@
 # tunnel, the USB tether and the internet. Read-only: nothing is started,
 # enabled or changed.
 #
-#   phone-doctor
+#   phone-doctor            report every condition
+#   phone-doctor --analyze  only the problems, as "status id detail" lines
 #
-# Prints ok/warn/FAIL/skip per condition. Exit 0 when every required condition
-# is met, 1 otherwise; optional conditions (USB tether, adb over Wi-Fi, the
-# tunnel service) only warn.
+# Exit 0 when every required condition is met, 1 otherwise; optional
+# conditions (USB tether, adb over Wi-Fi, the tunnel service) only warn.
 set -eu
 . "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
 
 usage() {
   cat >&2 <<'EOF'
-usage: phone-doctor
+usage: phone-doctor [--analyze]
 
-Checks the runtime conditions of the whole phone-link setup and prints one
-ok/warn/FAIL/skip line per condition. Read-only. Exits 0 when every required
-condition is met and 1 otherwise; optional conditions only warn.
+Checks the runtime conditions of the whole phone-link setup. Read-only.
+--analyze prints one "fail|warn ID detail" line per problem for scripts such as
+phone-doctor-fix; without it the report is grouped and human-readable. Exits 0
+when every required condition is met and 1 otherwise.
 EOF
 }
 
+analyze=0
 while [ $# -gt 0 ]; do
   case $1 in
+    --analyze) analyze=1 ;;
     -h | --help) usage; exit 0 ;;
     *)
       usage
@@ -40,28 +43,50 @@ probe_url=${PHONE_DOCTOR_URL:-https://example.com}
 n_ok=0
 n_fail=0
 n_warn=0
-say_ok() {
-  n_ok=$((n_ok + 1))
-  printf 'ok    %-20s %s\n' "$1" "$2"
-}
-say_warn() {
-  n_warn=$((n_warn + 1))
-  printf 'warn  %-20s %s\n' "$1" "$2"
-}
-say_fail() {
-  n_fail=$((n_fail + 1))
-  printf 'FAIL  %-20s %s\n' "$1" "$2"
-}
-say_skip() {
-  printf 'skip  %-20s %s\n' "$1" "$2"
+
+section() {
+  if [ "$analyze" = 0 ]; then printf '\n%s\n' "$1"; fi
 }
 
-printf '\n[host]\n'
+# emit STATUS ID DISPLAY DETAIL -> grouped line, or an analyze problem line.
+emit() {
+  status=$1
+  id=$2
+  display=$3
+  detail=$4
+  case $status in
+    ok)
+      n_ok=$((n_ok + 1))
+      if [ "$analyze" = 0 ]; then printf 'ok    %-20s %s\n' "$display" "$detail"; fi
+      ;;
+    warn)
+      n_warn=$((n_warn + 1))
+      if [ "$analyze" = 1 ]; then
+        printf 'warn %s %s\n' "$id" "$detail"
+      else
+        printf 'warn  %-20s %s\n' "$display" "$detail"
+      fi
+      ;;
+    fail)
+      n_fail=$((n_fail + 1))
+      if [ "$analyze" = 1 ]; then
+        printf 'fail %s %s\n' "$id" "$detail"
+      else
+        printf 'FAIL  %-20s %s\n' "$display" "$detail"
+      fi
+      ;;
+    skip)
+      if [ "$analyze" = 0 ]; then printf 'skip  %-20s %s\n' "$display" "$detail"; fi
+      ;;
+  esac
+}
+
+section '[host]'
 forward=$(sysctl -n net.ipv4.ip_forward 2>/dev/null || true)
 if [ "$forward" = 1 ]; then
-  say_ok "ip_forward" "1"
+  emit ok ip_forward "ip_forward" "1"
 else
-  say_fail "ip_forward" "${forward:-unknown} (set net.ipv4.ip_forward = 1)"
+  emit fail ip_forward "ip_forward" "${forward:-unknown} (set net.ipv4.ip_forward = 1)"
 fi
 
 ap_addr=$(ip -4 -br addr show "$ap_if" 2>/dev/null | awk '{print $3}' | head -1 || true)
@@ -69,23 +94,23 @@ ap_mode=0
 if [ -n "$ap_addr" ]; then ap_mode=1; fi
 
 if nmcli -t -f NAME con show 2>/dev/null | grep -Fxq "$PHONE_AP_CON"; then
-  say_ok "ap profile" "$PHONE_AP_CON"
+  emit ok ap_profile "ap profile" "$PHONE_AP_CON"
 elif [ "$ap_mode" = 1 ]; then
-  say_fail "ap profile" "$PHONE_AP_CON missing"
+  emit fail ap_profile "ap profile" "$PHONE_AP_CON missing"
 else
-  say_warn "ap profile" "$PHONE_AP_CON missing (hotspot mode)"
+  emit warn ap_profile "ap profile" "$PHONE_AP_CON missing (hotspot mode)"
 fi
 
 if [ "$ap_mode" = 1 ]; then
-  say_ok "ap address" "$ap_if $ap_addr"
+  emit ok ap_address "ap address" "$ap_if $ap_addr"
 else
-  say_warn "ap address" "$ap_if has no IPv4 (hotspot mode)"
+  emit warn ap_address "ap address" "$ap_if has no IPv4 (hotspot mode)"
 fi
 
 nameservers=$(awk '/^nameserver/ {printf "%s ", $2}' "$resolv" 2>/dev/null || true)
 case $nameservers in
-  *1.1.1.1*9.9.9.9* | *9.9.9.9*1.1.1.1*) say_ok "resolver" "$nameservers" ;;
-  *) say_warn "resolver" "${nameservers:-none} (the module pins 1.1.1.1/9.9.9.9)" ;;
+  *1.1.1.1*9.9.9.9* | *9.9.9.9*1.1.1.1*) emit ok resolver "resolver" "$nameservers" ;;
+  *) emit warn resolver "resolver" "${nameservers:-none} (the module pins 1.1.1.1/9.9.9.9)" ;;
 esac
 
 if [ "$ap_mode" = 1 ]; then
@@ -94,44 +119,45 @@ else
   target=$PHONE_HOTSPOT_IP
 fi
 
-printf '\n[phone]\n'
+section '[phone]'
 serial=$(phone_serial 2>/dev/null) || serial=""
 if [ -n "$serial" ]; then
-  say_ok "adb device" "$serial"
+  emit ok adb_device "adb device" "$serial"
 else
-  say_fail "adb device" "none (see adb devices)"
+  emit fail adb_device "adb device" "none (see adb devices)"
 fi
 
 if [ -n "$serial" ]; then
   keyguard=$(adb -s "$serial" shell dumpsys window policy 2>/dev/null \
     | tr -d '\r' | sed -n 's/^ *showing=\(true\|false\)$/\1/p' | head -1 || true)
   case $keyguard in
-    false) say_ok "phone unlocked" "yes" ;;
-    true) say_warn "phone unlocked" "no (run phone-unlock)" ;;
-    *) say_warn "phone unlocked" "unknown" ;;
+    false) emit ok phone_unlocked "phone unlocked" "yes" ;;
+    true) emit warn phone_unlocked "phone unlocked" "no (run phone-unlock)" ;;
+    *) emit warn phone_unlocked "phone unlocked" "unknown" ;;
   esac
 
   ips=$(phone_ips 2>/dev/null || true)
   if printf '%s\n' "$ips" | grep -Fxq "$target"; then
-    say_ok "phone address" "$target"
+    emit ok phone_address "phone address" "$target"
   else
-    say_fail "phone address" "$target not on the phone (has: $(printf '%s\n' "$ips" | tr '\n' ' '))"
+    emit fail phone_address "phone address" \
+      "$target not on the phone (has: $(printf '%s\n' "$ips" | tr '\n' ' '))"
   fi
 
   default_route=$(adb -s "$serial" shell ip route show default 2>/dev/null \
     | tr -d '\r' | head -1 || true)
   if [ -n "$default_route" ]; then
-    say_ok "phone default" "$default_route"
+    emit ok phone_default "phone default" "$default_route"
   else
-    say_fail "phone default" "no default route (mobile data off?)"
+    emit fail phone_default "phone default" "no default route (mobile data off?)"
   fi
 else
-  say_skip "phone unlocked" "no adb"
-  say_skip "phone address" "no adb"
-  say_skip "phone default" "no adb"
+  emit skip phone_unlocked "phone unlocked" "no adb"
+  emit skip phone_address "phone address" "no adb"
+  emit skip phone_default "phone default" "no adb"
 fi
 
-printf '\n[secrets]\n'
+section '[secrets]'
 if [ -r "$PHONE_SECRETS" ]; then
   keys=$(grep -oE '^[A-Za-z_][A-Za-z0-9_]*=' "$PHONE_SECRETS" 2>/dev/null | tr -d '=' || true)
   missing=""
@@ -139,25 +165,28 @@ if [ -r "$PHONE_SECRETS" ]; then
     printf '%s\n' "$keys" | grep -Fxq "$key" || missing="$missing $key"
   done
   if [ -z "$missing" ]; then
-    say_ok "secrets" "$PHONE_SECRETS"
+    emit ok secrets "secrets" "$PHONE_SECRETS"
   else
-    say_fail "secrets" "missing$missing"
+    emit fail secrets "secrets" "missing$missing"
   fi
-  printf '%s\n' "$keys" | grep -Fxq PHONE_AP_PASS \
-    || say_warn "secrets" "PHONE_AP_PASS missing (phone-wifi-connect needs it)"
+  if printf '%s\n' "$keys" | grep -Fxq PHONE_AP_PASS; then
+    emit ok ap_pass "secrets" "PHONE_AP_PASS present"
+  else
+    emit warn ap_pass "secrets" "PHONE_AP_PASS missing (phone-wifi-connect needs it)"
+  fi
 else
-  say_fail "secrets" "$PHONE_SECRETS not readable (run with sudo)"
+  emit fail secrets "secrets" "$PHONE_SECRETS not readable (run with sudo)"
 fi
 
-printf '\n[proxy]\n'
+section '[proxy]'
 if [ -n "$serial" ]; then
   if adb -s "$serial" shell pm path "$PHONE_PROXY_PKG" 2>/dev/null | grep -q '^package:'; then
-    say_ok "proxy app" "$PHONE_PROXY_PKG"
+    emit ok proxy_app "proxy app" "$PHONE_PROXY_PKG"
   else
-    say_fail "proxy app" "$PHONE_PROXY_PKG not installed"
+    emit fail proxy_app "proxy app" "$PHONE_PROXY_PKG not installed"
   fi
 else
-  say_skip "proxy app" "no adb"
+  emit skip proxy_app "proxy app" "no adb"
 fi
 
 if pass=$(phone_proxy_pass 2>/dev/null); then
@@ -165,54 +194,59 @@ if pass=$(phone_proxy_pass 2>/dev/null); then
     --socks5-hostname "$PHONE_PROXY_USER:$pass@$target:$PHONE_PROXY_PORT" \
     "$probe_url" 2>/dev/null || true)
   if [ "$code" = 200 ]; then
-    say_ok "proxy request" "$target:$PHONE_PROXY_PORT -> 200"
+    emit ok proxy_request "proxy request" "$target:$PHONE_PROXY_PORT -> 200"
   else
-    say_fail "proxy request" "$target:$PHONE_PROXY_PORT -> ${code:-000}"
+    emit fail proxy_request "proxy request" "$target:$PHONE_PROXY_PORT -> ${code:-000}"
   fi
 else
-  say_fail "proxy request" "no PHONE_SOCKS_PASS (run with sudo)"
+  emit fail proxy_request "proxy request" "no PHONE_SOCKS_PASS (run with sudo)"
 fi
 
-printf '\n[tunnel]\n'
+section '[tunnel]'
 tunnel=$(systemctl is-active phone-tun.service 2>/dev/null || true)
 if [ "$tunnel" = active ]; then
-  say_ok "phone-tun" "active"
+  emit ok phone_tun "phone-tun" "active"
   if ip rule show 2>/dev/null | grep -q 2022; then
-    say_ok "tunnel route" "table 2022"
+    emit ok tunnel_route "tunnel route" "table 2022"
   else
-    say_warn "tunnel route" "no 2022 ip rule"
+    emit warn tunnel_route "tunnel route" "no 2022 ip rule"
   fi
 else
-  say_warn "phone-tun" "${tunnel:-unknown} (the timer starts it when the proxy answers)"
+  emit warn phone_tun "phone-tun" "${tunnel:-unknown} (the timer starts it when the proxy answers)"
 fi
 
-printf '\n[usb tether]\n'
+section '[usb tether]'
 if [ -n "$serial" ]; then
   rndis=$(adb -s "$serial" shell ip -4 -o addr show rndis0 2>/dev/null \
     | tr -d '\r' | awk '{print $4}' | head -1 || true)
   if [ -n "$rndis" ]; then
-    say_ok "rndis0" "$rndis"
+    emit ok rndis0 "rndis0" "$rndis"
   else
-    say_warn "rndis0" "no address (USB tether off)"
+    emit warn rndis0 "rndis0" "no address (USB tether off)"
   fi
 else
-  say_skip "rndis0" "no adb"
+  emit skip rndis0 "rndis0" "no adb"
 fi
 
-printf '\n[internet]\n'
+section '[internet]'
 code=$(timeout 20 curl -4 -s -m 20 -o /dev/null -w '%{http_code}' \
   "$probe_url" 2>/dev/null || true)
 if [ "$code" = 200 ]; then
-  say_ok "https" "$probe_url -> 200"
+  emit ok https "https" "$probe_url -> 200"
 else
-  say_fail "https" "$probe_url -> ${code:-000}"
+  emit fail https "https" "$probe_url -> ${code:-000}"
 fi
 
-printf '\n[adb over wi-fi]\n'
+section '[adb over wi-fi]'
 if transport=$(adb_transport 2>/dev/null); then
-  say_ok "network transport" "$transport"
+  emit ok network_transport "network transport" "$transport"
 else
-  say_warn "network transport" "USB only (phone-adb-wifi)"
+  emit warn network_transport "network transport" "USB only (phone-adb-wifi)"
+fi
+
+if [ "$analyze" = 1 ]; then
+  if [ "$n_fail" -gt 0 ]; then exit 1; fi
+  exit 0
 fi
 
 printf '\n%d ok, %d failed, %d warnings\n' "$n_ok" "$n_fail" "$n_warn"

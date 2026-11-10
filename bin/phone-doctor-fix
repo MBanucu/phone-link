@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+# Fix the problems phone-doctor reports by running one dedicated script per
+# problem. Problems without a fix script print the manual step instead.
+#
+#   phone-doctor-fix            list the plan, then ask once
+#   phone-doctor-fix --yes      apply without asking
+#   phone-doctor-fix --dry-run  list only
+#
+# Each fix is its own script (see describe_fix below), so a single fix can be
+# run on its own. Run this with sudo: phone-unlock and phone-wifi-connect read
+# the root-only secrets, and the forwarding/tunnel fixes escalate themselves.
+set -eu
+. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
+
+here=$(dirname -- "$(readlink -f -- "$0")")
+
+usage() {
+  cat >&2 <<'EOF'
+usage: phone-doctor-fix [--yes] [--dry-run]
+
+Runs phone-doctor --analyze, then the fix script for each problem it reports,
+in dependency order, and re-checks afterwards. --yes skips the confirmation;
+--dry-run only lists what would run. Problems without a fix script are printed
+with the manual step.
+EOF
+}
+
+yes=0
+dry=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --yes) yes=1 ;;
+    --dry-run) dry=1 ;;
+    -h | --help) usage; exit 0 ;;
+    *)
+      usage
+      die "unknown argument: $1"
+      ;;
+  esac
+  shift
+done
+
+doctor=${PHONE_DOCTOR:-}
+if [ -z "$doctor" ]; then
+  doctor=$(command -v phone-doctor 2>/dev/null || true)
+fi
+if [ -z "$doctor" ]; then doctor=$here/phone-doctor; fi
+[ -x "$doctor" ] || die "phone-doctor not found (set PHONE_DOCTOR)"
+
+has_fix() {
+  case $1 in
+    ip_forward | ap_address | phone_unlocked | phone_address | phone_default | \
+      proxy_app | proxy_request | phone_tun | tunnel_route | rndis0 | \
+      network_transport) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+describe_fix() {
+  case $1 in
+    ip_forward) printf 'phone-fix-forwarding' ;;
+    ap_address) printf 'phone-ap-up' ;;
+    phone_unlocked) printf 'phone-unlock' ;;
+    phone_address) printf 'phone-wifi-connect' ;;
+    phone_default) printf 'phone-fix-mobile-data' ;;
+    proxy_app) printf 'phone-proxy-install --fdroid' ;;
+    proxy_request) printf 'phone-proxy-start' ;;
+    phone_tun | tunnel_route) printf 'phone-fix-tunnel' ;;
+    rndis0) printf 'phone-usb-tether-default' ;;
+    network_transport) printf 'phone-adb-wifi' ;;
+  esac
+}
+
+manual_hint() {
+  case $1 in
+    adb_device) printf 'attach the phone over USB (or run phone-adb-wifi from a trusted host)' ;;
+    ap_profile) printf 'create the %s profile with the nmcli command in README "One-time setup"' "$PHONE_AP_CON" ;;
+    resolver) printf 'pin /etc/resolv.conf via phoneLink.manageResolver and rebuild' ;;
+    secrets) printf 'write %s with PHONE_SOCKS_PASS and PHONE_PIN (root, mode 600)' "$PHONE_SECRETS" ;;
+    ap_pass) printf 'add PHONE_AP_PASS to %s' "$PHONE_SECRETS" ;;
+    https) printf 'retry after the proxy/tether fixes; net-check shows which fetch fails' ;;
+    *) printf 'no automatic fix' ;;
+  esac
+}
+
+run_cmd() {
+  name=$1
+  shift
+  bin=$(command -v "$name" 2>/dev/null || true)
+  if [ -z "$bin" ]; then bin=$here/$name; fi
+  if [ ! -x "$bin" ]; then
+    log "error: $name not found"
+    return 1
+  fi
+  "$bin" "$@"
+}
+
+run_fix() {
+  case $1 in
+    ip_forward) run_cmd phone-fix-forwarding ;;
+    ap_address) run_cmd phone-ap-up ;;
+    phone_unlocked) run_cmd phone-unlock ;;
+    phone_address) run_cmd phone-wifi-connect ;;
+    phone_default) run_cmd phone-fix-mobile-data ;;
+    proxy_app) run_cmd phone-proxy-install --fdroid ;;
+    proxy_request) run_cmd phone-proxy-start ;;
+    phone_tun | tunnel_route) run_cmd phone-fix-tunnel ;;
+    rndis0) run_cmd phone-usb-tether-default ;;
+    network_transport) run_cmd phone-adb-wifi ;;
+    *) return 1 ;;
+  esac
+}
+
+problems=$("$doctor" --analyze 2>/dev/null || true)
+if [ -z "$problems" ]; then
+  log "nothing to fix"
+  exit 0
+fi
+
+printf 'problems:\n%s\n' "$(printf '%s\n' "$problems" | sed 's/^/  /')"
+
+fix_order="ip_forward ap_address phone_unlocked phone_address phone_default proxy_app proxy_request phone_tun tunnel_route rndis0 network_transport"
+actions=""
+manual=""
+for id in $fix_order; do
+  printf '%s\n' "$problems" | grep -qE "^(fail|warn) $id( |$)" || continue
+  actions="$actions $id"
+done
+for id in $(printf '%s\n' "$problems" | awk '$1 == "fail" || $1 == "warn" {print $2}' | awk '!seen[$0]++'); do
+  has_fix "$id" && continue
+  manual="$manual $id"
+done
+
+printf '\nfixes:\n'
+if [ -n "$actions" ]; then
+  for id in $actions; do
+    printf '  %-18s %s\n' "$id" "$(describe_fix "$id")"
+  done
+else
+  printf '  none\n'
+fi
+printf 'manual:\n'
+if [ -n "$manual" ]; then
+  for id in $manual; do
+    printf '  %-18s %s\n' "$id" "$(manual_hint "$id")"
+  done
+else
+  printf '  none\n'
+fi
+
+if [ "$dry" = 1 ]; then
+  log "dry run: nothing applied"
+  exit 0
+fi
+
+if [ -z "$actions" ]; then
+  log "no automatic fixes; follow the manual steps above"
+  exit 1
+fi
+
+if [ "$yes" -eq 0 ]; then
+  count=$(printf '%s\n' $actions | wc -l)
+  printf 'Apply %d fix(es) now? [y/N] ' "$count" >&2
+  answer=""
+  read -r answer </dev/tty || answer=""
+  case $answer in
+    y | Y | yes | YES) ;;
+    *) die "aborted" ;;
+  esac
+fi
+
+for id in $actions; do
+  log "fixing $id with $(describe_fix "$id")"
+  run_fix "$id" || log "warning: the $id fix failed"
+done
+
+log "re-checking"
+remaining=$("$doctor" --analyze 2>/dev/null || true)
+if [ -n "$remaining" ]; then
+  printf 'still open:\n%s\n' "$(printf '%s\n' "$remaining" | sed 's/^/  /')"
+  exit 1
+fi
+log "all reported problems are fixed"

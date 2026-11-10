@@ -179,7 +179,25 @@ fresh_state
 if run; then ok "tether off exits 0"; else bad "tether off exits 0" "$(cat "$LOG/out")"; fi
 grep -q 'warn  rndis0' "$LOG/out" && ok "warns about the tether" || bad "warns about the tether"
 
-# 10. --help exits 0.
+# 10. --analyze prints only the problems, as stable ids.
+fresh_state
+if run --analyze; then ok "--analyze on a ready setup exits 0"; else bad "--analyze on a ready setup exits 0" "$(cat "$LOG/out")"; fi
+[ -s "$LOG/out" ] && bad "--analyze on a ready setup is empty" "$(cat "$LOG/out")" \
+  || ok "--analyze on a ready setup is empty"
+fresh_state
+printf 'List of devices attached\n' >"$LOG/devices"
+if run --analyze; then bad "--analyze with problems exits 1"; else ok "--analyze with problems exits 1"; fi
+grep -q '^fail adb_device ' "$LOG/out" && ok "--analyze names the problem id" \
+  || bad "--analyze names the problem id" "$(cat "$LOG/out")"
+grep -q '^ok ' "$LOG/out" && bad "--analyze omits ok lines" || ok "--analyze omits ok lines"
+grep -q '^\[' "$LOG/out" && bad "--analyze omits section headers" || ok "--analyze omits section headers"
+fresh_state
+printf 'true\n' >"$LOG/keyguard"
+if run --analyze; then ok "--analyze with only warnings exits 0"; else bad "--analyze with only warnings exits 0"; fi
+grep -q '^warn phone_unlocked ' "$LOG/out" && ok "--analyze reports warnings" \
+  || bad "--analyze reports warnings" "$(cat "$LOG/out")"
+
+# 11. --help exits 0.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
