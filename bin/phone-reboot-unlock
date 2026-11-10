@@ -49,12 +49,18 @@ fi
 poll=${PHONE_REBOOT_POLL:-2}
 wait_for=${PHONE_REBOOT_TIMEOUT:-240}
 
+# The old session still reports device and boot_completed for a moment after
+# `adb reboot`, so the new boot id is what proves the phone actually restarted.
+boot_id=$(adb -s "$serial" shell cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r')
+[ -n "$boot_id" ] || boot_id=unknown
+
 log "rebooting $serial"
 adb -s "$serial" reboot
 
 log "waiting for the phone to come back"
 waited=0
-until adb -s "$serial" get-state 2>/dev/null | grep -qx device; do
+until [ "$(adb -s "$serial" get-state 2>/dev/null)" = device ] \
+  && [ "$(adb -s "$serial" shell cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r')" != "$boot_id" ]; do
   sleep "$poll"
   waited=$((waited + poll))
   [ "$waited" -lt "$wait_for" ] || die "the phone did not come back within ${wait_for}s"

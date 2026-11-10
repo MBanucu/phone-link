@@ -30,6 +30,7 @@ case "${args[0]:-}" in
   devices) cat "$LOG/devices" ;;
   reboot)
     printf 'reboot\n' >>"$LOG/actions"
+    printf 'new-boot-id\n' >"$LOG/boot_id"
     : >"$LOG/online"
     if [ ! -f "$LOG/no_boot" ]; then
       ( sleep "$(cat "$LOG/boot_delay" 2>/dev/null || echo 1)"; : >"$LOG/booted" ) &
@@ -53,6 +54,7 @@ case "${args[0]:-}" in
           printf '0\n'
         fi
         ;;
+      cat) cat "$LOG/boot_id" ;;
     esac
     ;;
 esac
@@ -74,6 +76,7 @@ run() {
 
 fresh_state() {
   printf 'List of devices attached\nXPLO2EEA0001541\tdevice\n' >"$LOG/devices"
+  printf 'old-boot-id\n' >"$LOG/boot_id"
   rm -f "$LOG/actions" "$LOG/online" "$LOG/booted" "$LOG/no_boot" "$LOG/boot_delay"
 }
 
