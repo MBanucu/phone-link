@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Connect adb to the phone over TCP, with no cable needed once adbd listens.
+#
+#   adb-wifi-connect             connect to whichever phone address answers
+#   adb-wifi-connect --prepare   run `adb tcpip 5555` first (needs USB)
+#
+# --prepare restarts adbd, which re-enumerates the USB gadget: the USB tether
+# and any USB adb session drop for a few seconds. That blip, not the network
+# configuration, is what cuts the laptop's internet when run while tethered.
+set -u
+. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
+
+prepare=0
+[ "${1:-}" = "--prepare" ] && prepare=1
+
+if [ "$prepare" = 1 ]; then
+  log "warning: adb tcpip resets the USB gadget (the tether will blip)"
+  adb tcpip "$PHONE_ADB_PORT" >/dev/null || die "adb tcpip failed (cable attached?)"
+  sleep 2
+fi
+
+target=
+for ip in $(phone_ips 2>/dev/null) "$PHONE_HOTSPOT_IP" "$PHONE_AP_IP"; do
+  if tcp_open "$ip" 2 "$PHONE_ADB_PORT"; then target=$ip; break; fi
+done
+[ -n "$target" ] || die "no adb TCP listener reachable on the phone"
+
+adb connect "$target:$PHONE_ADB_PORT" >/dev/null || die "adb connect failed"
+adb devices
+if t=$(adb_transport 2>/dev/null); then log "adb over Wi-Fi: $t"; fi

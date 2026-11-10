@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Probe the phone's SOCKS proxy on the hotspot and AP addresses.
+# Exit status 0 when at least one address serves a request.
+set -u
+. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
+
+rc=1
+for ip in "$PHONE_HOTSPOT_IP" "$PHONE_AP_IP"; do
+  phone_proxy_check "$ip" && rc=0
+done
+exit $rc

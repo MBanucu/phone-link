@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Stop the access point and go back to the phone's own hotspot.
+set -eu
+. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
+as_root "$@"
+
+nmcli connection down "$PHONE_AP_CON" || true
+nmcli connection up "$PHONE_HOTSPOT_CON" \
+  || log "could not join $PHONE_HOTSPOT_CON (is the phone sharing it?)"
+nmcli -t -f NAME,DEVICE con show --active

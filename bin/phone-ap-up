@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Bring up the laptop access point the phone joins as a Wi-Fi client.
+#
+# This is the mode where Android's Wi-Fi client is active, which is what makes
+# the Developer-options "Wireless debugging" toggle usable, and therefore the
+# only mode in which adb can come back after a phone reboot without a cable.
+set -eu
+. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
+as_root "$@"
+
+iw list 2>/dev/null | grep -q '\* AP' || die "driver reports no AP mode"
+[ "$(nmcli -g wifi.backend 2>/dev/null || true)" != iwd ] \
+  || die "NetworkManager uses iwd; AP mode needs wpa_supplicant"
+[ "$(sysctl -n net.ipv4.ip_forward)" = 1 ] || die "net.ipv4.ip_forward is 0"
+nmcli -t -f NAME con show | grep -qx "$PHONE_AP_CON" \
+  || die "profile $PHONE_AP_CON missing (see phone-ap.nix for the nmcli command)"
+
+nmcli connection up "$PHONE_AP_CON"
+ip -4 -br addr show wlp110s0
+log "AP up. The phone must have Wi-Fi (client) on, not the hotspot."

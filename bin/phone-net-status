@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# One-screen overview of the phone link: wireless side, routes, resolver,
+# proxy reachability, adb transports and the phone's Wi-Fi/debug state.
+set -u
+. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
+
+say() { printf '%-20s %s\n' "$1" "$2"; }
+
+say "wifi link"      "$(nmcli -t -f NAME,DEVICE con show --active 2>/dev/null | grep wlp110s0 || echo '-')"
+say "wifi address"   "$(ip -4 -br addr show wlp110s0 2>/dev/null | awk '{print $3}')"
+say "tether address" "$(ip -4 -br addr show enp55s0u1 2>/dev/null | awk '{print $3}')"
+say "default route"  "$(ip route show default | tr '\n' ' ')"
+say "resolver"       "$(grep -v '^#' /etc/resolv.conf | tr '\n' ' ')"
+say "internet"       "$(curl -4 -s -m 10 -o /dev/null -w '%{http_code}' https://example.com || echo 000)"
+say "ap profile"     "$(nmcli -t -f NAME,TYPE con show 2>/dev/null | grep -F "$PHONE_AP_CON" | tr '\n' ' ' || true)"
+say "tunnel unit"    "$(systemctl is-active phone-tun.service 2>/dev/null || true)"
+say "tunnel rules"   "$(ip rule show 2>/dev/null | grep -c 2022 || true)"
+
+if t=$(adb_transport 2>/dev/null); then
+  say "adb wireless" "$t"
+else
+  say "adb wireless" "none"
+fi
+say "adb devices"    "$(adb devices | awk 'NR>1 && $2=="device" {printf "%s ", $1}')"
+
+for ip in "$PHONE_HOTSPOT_IP" "$PHONE_AP_IP"; do
+  if tcp_open "$ip" 2; then say "proxy $ip" "open"; else say "proxy $ip" "closed"; fi
+done
+
+if s=$(phone_serial 2>/dev/null); then
+  say "phone serial" "$s"
+  say "phone addrs"  "$(phone_ips | tr '\n' ' ')"
+  say "phone wifi"   "$(adb -s "$s" shell 'cmd wifi status 2>/dev/null | head -2 | tr "\n" " "' 2>/dev/null | tr -d '\r')"
+  say "wireless dbg" "$(adb -s "$s" shell 'settings get global adb_wifi_enabled; getprop service.adb.tcp.port' 2>/dev/null | tr -d '\r' | tr '\n' ' ')"
+fi
