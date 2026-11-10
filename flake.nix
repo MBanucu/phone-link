@@ -20,6 +20,7 @@
         "phone-adb-wifi"
         "phone-ap-down"
         "phone-ap-up"
+        "phone-doctor"
         "phone-net-status"
         "phone-proxy-battery-whitelist"
         "phone-proxy-check"
