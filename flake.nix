@@ -95,8 +95,11 @@
                 install -Dm644 ${./lib/phone-net.sh} "$out/share/phone-link/lib/phone-net.sh"
                 install -Dm644 ${./lib/phone-ui.sh} "$out/share/phone-link/lib/phone-ui.sh"
                 # phone-doctor is a Python package: one module per symptom group.
-                cp -r ${./lib/python}/phone_doctor "$out/share/phone-link/lib/phone_doctor"
-                find "$out/share/phone-link/lib/phone_doctor" -name __pycache__ \
+                # It must live under lib/python so the checkout-relative
+                # PYTHONPATH in bin/phone-doctor also works from the store.
+                mkdir -p "$out/share/phone-link/lib/python"
+                cp -r ${./lib/python}/phone_doctor "$out/share/phone-link/lib/python/phone_doctor"
+                find "$out/share/phone-link/lib/python/phone_doctor" -name __pycache__ \
                   -type d -exec rm -rf {} +
                 ${lib.concatMapStringsSep "\n" (name: ''
                   install -Dm755 ${./bin}/${name} "$out/share/phone-link/bin/${name}"
@@ -181,6 +184,7 @@
                 exit 1
               }
             done
+            ${package}/bin/phone-doctor --help >/dev/null
             status=$(${package}/bin/phone-net-status 2>&1 || true)
             case "$status" in
               *"wifi link"*) ;;
