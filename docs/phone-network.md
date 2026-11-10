@@ -25,6 +25,10 @@ laptop wlp110s0   192.168.77.1/24   NetworkManager "shared", its own dnsmasq
 phone  wlan0      192.168.77.232     DHCP lease, proxy binds this address
 ```
 
+The tether address is assigned per connection (it has been `172.26.192.42`,
+`10.207.119.29` and `10.186.76.251`); the hotspot and AP addresses below are
+stable.
+
 ## Traps, in the order they cost time
 
 1. **A hotspot phone is not a Wi-Fi client.** `cmd wifi status` prints
@@ -33,7 +37,8 @@ phone  wlan0      192.168.77.232     DHCP lease, proxy binds this address
    be switched to TCP from the shell either (`cmd adb` only exposes
    `is-wifi-supported` / `is-wifi-qr-supported`, and starting the proxy service
    with `am start-foreground-service` fails with "Requires permission not
-   exported from uid 10300").
+   exported from uid 10300"). In AP mode the `adb_wifi_enabled` setting can be
+   written over adb instead, which is what `phone-adb-wifi` does.
 2. **`adb tcpip 5555` resets the USB gadget.** adbd restarts, rndis disappears
    and re-appears, so the USB tether drops for a few seconds. If the phone is the
    only uplink, the laptop's internet dies with it. Replugging the cable fixes it.
@@ -51,10 +56,10 @@ phone  wlan0      192.168.77.232     DHCP lease, proxy binds this address
    app while the AP link is up, or use `--via-adb` (`adb reverse tcp:1080`) which
    reaches the `127.0.0.1` listener.
 6. **DNS loop.** With the tether, the laptop's resolver is the phone's tether DNS
-   (`172.26.192.42`). That forwards to the phone's default network, which in AP
-   mode is the `PhoneLink` Wi-Fi whose DNS is the laptop (`192.168.77.1`), which
-   forwards back. Result: every name lookup fails and every `curl` exits `000`
-   even though raw IPs work. `modules/phone-link.nix` avoids this by pinning
+   (`rndis0`'s address, which changes per connection). That forwards to the
+   phone's default network, which in AP mode is the `PhoneLink` Wi-Fi whose DNS
+   is the laptop (`192.168.77.1`), which forwards back. Result: every name lookup
+   fails and every `curl` exits `000` even though raw IPs work. `modules/phone-link.nix` avoids this by pinning
    `/etc/resolv.conf` to `1.1.1.1`/`9.9.9.9`.
 7. **Policy routing is not obvious.** sing-box (gvisor stack) installs
    `ip rule` entries with fwmark 2022 and a table 2022 route, so
@@ -92,13 +97,14 @@ adb -s 10.244.108.165:5555 shell echo -> OK
   credentials `proxy:<proxy password>` (secret lives in `/etc/nixos/phone-socks-secrets`).
 - `adb tcpip 5555` works, but `persist.adb.tcp.port` cannot be written:
   `setprop` is denied by SELinux for `shell` (`Enforcing`, `ro.build.type=user`),
-  so there is no way to make adbd start on TCP after a reboot.
-- `mdnsd` runs on the phone; it advertises `_adb._tcp` with hostname
-  `Android.local`, but only on the interface of its active network (seen on the
-  tether, not on the AP/hotspot side). Laptop side: `avahi-browse -art` finds it.
+  so there is no way to make the legacy 5555 listener start after a reboot.
+- `mdnsd` runs on the phone and advertises `_adb._tcp` with hostname
+  `Android.local` on the interface of its active network (seen on the tether).
+  The wireless-debugging service is `_adb-tls-connect._tcp`; it is advertised on
+  the AP link (`wlp110s0`) too, and its record carries the random TLS port that
+  `avahi-browse -rt` reads.
 - Wireless debugging (Android 11+) works headlessly here: `settings put global
-  adb_wifi_enabled 1` starts a TLS adbd on a random port, advertised as
-  `_adb-tls-connect._tcp` with that port, which `avahi-browse -rt` reads. The
-  host's key is already trusted, so `adb connect` needs no pairing. `adb tcpip
-  5555` restarts adbd and leaves wireless debugging on with a new random port,
-  so both listeners work at once.
+  adb_wifi_enabled 1` starts a TLS adbd on that random port, and the host's key
+  is already trusted, so `adb connect` needs no pairing. `adb tcpip 5555`
+  restarts adbd and leaves wireless debugging on with a new random port, so both
+  listeners work at once.
