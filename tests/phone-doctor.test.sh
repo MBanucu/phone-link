@@ -37,6 +37,8 @@ case "${args[0]:-}" in
       "ip -4 -o addr show"*) cat "$LOG/ips" ;;
       "ip route show default") cat "$LOG/default_route" ;;
       "pm path "*) cat "$LOG/pm" ;;
+      "dumpsys package "*) cat "$LOG/dumpsys" ;;
+      "getprop ro.build.version.sdk") cat "$LOG/sdk" ;;
     esac
     ;;
 esac
@@ -74,16 +76,30 @@ sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/systemctl"
 cat >"$STUBS/curl" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
+  *api/v1/packages*) cat "$LOG/fdroid_json" ;;
   *--socks5-hostname*) printf '%s' "$(cat "$LOG/proxy_code")" ;;
   *) printf '%s' "$(cat "$LOG/internet_code")" ;;
 esac
 EOF
 sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/curl"
 
+cat >"$STUBS/git" <<'EOF'
+#!/usr/bin/env bash
+while [ "${1:-}" = "-C" ]; do shift 2; done
+case "$*" in
+  "rev-parse HEAD") cat "$LOG/local_head" ;;
+  "log -1 --format=%ct") cat "$LOG/head_time" ;;
+  "ls-remote origin HEAD") printf '%s\tHEAD\n' "$(cat "$LOG/remote_head")" ;;
+esac
+EOF
+sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/git"
+
 chmod +x "$STUBS"/*
 export PATH="$STUBS:$PATH"
 export PHONE_SECRETS=$TMP/secrets
 export PHONE_DOCTOR_RESOLV=$LOG/resolv.conf
+export PHONE_APK_CACHE=$TMP/cache
+export PHONE_NIXOS_DIR=$TMP/nixos PHONE_FLAKE_SRC=$TMP/no-src
 printf 'PHONE_SOCKS_PASS=pass\nPHONE_PIN=1234\nPHONE_AP_PASS=pass\n' >"$PHONE_SECRETS"
 chmod 600 "$PHONE_SECRETS"
 
@@ -102,6 +118,14 @@ fresh_state() {
   printf '200' >"$LOG/proxy_code"
   printf '200' >"$LOG/internet_code"
   printf 'nameserver 1.1.1.1\nnameserver 9.9.9.9\n' >"$LOG/resolv.conf"
+  printf '    versionCode=24 minSdk=26 targetSdk=34\n    versionName=1.7.4\n' >"$LOG/dumpsys"
+  printf '35\n' >"$LOG/sdk"
+  printf '{"packageName":"com.tokyoxpa3.androidproxy","suggestedVersionCode":24,"packages":[{"versionName":"1.7.4","versionCode":24}]}' >"$LOG/fdroid_json"
+  mkdir -p "$PHONE_APK_CACHE"
+  : >"$PHONE_APK_CACHE/com.tokyoxpa3.androidproxy-test.apk"
+  printf 'abc\n' >"$LOG/local_head"
+  printf 'abc\n' >"$LOG/remote_head"
+  printf '200\n' >"$LOG/head_time"
 }
 
 run() {
@@ -179,7 +203,42 @@ fresh_state
 if run; then ok "tether off exits 0"; else bad "tether off exits 0" "$(cat "$LOG/out")"; fi
 grep -q 'warn  rndis0' "$LOG/out" && ok "warns about the tether" || bad "warns about the tether"
 
-# 10. --analyze prints only the problems, as stable ids.
+# 10. An AP profile with the AP down is a required failure.
+fresh_state
+: >"$LOG/ap_addr"
+if run; then bad "AP down exits 1"; else ok "AP down exits 1"; fi
+grep -q 'FAIL  ap address' "$LOG/out" && ok "fails the AP address" || bad "fails the AP address"
+run --analyze || true
+grep -q '^fail ap_address ' "$LOG/out" && ok "--analyze names ap_address" \
+  || bad "--analyze names ap_address" "$(cat "$LOG/out")"
+
+# 11. An empty ambulance box is a required failure.
+fresh_state
+rm -f "$PHONE_APK_CACHE"/*.apk
+if run; then bad "empty ambulance exits 1"; else ok "empty ambulance exits 1"; fi
+grep -q 'FAIL  ambulance apk' "$LOG/out" && ok "fails the ambulance check" \
+  || bad "fails the ambulance check" "$(cat "$LOG/out")"
+
+# 12. The installed proxy version is compared with F-Droid.
+fresh_state
+printf '{"suggestedVersionCode":25,"packages":[{"versionName":"1.8.0","versionCode":25}]}' >"$LOG/fdroid_json"
+if run; then ok "outdated proxy still exits 0"; else bad "outdated proxy still exits 0"; fi
+grep -q 'warn  proxy version.*1.7.4 (24) < 1.8.0 (25)' "$LOG/out" \
+  && ok "warns about the update" || bad "warns about the update" "$(cat "$LOG/out")"
+grep -q 'ok    proxy compat.*minSdk 26 <= phone SDK 35' "$LOG/out" \
+  && ok "checks the SDK compatibility" || bad "checks the SDK compatibility" "$(cat "$LOG/out")"
+
+# 14. A flake lock older than the source HEAD is reported.
+fresh_state
+mkdir -p "$TMP/src/.git" "$TMP/nixos"
+printf '{\n  "nodes": {\n    "phone-link": {\n      "locked": {\n        "lastModified": 100\n      }\n    }\n  }\n}\n' >"$TMP/nixos/flake.lock"
+export PHONE_FLAKE_SRC=$TMP/src PHONE_NIXOS_DIR=$TMP/nixos
+if run; then ok "stale flake still exits 0"; else bad "stale flake still exits 0"; fi
+grep -q 'warn  flake update.*older' "$LOG/out" && ok "warns about the stale lock" \
+  || bad "warns about the stale lock" "$(cat "$LOG/out")"
+unset PHONE_FLAKE_SRC PHONE_NIXOS_DIR
+
+# 15. --analyze prints only the problems, as stable ids.
 fresh_state
 if run --analyze; then ok "--analyze on a ready setup exits 0"; else bad "--analyze on a ready setup exits 0" "$(cat "$LOG/out")"; fi
 [ -s "$LOG/out" ] && bad "--analyze on a ready setup is empty" "$(cat "$LOG/out")" \
@@ -197,7 +256,7 @@ if run --analyze; then ok "--analyze with only warnings exits 0"; else bad "--an
 grep -q '^warn phone_unlocked ' "$LOG/out" && ok "--analyze reports warnings" \
   || bad "--analyze reports warnings" "$(cat "$LOG/out")"
 
-# 11. --help exits 0.
+# 16. --help exits 0.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"

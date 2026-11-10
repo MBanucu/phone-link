@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# Restore internet so the proxy APK can be downloaded and checked. Tries every
+# uplink the setup supports, in order, and verifies each with a fresh request:
+#
+#   1. the phone's mobile data,
+#   2. USB tethering (RNDIS) to the laptop,
+#   3. the phone's hotspot with the laptop as a normal Wi-Fi client.
+#
+#   phone-fix-internet           try the paths above until HTTPS works
+#   phone-fix-internet --check   report whether internet works, change nothing
+#
+# Run with sudo: unlocking and phone-wifi-connect read the secrets file.
+set -eu
+. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
+
+usage() {
+  cat >&2 <<'EOF'
+usage: phone-fix-internet [--check] [--help]
+
+Restores internet for the APK download/version check by trying mobile data,
+USB tethering and the phone hotspot (the laptop joining as a client), checking
+HTTPS after each step. --check only reports whether internet already works.
+EOF
+}
+
+check_only=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --check) check_only=1 ;;
+    -h | --help) usage; exit 0 ;;
+    *)
+      usage
+      die "unknown argument: $1"
+      ;;
+  esac
+  shift
+done
+
+online() {
+  code=$(timeout 15 curl -4 -s -m 10 -o /dev/null -w '%{http_code}' \
+    "${PHONE_DOCTOR_URL:-https://example.com}" 2>/dev/null || true)
+  [ "$code" = 200 ]
+}
+
+if online; then
+  log "internet is up"
+  exit 0
+fi
+if [ "$check_only" = 1 ]; then
+  log "no internet"
+  exit 1
+fi
+
+here=$(dirname -- "$(readlink -f -- "$0")")
+run_tool() {
+  name=$1
+  shift
+  bin=$(command -v "$name" 2>/dev/null || true)
+  if [ -z "$bin" ]; then bin=$here/$name; fi
+  if [ ! -x "$bin" ]; then
+    log "warning: $name not found"
+    return 1
+  fi
+  "$bin" "$@"
+}
+
+log "no internet; trying mobile data"
+run_tool phone-fix-mobile-data || log "warning: could not enable mobile data"
+sleep 3
+if online; then
+  log "internet is up over mobile data"
+  exit 0
+fi
+
+log "trying USB tethering"
+adb shell svc usb setFunctions rndis,adb >/dev/null 2>&1 || true
+run_tool phone-usb-tether-default || log "warning: could not set USB tethering"
+sleep 5
+if online; then
+  log "internet is up over USB tethering"
+  exit 0
+fi
+
+log "trying the phone hotspot (laptop as a Wi-Fi client)"
+adb shell svc wifi disable >/dev/null 2>&1 || true
+adb shell cmd wifi start-softap "$PHONE_HOTSPOT_SSID" >/dev/null 2>&1 || true
+if nmcli -t -f NAME con show 2>/dev/null | grep -Fxq "$PHONE_HOTSPOT_CON"; then
+  nmcli connection up "$PHONE_HOTSPOT_CON" \
+    || log "warning: could not activate $PHONE_HOTSPOT_CON"
+elif [ -n "${PHONE_HOTSPOT_PASS:-}" ]; then
+  nmcli device wifi connect "$PHONE_HOTSPOT_SSID" password "$PHONE_HOTSPOT_PASS" \
+    || log "warning: could not join $PHONE_HOTSPOT_SSID"
+else
+  log "warning: no saved $PHONE_HOTSPOT_CON profile and no PHONE_HOTSPOT_PASS"
+fi
+sleep 10
+if online; then
+  log "internet is up over the phone hotspot"
+  exit 0
+fi
+
+die "could not restore internet; connect a working uplink and run phone-net-status"

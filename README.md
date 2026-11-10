@@ -52,6 +52,7 @@ stopped proxy app cannot blackhole traffic.
 | `phoneLink.interfaceName` | `phone-tun` | TUN device name |
 | `phoneLink.tunAddress` | `172.19.0.1/30` | TUN address |
 | `phoneLink.logLevel` | `warn` | sing-box log level |
+| `phoneLink.cacheProxyApk` | `true` | download the proxy APK during activation, so every install/update stocks the ambulance cache |
 | `phoneLink.manageResolver` | `true` | pin `/etc/resolv.conf` to `1.1.1.1`/`9.9.9.9` |
 | `phoneLink.openApFirewall` | `true` | allow DHCP/DNS from AP clients |
 | `phoneLink.enableRelay` | `false` | run the local SOCKS/HTTP relay (`gost`) |
@@ -70,9 +71,11 @@ Or straight from the checkout: `./bin/phone-net-status`.
 | script | what it does |
 |---|---|
 | `phone-net-status` | links, routes, resolver, proxy probes, adb transports, phone state |
-| `phone-doctor` | check every runtime condition of the setup (forwarding, AP profile/address, adb, phone link, secrets, proxy, tunnel, tether, internet) and exit non-zero if a required one is unmet; `--analyze` prints one `fail`/`warn` line with a stable problem id for scripts |
-| `phone-doctor-fix` | list the fixes for the problems `phone-doctor --analyze` reports, run one dedicated script per problem in dependency order, then re-check (`--yes` skips the prompt, `--dry-run` only lists; run with `sudo`) |
+| `phone-doctor` | check every runtime condition of the setup (forwarding, AP profile/address, adb, phone link, secrets, proxy, tunnel, tether, internet), the cached proxy APK, the installed app versus F-Droid's latest and the phone SDK, and whether the source checkout is newer than the installed flake lock; exit non-zero if a required one is unmet; `--analyze` prints one `fail`/`warn` line with a stable problem id for scripts |
+| `phone-doctor-fix` | list the fixes for the problems `phone-doctor --analyze` reports, run one dedicated script per problem in dependency order, then re-check (`--yes` skips the prompt, `--dry-run` only lists, `--required` leaves warnings alone; run with `sudo`) |
+| `phone-fix-apk` | stock the ambulance box: cache the proxy APK in `/var/cache/phone-link` so the app can be reinstalled without a network (`--refresh` re-downloads, `--check` reports) |
 | `phone-fix-forwarding` | set `net.ipv4.ip_forward=1` for the running kernel (`--check` reports only) |
+| `phone-fix-internet` | restore internet for the APK download/check by trying mobile data, USB tethering, then the phone hotspot with the laptop as a client, verifying HTTPS after each (`--check` reports only) |
 | `phone-fix-mobile-data` | enable the phone's mobile data and wait for a default route (`--check` reports only) |
 | `phone-fix-tunnel` | start `phone-tun`, or restart it when its route is missing, and wait for the route (`--check` reports only) |
 | `phone-proxy-check` | request through the proxy on the hotspot and AP addresses (needs root for the secret) |
@@ -93,6 +96,7 @@ Or straight from the checkout: `./bin/phone-net-status`.
 | `phone-wifi-forget` | forget a saved network, default PhoneLink (`--check`, `--yes`) |
 | `phone-wifi-concurrency` | report whether Wi-Fi client and hotspot can run together (STA+AP), read-only; exit 2 if the phone does not say |
 | `phone-unlock` | unlock the lock screen with `PHONE_PIN` from the secrets file (`--check` only reports locked/unlocked) |
+| `phone-ap-delete` | delete the `phonelink` AP profile from NetworkManager, bringing it down first if active (`--check` reports, `--yes` skips the prompt) |
 | `phone-ap-up` | preflight the radio, then `nmcli connection up phonelink` |
 | `phone-ap-down` | drop the AP and rejoin the phone's hotspot |
 | `adb-wifi-connect` | connect adb to the phone over TCP |
@@ -100,6 +104,10 @@ Or straight from the checkout: `./bin/phone-net-status`.
 | `phone-adb-wifi` | enable adb over Wi-Fi on the phone: legacy `adb tcpip 5555` and Android 11+ wireless debugging on its random TLS port, then connect (`--legacy`, `--tls`, `--check`) |
 | `phone-tunnel-run` | run the built tunnel config in the foreground |
 | `phone-tunnel-run --via-adb` | same, with the upstream reached through `adb reverse` |
+
+`phone-doctor` is a Python package under `lib/python/phone_doctor`, with one
+module per symptom group (`flake`, `host`, `phone`, `secrets`, `proxy`,
+`tunnel`, `tether`, `internet`, `adb_wifi`); `bin/phone-doctor` only resolves it.
 
 `lib/phone-net.sh` holds the shared functions (`phone_proxy_check`, `tcp_open`,
 `phone_ips`, `adb_transport`, …); source it so addresses and ports live in one
@@ -117,10 +125,31 @@ place.
 | `module` | the module generates the expected sing-box config and units (5 s probe, 20 s first run, AP DHCP/DNS holes, pinned resolver, never started at boot) and defines nothing when disabled |
 | `script` | hermetic tests with stub `adb`/`curl`/`avahi-browse`: for `phone-proxy-install` the F-Droid version selection, cache keying and reuse, `--check` staying read-only, the exact install argv and `--pull` naming; for `phone-proxy-uninstall` the confirm/`--yes` guard, `--keep-data`, idempotence and the exact uninstall argv; for `phone-proxy-data-clear` the prompt guard, `--check` staying read-only and the `pm clear` argv; for `phone-proxy-setup` the field order, values typed, auto-start toggle and Start tap against a stub settings screen; for `phone-unlock` the keyguard check, PIN entry and wrong-PIN failure; for `phone-proxy-battery-whitelist` the idempotent add, `--check` and the device-idle argv; for `phone-proxy-start`/`phone-proxy-stop` the Start/Stop tap, the already-running/stopped no-op and the failed-start path; for `phone-wifi-concurrency` the supported, unsupported and inconclusive verdicts and the read-only queries; for `phone-usb-tether-check` the rndis0/usb state, the host route and a source-bound request; for `net-check` the three fetches, their failure modes and the cache-busting URL; for `phone-reboot-unlock` the reboot/wait/unlock sequence, the slow-boot wait, the aborted prompt and the boot timeout; for `phone-usb-tether-default` the current and screen-unlocked functions, the `--check` report and an ineffective setter; for `phone-wifi-enable` the idempotent enable and `--check`; for `phone-wifi-forget` the saved-network table, the prompt/`--yes` guard and idempotence; for `phone-wifi-connect` the password sources, remote quoting of SSID/passphrase and the association wait; for `phone-tether-cycle` the MTP disable, the health check, the lock/unlock restore, an adb abort retry, the already-off case, an unhealthy restore and the prompt guard; for `phone-adb-wifi` the legacy/TLS split, the mDNS port lookup, the `adb_wifi_enabled` write, the already-on case and the missing-port failure; for `phone-doctor` the ready, hotspot, locked, missing-adb, missing-secrets and dead-proxy paths |
 
-The `script` check also covers `phone-doctor --analyze` (problem ids, warnings-only,
-no headers or `ok` lines), `phone-doctor-fix` (dry run, ordered application,
-manual-only and failed-fix paths) and the three fix scripts (forwarding,
-mobile data, tunnel: apply, no-op and read-only `--check`).
+The `script` check also covers `phone-doctor --analyze` (problem ids, AP down and
+an empty ambulance box, warnings-only, no headers or `ok` lines),
+`phone-doctor-fix` (dry run, ordered application, cached-APK install,
+manual-only and failed-fix paths) and the fix scripts (ambulance APK,
+forwarding, mobile data, tunnel: apply, no-op and read-only `--check`).
+
+### Live end-to-end test
+
+`tests/live/doctor-fix-proxy.sh` breaks the setup on purpose and checks that the
+doctor repairs it: it stocks the ambulance APK, drops the laptop AP, uninstalls
+the proxy app, requires `phone-doctor` to report `ap_address`, `proxy_app` and
+`proxy_request`, runs `phone-doctor-fix --yes --required`, and requires a clean
+doctor with the AP back up and the phone joined again. The fixer restores the AP
+and the phone's link to it last, so every proxy fix runs while the phone is
+still reachable. The APK is cached before the phone is touched, so the repair
+works even when the removed proxy was the laptop's only uplink
+(`PHONE_PROXY_APK=<file>` also forces a specific APK). It reinstalls and
+reconfigures the app on exit if the repair failed.
+
+```sh
+sudo tests/live/doctor-fix-proxy.sh
+```
+
+It is not named `*.test.sh`, so `nix flake check` never runs it; it needs the
+phone, root and F-Droid access, and it deletes the app's data.
 
 The `module` check evaluates a NixOS configuration with non-default options, so
 it catches option or unit regressions without building a system or a VM.

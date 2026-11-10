@@ -18,11 +18,14 @@
         "adb-wifi-connect"
         "net-check"
         "phone-adb-wifi"
+        "phone-ap-delete"
         "phone-ap-down"
         "phone-ap-up"
         "phone-doctor"
         "phone-doctor-fix"
+        "phone-fix-apk"
         "phone-fix-forwarding"
+        "phone-fix-internet"
         "phone-fix-mobile-data"
         "phone-fix-tunnel"
         "phone-net-status"
@@ -89,6 +92,10 @@
                 mkdir -p "$out/bin"
                 install -Dm644 ${./lib/phone-net.sh} "$out/share/phone-link/lib/phone-net.sh"
                 install -Dm644 ${./lib/phone-ui.sh} "$out/share/phone-link/lib/phone-ui.sh"
+                # phone-doctor is a Python package: one module per symptom group.
+                cp -r ${./lib/python}/phone_doctor "$out/share/phone-link/lib/phone_doctor"
+                find "$out/share/phone-link/lib/phone_doctor" -name __pycache__ \
+                  -type d -exec rm -rf {} +
                 ${lib.concatMapStringsSep "\n" (name: ''
                   install -Dm755 ${./bin}/${name} "$out/share/phone-link/bin/${name}"
                   # Point the shebang at the store bash: /usr/bin/env does not

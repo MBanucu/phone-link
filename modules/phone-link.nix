@@ -151,6 +151,17 @@ in
       default = "warn";
     };
 
+    cacheProxyApk = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Download the proxy APK into the ambulance cache during activation, so
+        installing or updating the system always leaves a copy that can be
+        reinstalled without a network.  Ignored when phone-fix-apk is not on
+        the system PATH.
+      '';
+    };
+
     manageResolver = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -220,6 +231,19 @@ in
 
         boot.kernelModules = [ "tun" ];
       }
+
+      (lib.mkIf cfg.cacheProxyApk {
+        # Runs on every switch/boot-time activation, not at build time: a Nix
+        # derivation cannot download, and the cache must follow the newest
+        # F-Droid version.
+        system.activationScripts.phone-apk-cache = {
+          text = ''
+            if [ -x "${config.system.path}/bin/phone-fix-apk" ]; then
+              "${config.system.path}/bin/phone-fix-apk" --refresh >&2 || true
+            fi
+          '';
+        };
+      })
 
       (lib.mkIf cfg.manageResolver {
         networking.networkmanager.dns = "none";

@@ -2,9 +2,14 @@
 # Fix the problems phone-doctor reports by running one dedicated script per
 # problem. Problems without a fix script print the manual step instead.
 #
-#   phone-doctor-fix            list the plan, then ask once
-#   phone-doctor-fix --yes      apply without asking
-#   phone-doctor-fix --dry-run  list only
+#   phone-doctor-fix              list the plan, then ask once
+#   phone-doctor-fix --yes        apply without asking
+#   phone-doctor-fix --dry-run    list only
+#   phone-doctor-fix --required   only fix `fail` problems, leave warnings
+#
+# --required is what a self-repair run wants: the optional checks (locked
+# phone, USB tether off, no adb over Wi-Fi) do not stop the setup from working,
+# so fixing them would change state the user did not ask to touch.
 #
 # Each fix is its own script (see describe_fix below), so a single fix can be
 # run on its own. Run this with sudo: phone-unlock and phone-wifi-connect read
@@ -16,21 +21,26 @@ here=$(dirname -- "$(readlink -f -- "$0")")
 
 usage() {
   cat >&2 <<'EOF'
-usage: phone-doctor-fix [--yes] [--dry-run]
+usage: phone-doctor-fix [--yes] [--dry-run] [--required]
 
 Runs phone-doctor --analyze, then the fix script for each problem it reports,
 in dependency order, and re-checks afterwards. --yes skips the confirmation;
---dry-run only lists what would run. Problems without a fix script are printed
-with the manual step.
+--dry-run only lists what would run; --required ignores warnings and only
+fixes required failures. Problems without a fix script are printed with the
+manual step. PHONE_PROXY_APK=/path/app.apk installs the proxy from that file
+instead of downloading from F-Droid, which keeps the repair working when the
+network it restores is itself down.
 EOF
 }
 
 yes=0
 dry=0
+required=0
 while [ $# -gt 0 ]; do
   case $1 in
     --yes) yes=1 ;;
     --dry-run) dry=1 ;;
+    --required) required=1 ;;
     -h | --help) usage; exit 0 ;;
     *)
       usage
@@ -49,25 +59,35 @@ if [ -z "$doctor" ]; then doctor=$here/phone-doctor; fi
 
 has_fix() {
   case $1 in
-    ip_forward | ap_address | phone_unlocked | phone_address | phone_default | \
-      proxy_app | proxy_request | phone_tun | tunnel_route | rndis0 | \
-      network_transport) return 0 ;;
+    apk_cache | ip_forward | ap_address | phone_unlocked | phone_address | \
+      phone_default | proxy_app | proxy_request | phone_tun | tunnel_route | \
+      rndis0 | network_transport | https) return 0 ;;
     *) return 1 ;;
   esac
 }
 
 describe_fix() {
   case $1 in
+    apk_cache) printf 'phone-fix-apk' ;;
     ip_forward) printf 'phone-fix-forwarding' ;;
     ap_address) printf 'phone-ap-up' ;;
     phone_unlocked) printf 'phone-unlock' ;;
     phone_address) printf 'phone-wifi-connect' ;;
     phone_default) printf 'phone-fix-mobile-data' ;;
-    proxy_app) printf 'phone-proxy-install --fdroid' ;;
-    proxy_request) printf 'phone-proxy-start' ;;
+    proxy_app)
+      if [ -n "${PHONE_PROXY_APK:-}" ]; then
+        printf 'phone-proxy-install %s' "$PHONE_PROXY_APK"
+      elif apk=$(phone_apk_cached 2>/dev/null); then
+        printf 'phone-proxy-install %s' "$apk"
+      else
+        printf 'phone-proxy-install --fdroid'
+      fi
+      ;;
+    proxy_request) printf 'phone-proxy-setup' ;;
     phone_tun | tunnel_route) printf 'phone-fix-tunnel' ;;
     rndis0) printf 'phone-usb-tether-default' ;;
     network_transport) printf 'phone-adb-wifi' ;;
+    https) printf 'phone-fix-internet' ;;
   esac
 }
 
@@ -78,6 +98,9 @@ manual_hint() {
     resolver) printf 'pin /etc/resolv.conf via phoneLink.manageResolver and rebuild' ;;
     secrets) printf 'write %s with PHONE_SOCKS_PASS and PHONE_PIN (root, mode 600)' "$PHONE_SECRETS" ;;
     ap_pass) printf 'add PHONE_AP_PASS to %s' "$PHONE_SECRETS" ;;
+    proxy_version) printf 'refresh the ambulance box, then run phone-proxy-install --fdroid' ;;
+    proxy_compat) printf 'the installed app does not fit this phone; pick a compatible APK' ;;
+    flake_update) printf 'update the source and rebuild: nix flake update phone-link' ;;
     https) printf 'retry after the proxy/tether fixes; net-check shows which fetch fails' ;;
     *) printf 'no automatic fix' ;;
   esac
@@ -97,29 +120,54 @@ run_cmd() {
 
 run_fix() {
   case $1 in
+    apk_cache) run_cmd phone-fix-apk ;;
     ip_forward) run_cmd phone-fix-forwarding ;;
     ap_address) run_cmd phone-ap-up ;;
     phone_unlocked) run_cmd phone-unlock ;;
     phone_address) run_cmd phone-wifi-connect ;;
     phone_default) run_cmd phone-fix-mobile-data ;;
-    proxy_app) run_cmd phone-proxy-install --fdroid ;;
-    proxy_request) run_cmd phone-proxy-start ;;
+    proxy_app)
+      # Offline reinstall: the network may be the thing this fix restores.
+      apk=${PHONE_PROXY_APK:-}
+      if [ -z "$apk" ]; then apk=$(phone_apk_cached 2>/dev/null || true); fi
+      if [ -n "$apk" ]; then
+        if [ ! -f "$apk" ]; then
+          log "error: proxy APK is not a file: $apk"
+          return 1
+        fi
+        run_cmd phone-proxy-install "$apk"
+      else
+        run_cmd phone-proxy-install --fdroid
+      fi
+      ;;
+    proxy_request) run_cmd phone-proxy-setup ;;
     phone_tun | tunnel_route) run_cmd phone-fix-tunnel ;;
     rndis0) run_cmd phone-usb-tether-default ;;
     network_transport) run_cmd phone-adb-wifi ;;
+    https) run_cmd phone-fix-internet ;;
     *) return 1 ;;
   esac
 }
 
 problems=$("$doctor" --analyze 2>/dev/null || true)
+if [ "$required" = 1 ]; then
+  problems=$(printf '%s\n' "$problems" | awk '$1 == "fail"')
+fi
 if [ -z "$problems" ]; then
-  log "nothing to fix"
+  if [ "$required" = 1 ]; then
+    log "no required problems to fix"
+  else
+    log "nothing to fix"
+  fi
   exit 0
 fi
 
 printf 'problems:\n%s\n' "$(printf '%s\n' "$problems" | sed 's/^/  /')"
 
-fix_order="ip_forward ap_address phone_unlocked phone_address phone_default proxy_app proxy_request phone_tun tunnel_route rndis0 network_transport"
+# The AP and the phone's link to it come last: bringing the AP up moves the
+# phone's address, so every proxy/tunnel fix runs while the phone is still
+# reachable over USB tether or its current address.
+fix_order="apk_cache ip_forward phone_unlocked phone_default proxy_app proxy_request phone_tun tunnel_route rndis0 network_transport ap_address phone_address https"
 actions=""
 manual=""
 for id in $fix_order; do
@@ -176,6 +224,9 @@ done
 
 log "re-checking"
 remaining=$("$doctor" --analyze 2>/dev/null || true)
+if [ "$required" = 1 ]; then
+  remaining=$(printf '%s\n' "$remaining" | awk '$1 == "fail"')
+fi
 if [ -n "$remaining" ]; then
   printf 'still open:\n%s\n' "$(printf '%s\n' "$remaining" | sed 's/^/  /')"
   exit 1

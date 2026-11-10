@@ -13,12 +13,16 @@ PHONE_AP_IP=${PHONE_AP_IP:-192.168.77.232}
 PHONE_AP_CON=${PHONE_AP_CON:-phonelink}
 PHONE_AP_SSID=${PHONE_AP_SSID:-PhoneLink}
 PHONE_HOTSPOT_CON=${PHONE_HOTSPOT_CON:-XPLORE 2}
+PHONE_HOTSPOT_SSID=${PHONE_HOTSPOT_SSID:-$PHONE_HOTSPOT_CON}
 PHONE_AP_SUBNET=${PHONE_AP_SUBNET:-192.168.77.0/24}
 PHONE_PROXY_PORT=${PHONE_PROXY_PORT:-1080}
 PHONE_PROXY_USER=${PHONE_PROXY_USER:-proxy}
 PHONE_PROXY_PKG=${PHONE_PROXY_PKG:-com.tokyoxpa3.androidproxy}
 PHONE_ADB_PORT=${PHONE_ADB_PORT:-5555}
 PHONE_SECRETS=${PHONE_SECRETS:-/etc/nixos/phone-socks-secrets}
+# The ambulance box: a root-owned cache of the proxy APK, kept so the proxy
+# can be reinstalled when the network it provides is the thing that broke.
+PHONE_APK_CACHE=${PHONE_APK_CACHE:-/var/cache/phone-link}
 
 log() { printf '%s\n' "$*" >&2; }
 die() { log "error: $*"; exit 1; }
@@ -63,6 +67,21 @@ phone_proxy_check() {
            -o /dev/null -w '%{http_code}' https://example.com)
   log "$ip:$PHONE_PROXY_PORT -> https://example.com = ${code:-000}"
   [ "$code" = 200 ]
+}
+
+# phone_apk_cached -> newest proxy APK in the ambulance box or a user cache
+phone_apk_cached() {
+  local dir f newest=""
+  for dir in "$PHONE_APK_CACHE" "${PHONE_APK_DIR:-}" \
+    "${XDG_CACHE_HOME:-$HOME/.cache}/phone-link"; do
+    [ -n "$dir" ] && [ -d "$dir" ] || continue
+    for f in "$dir"/*.apk; do
+      [ -f "$f" ] || continue
+      if [ -z "$newest" ] || [ "$f" -nt "$newest" ]; then newest=$f; fi
+    done
+  done
+  [ -n "$newest" ] || return 1
+  printf '%s\n' "$newest"
 }
 
 # adb_transport -> the serial of a network (non-USB) adb transport

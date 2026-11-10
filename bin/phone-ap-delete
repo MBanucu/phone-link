@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Delete the laptop's PhoneLink access-point profile from NetworkManager.
+#
+#   phone-ap-delete            ask, then delete the profile
+#   phone-ap-delete --yes      delete without asking
+#   phone-ap-delete --check    report the profile and its state, change nothing
+#
+# The phone's saved network and the APK are untouched. The profile contains the
+# Wi-Fi PSK, so this also removes that secret from NetworkManager's store.
+set -eu
+. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
+
+usage() {
+  cat >&2 <<'EOF'
+usage: phone-ap-delete [--yes] [--check]
+
+Deletes the NetworkManager connection $PHONE_AP_CON (the laptop AP) after
+bringing it down if it is active. --check only reports; --yes skips the
+confirmation. Needs root.
+EOF
+}
+
+assume_yes=0
+check_only=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    -y | --yes) assume_yes=1 ;;
+    --check) check_only=1 ;;
+    -h | --help) usage; exit 0 ;;
+    *)
+      usage
+      die "unknown argument: $1"
+      ;;
+  esac
+  shift
+done
+
+profile_exists() {
+  nmcli -t -f NAME con show 2>/dev/null | grep -Fxq "$PHONE_AP_CON"
+}
+
+if ! profile_exists; then
+  log "$PHONE_AP_CON is not configured; nothing to delete"
+  exit 0
+fi
+
+device=$(nmcli -t -f NAME,DEVICE con show --active 2>/dev/null \
+  | awk -F: -v n="$PHONE_AP_CON" '$1 == n {print $2; exit}')
+
+if [ "$check_only" = 1 ]; then
+  log "$PHONE_AP_CON exists${device:+ and is active on $device}"
+  exit 0
+fi
+
+as_root "$@"
+
+if [ "$assume_yes" = 0 ]; then
+  if [ -t 0 ]; then
+    printf 'Delete the AP profile %s? [y/N] ' "$PHONE_AP_CON" >&2
+    read -r answer
+    case $answer in
+      y | Y | yes | YES) ;;
+      *)
+        log "aborted"
+        exit 1
+        ;;
+    esac
+  else
+    die "refusing to delete without --yes (not a terminal)"
+  fi
+fi
+
+if [ -n "$device" ]; then
+  log "bringing $PHONE_AP_CON down (active on $device)"
+  nmcli connection down "$PHONE_AP_CON" || true
+fi
+
+log "deleting $PHONE_AP_CON"
+nmcli connection delete "$PHONE_AP_CON" || die "nmcli connection delete failed"
+profile_exists && die "$PHONE_AP_CON still exists after delete"
+log "$PHONE_AP_CON deleted (the phone's saved network is untouched)"
