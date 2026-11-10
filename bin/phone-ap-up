@@ -8,14 +8,27 @@ set -eu
 . "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
 as_root "$@"
 
+here=$(dirname -- "$(readlink -f -- "$0")")
+
+profile_exists() {
+  nmcli -t -f NAME con show 2>/dev/null | grep -qx "$PHONE_AP_CON"
+}
+
 iw list 2>/dev/null | grep -q '\* AP' || die "driver reports no AP mode"
 [ "$(nmcli -g wifi.backend 2>/dev/null || true)" != iwd ] \
   || die "NetworkManager uses iwd; AP mode needs wpa_supplicant"
 [ "$(sysctl -n net.ipv4.ip_forward)" = 1 ] || die "net.ipv4.ip_forward is 0"
-if ! nmcli -t -f NAME con show | grep -qx "$PHONE_AP_CON"; then
-  log "profile $PHONE_AP_CON missing; creating it from $PHONE_SECRETS"
-  "$(dirname -- "$(readlink -f -- "$0")")/phone-ap-create" \
-    || die "could not create profile $PHONE_AP_CON (run phone-ap-create)"
+if ! profile_exists; then
+  if ap_declarative; then
+    log "profile $PHONE_AP_CON missing; reloading it from phoneLink.ap"
+    systemctl restart "$PHONE_AP_ENSURE_UNIT" \
+      || die "could not restart $PHONE_AP_ENSURE_UNIT"
+    profile_exists || die "$PHONE_AP_CON is still missing after the reload"
+  else
+    log "profile $PHONE_AP_CON missing; creating it from $PHONE_SECRETS"
+    "$here/phone-ap-create" \
+      || die "could not create profile $PHONE_AP_CON (run phone-ap-create)"
+  fi
 fi
 
 nmcli connection up "$PHONE_AP_CON"

@@ -20,6 +20,7 @@ confirmation. Needs root.
 EOF
 }
 
+orig_args=("$@")
 assume_yes=0
 check_only=0
 while [ $# -gt 0 ]; do
@@ -44,6 +45,10 @@ if ! profile_exists; then
   exit 0
 fi
 
+if ap_declarative; then
+  log "note: $PHONE_AP_CON is declared by phoneLink.ap; it returns at the next boot"
+fi
+
 device=$(nmcli -t -f NAME,DEVICE con show --active 2>/dev/null \
   | awk -F: -v n="$PHONE_AP_CON" '$1 == n {print $2; exit}')
 
@@ -52,7 +57,7 @@ if [ "$check_only" = 1 ]; then
   exit 0
 fi
 
-as_root "$@"
+as_root "${orig_args[@]}"
 
 if [ "$assume_yes" = 0 ]; then
   if [ -t 0 ]; then

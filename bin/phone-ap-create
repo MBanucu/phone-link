@@ -5,6 +5,10 @@
 # phone-wifi-connect uses -- so it never enters the Nix store or a shell
 # history. NetworkManager keeps the resulting profile root-only.
 #
+# With phoneLink.ap the module owns the profile: there is no nmcli add or
+# modify here, only a restart of NetworkManager-ensure-profiles so the
+# declaration (and a rotated PSK) is reloaded.
+#
 #   phone-ap-create            create phonelink if it is missing
 #   phone-ap-create --refresh  rewrite its settings and PSK (after rotation)
 #   phone-ap-create --check    report the profile and secret, change nothing
@@ -19,9 +23,13 @@ Creates the NetworkManager AP profile $PHONE_AP_CON with the SSID, WPA2 PSK
 and address from PHONE_AP_SSID, PHONE_AP_PASS (in $PHONE_SECRETS) and
 PHONE_AP_ADDRESS. The PSK stays out of the Nix store. --refresh rewrites an
 existing profile, e.g. after rotating the password; --check only reports.
+
+When phoneLink.ap declares the profile, --refresh restarts the
+NetworkManager-ensure-profiles unit instead of editing NetworkManager.
 EOF
 }
 
+orig_args=("$@")
 refresh=0
 check_only=0
 while [ $# -gt 0 ]; do
@@ -47,7 +55,10 @@ if [ "$check_only" = 1 ]; then
   else
     log "$PHONE_AP_CON is missing"
   fi
-  if [ -r "$PHONE_SECRETS" ]; then
+  if ap_declarative; then
+    log "$PHONE_AP_CON is declared by phoneLink.ap"
+    log "PSK source: $PHONE_SECRETS (read by $PHONE_AP_ENSURE_UNIT as root)"
+  elif [ -r "$PHONE_SECRETS" ]; then
     log "PSK source: $PHONE_SECRETS (PHONE_AP_PASS)"
   else
     log "PSK source: $PHONE_SECRETS not readable (run with sudo)"
@@ -56,12 +67,26 @@ if [ "$check_only" = 1 ]; then
   exit 1
 fi
 
+if ap_declarative; then
+  if profile_exists && [ "$refresh" = 0 ]; then
+    log "$PHONE_AP_CON is declared by phoneLink.ap and exists"
+    exit 0
+  fi
+  as_root "${orig_args[@]}"
+  log "reloading $PHONE_AP_CON from phoneLink.ap"
+  systemctl restart "$PHONE_AP_ENSURE_UNIT" \
+    || die "could not restart $PHONE_AP_ENSURE_UNIT"
+  profile_exists || die "$PHONE_AP_CON is still missing after the reload"
+  log "$PHONE_AP_CON reloaded; run phone-ap-up to activate it"
+  exit 0
+fi
+
 if profile_exists && [ "$refresh" = 0 ]; then
   log "$PHONE_AP_CON already exists (use --refresh to rewrite its PSK)"
   exit 0
 fi
 
-as_root "$@"
+as_root "${orig_args[@]}"
 pass=$(phone_ap_pass) || exit 1
 
 if profile_exists; then

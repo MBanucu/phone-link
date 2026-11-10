@@ -9,6 +9,7 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
 export PHONE_SECRETS=$TMP/secrets
+export PHONE_AP_DECLARATIVE=$TMP/ap-profile
 mkdir -p "$LOG" "$STUBS"
 
 pass=0
@@ -43,6 +44,12 @@ EOF
 cat >"$STUBS/sudo" <<'EOF'
 #!/usr/bin/env bash
 exec "$@"
+EOF
+
+cat >"$STUBS/systemctl" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$LOG/actions"
+if [ -f "$LOG/recreate" ]; then printf 'phonelink\n' >"$LOG/names"; fi
 EOF
 
 sed -i "1s|.*|#!$BASH_BIN|" "$STUBS"/*
@@ -101,7 +108,39 @@ rm -f "$LOG/actions"
 if PHONE_SECRETS=$TMP/missing run; then bad "missing secret exits 1"; else ok "missing secret exits 1"; fi
 [ -s "$LOG/actions" ] && bad "missing secret changes nothing" || ok "missing secret changes nothing"
 
-# 6. --help.
+# 6. Declarative: --refresh restarts the ensure unit, never edits NM.
+printf 'phonelink\n' >"$PHONE_AP_DECLARATIVE"
+printf 'phonelink\n' >"$LOG/names"
+rm -f "$LOG/actions"
+if run --refresh; then ok "declarative --refresh exits 0"; else bad "declarative --refresh exits 0" "$(cat "$LOG/out")"; fi
+grep -qx 'restart NetworkManager-ensure-profiles.service' "$LOG/actions" \
+  && ok "restarts the ensure unit" || bad "restarts the ensure unit" "$(cat "$LOG/actions" 2>/dev/null)"
+grep -q '^connection modify' "$LOG/actions" \
+  && bad "declarative --refresh leaves NM alone" || ok "declarative --refresh leaves NM alone"
+
+# 7. Declarative: a missing profile is recreated by the ensure unit.
+printf 'phonelink\n' >"$PHONE_AP_DECLARATIVE"
+: >"$LOG/names"
+: >"$LOG/recreate"
+rm -f "$LOG/actions"
+if run; then ok "declarative create exits 0"; else bad "declarative create exits 0" "$(cat "$LOG/out")"; fi
+grep -qx 'restart NetworkManager-ensure-profiles.service' "$LOG/actions" \
+  && ok "recreates through the ensure unit" || bad "recreates through the ensure unit"
+[ -s "$LOG/names" ] && ok "declarative profile exists afterwards" \
+  || bad "declarative profile exists afterwards"
+rm -f "$LOG/recreate"
+
+# 8. Declarative --check is read-only and names the owner.
+printf 'phonelink\n' >"$PHONE_AP_DECLARATIVE"
+printf 'phonelink\n' >"$LOG/names"
+rm -f "$LOG/actions"
+if run --check; then ok "declarative --check exits 0"; else bad "declarative --check exits 0"; fi
+grep -q 'declared by phoneLink.ap' "$LOG/out" \
+  && ok "reports the declarative owner" || bad "reports the declarative owner" "$(cat "$LOG/out")"
+[ -s "$LOG/actions" ] && bad "declarative --check changes nothing" \
+  || ok "declarative --check changes nothing"
+
+# 9. --help.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"

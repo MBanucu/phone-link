@@ -6,7 +6,8 @@ cable.
 
 - `packages.<system>.phone-link` — the diagnostic/control scripts, with every
   runtime tool wrapped onto their `PATH`
-- `nixosModules.default` — the tunnel plus the access-point firewall holes
+- `nixosModules.default` — the tunnel, the declarative access-point profile and
+  its firewall holes
 - `devShells.default`, `formatter`, `checks`
 - `docs/phone-network.md` — measured behaviour, evidence and the traps
 
@@ -24,6 +25,7 @@ cable.
         {
           phoneLink = {
             enable = true;
+            ap.enable = true;
             apInterface = "wlp110s0";
             proxyHost = "192.168.77.232";
             secretsFile = "/etc/nixos/phone-socks-secrets";
@@ -45,10 +47,15 @@ stopped proxy app cannot blackhole traffic.
 |---|---|---|
 | `phoneLink.enable` | `false` | enable the tunnel, timer and AP firewall holes |
 | `phoneLink.apInterface` | `wlp110s0` | interface of the laptop access point |
+| `phoneLink.ap.enable` | `false` | declare the AP profile from `PHONE_AP_PASS` (requires `phoneLink.enable`) |
+| `phoneLink.ap.name` | `phonelink` | NetworkManager connection name |
+| `phoneLink.ap.ssid` | `PhoneLink` | SSID of the laptop access point |
+| `phoneLink.ap.band` / `channel` | `bg` / `1` | 802.11 band and channel |
+| `phoneLink.ap.address` | `192.168.77.1/24` | IPv4 address of the AP interface |
 | `phoneLink.proxyHost` | `192.168.77.232` | address of the phone's SOCKS proxy |
 | `phoneLink.proxyPort` | `1080` | SOCKS port |
 | `phoneLink.proxyUser` | `proxy` | SOCKS username |
-| `phoneLink.secretsFile` | `/etc/nixos/phone-socks-secrets` | file with `PHONE_SOCKS_PASS=…` |
+| `phoneLink.secretsFile` | `/etc/nixos/phone-socks-secrets` | file with `PHONE_SOCKS_PASS=…` (and `PHONE_AP_PASS=…` with `ap.enable`) |
 | `phoneLink.interfaceName` | `phone-tun` | TUN device name |
 | `phoneLink.tunAddress` | `172.19.0.1/30` | TUN address |
 | `phoneLink.logLevel` | `warn` | sing-box log level |
@@ -97,9 +104,10 @@ Or straight from the checkout: `./bin/phone-net-status`.
 | `phone-wifi-concurrency` | report whether Wi-Fi client and hotspot can run together (STA+AP), read-only; exit 2 if the phone does not say |
 | `phone-unlock` | unlock the lock screen with `PHONE_PIN` from the secrets file (`--check` only reports locked/unlocked) |
 | `phone-ap-create` | create the `phonelink` AP profile from the root-only `PHONE_AP_PASS` secret (`--refresh` rewrites it after a PSK change, `--check` reports) |
-| `phone-ap-delete` | delete the `phonelink` AP profile from NetworkManager, bringing it down first if active (`--check` reports, `--yes` skips the prompt) |
+| `phone-ap-delete` | delete the `phonelink` AP profile from NetworkManager, bringing it down first if active (`--check` reports, `--yes` skips the prompt; a declared profile returns at the next boot) |
 | `phone-ap-up` | preflight the radio, then `nmcli connection up phonelink` |
 | `phone-ap-down` | drop the AP and rejoin the phone's hotspot |
+| `phone-link-uninstall` | remove the AP profile and APK caches after unwiring the module (`--check`, `--yes`, `--keep-cache`); straight from the checkout |
 | `adb-wifi-connect` | connect adb to the phone over TCP |
 | `adb-wifi-connect --prepare` | once over USB: `adb tcpip 5555` (the tether blips) |
 | `phone-adb-wifi` | enable adb over Wi-Fi on the phone: legacy `adb tcpip 5555` and Android 11+ wireless debugging on its random TLS port, then connect (`--legacy`, `--tls`, `--check`) |
@@ -174,7 +182,8 @@ set `phoneLink.proxyHost = "10.244.108.165"`.
 ## One-time setup
 
 The AP profile needs the Wi-Fi PSK, so it is built from the same root-only
-secrets file as the PIN and never enters the Nix store:
+secrets file as the PIN and never enters the Nix store. With the module, set
+`phoneLink.ap.enable = true` and keep `PHONE_AP_PASS` in that file:
 
 ```sh
 install -m600 /dev/null /etc/nixos/phone-socks-secrets
@@ -182,13 +191,43 @@ printf 'PHONE_SOCKS_PASS=%s\nPHONE_PIN=%s\nPHONE_AP_PASS=%s\n' \
   '<proxy password>' '<phone PIN>' '<Wi-Fi PSK>' \
   | sudo tee /etc/nixos/phone-socks-secrets
 
-sudo phone-ap-create     # builds phonelink from PHONE_AP_PASS
-sudo phone-ap-up         # activates it (creates the profile if still missing)
+sudo nixos-rebuild switch   # writes /run/.../phonelink.nmconnection from the secret
+sudo phone-ap-up            # activates the AP
 ```
 
-`phone-ap-create --refresh` rewrites the profile after rotating the PSK.
-NetworkManager stores the profile root-only; it is never part of a Nix store
-path or the flake's closure.
+The generated profile lives in `/run/NetworkManager/system-connections/`; the
+store only holds the `$PHONE_AP_PASS` placeholder. `phone-ap-create --refresh`
+reloads it after rotating the PSK by restarting
+`NetworkManager-ensure-profiles`, rather than editing NetworkManager's copy.
+
+Without the module, `sudo phone-ap-create` still creates a persistent profile
+in `/etc/NetworkManager/system-connections/`, and `--refresh` rewrites it.
+
+If you previously created the profile with `phone-ap-create`, no manual step is
+needed: the ensure unit removes the persistent `/etc` copy before writing the
+declarative one, so only one profile with that name remains. The running AP
+drops with the old profile, so run `sudo phone-ap-up` after the switch.
+
+## Uninstall
+
+Unwiring the module removes the units, firewall holes and installed scripts,
+but NixOS has no uninstall hook for runtime state. Remove `phoneLink` (and the
+package, if you added it) from `configuration.nix`, switch, then run the
+uninstaller from the checkout — the installed scripts are gone by then:
+
+```sh
+sudo nixos-rebuild switch
+sudo ./bin/phone-link-uninstall --yes
+```
+
+It stops any tunnel units still running, deletes the `phonelink` profile from
+NetworkManager and from `/etc`/`/run`, and clears `/var/cache/phone-link` and
+the invoking user's `~/.cache/phone-link`. It keeps
+`/etc/nixos/phone-socks-secrets` and the phone's state, and prints the commands
+to remove those (`phone-wifi-forget PhoneLink`, `phone-proxy-uninstall`). Use
+`--check` to preview and `--keep-cache` to keep the APKs. A reboot is a simpler
+alternative for the profile, but it will not clear the caches or the secrets
+file.
 
 The proxy APK is not vendored (it is not ours to ship), but the app is on
 F-Droid, so the script can use F-Droid as its update channel:

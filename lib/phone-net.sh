@@ -14,6 +14,11 @@ PHONE_AP_CON=${PHONE_AP_CON:-phonelink}
 PHONE_AP_SSID=${PHONE_AP_SSID:-PhoneLink}
 PHONE_AP_IF=${PHONE_AP_IF:-wlp110s0}
 PHONE_AP_ADDRESS=${PHONE_AP_ADDRESS:-192.168.77.1/24}
+# Set by phoneLink.ap when the module owns the profile.
+PHONE_AP_DECLARATIVE=${PHONE_AP_DECLARATIVE:-/etc/phone-link/ap-profile}
+PHONE_AP_ENSURE_UNIT=${PHONE_AP_ENSURE_UNIT:-NetworkManager-ensure-profiles.service}
+PHONE_NM_SYSTEM_CONNECTIONS=${PHONE_NM_SYSTEM_CONNECTIONS:-/etc/NetworkManager/system-connections}
+PHONE_NM_RUN_CONNECTIONS=${PHONE_NM_RUN_CONNECTIONS:-/run/NetworkManager/system-connections}
 PHONE_HOTSPOT_CON=${PHONE_HOTSPOT_CON:-XPLORE 2}
 PHONE_HOTSPOT_SSID=${PHONE_HOTSPOT_SSID:-$PHONE_HOTSPOT_CON}
 PHONE_AP_SUBNET=${PHONE_AP_SUBNET:-192.168.77.0/24}
@@ -49,6 +54,14 @@ phone_ap_pass() {
   # shellcheck disable=SC1090
   . "$PHONE_SECRETS"
   printf '%s' "${PHONE_AP_PASS:?PHONE_AP_PASS missing in $PHONE_SECRETS}"
+}
+
+# ap_declarative -> true when phoneLink.ap declares the AP profile
+ap_declarative() {
+  local name
+  [ -r "$PHONE_AP_DECLARATIVE" ] || return 1
+  IFS= read -r name <"$PHONE_AP_DECLARATIVE" || true
+  [ "$name" = "$PHONE_AP_CON" ]
 }
 
 # phone_proxy_pass -> the proxy password, read from the root-only secrets file

@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# Remove the state phone-link leaves outside the Nix store.
+#
+# Unwiring phoneLink removes the units, firewall holes and package, but NixOS
+# has no uninstall hook: the AP profile, the APK caches and the secrets file
+# are runtime state.  Run this from the checkout *after* the switch, because
+# the installed scripts are gone by then.
+#
+#   phone-link-uninstall --check       report what would be removed
+#   phone-link-uninstall --yes         remove without asking
+#   phone-link-uninstall --keep-cache  keep the cached APKs
+#
+# The secrets file and the phone's own state are deliberately kept; the script
+# prints how to remove them.
+set -eu
+. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
+
+usage() {
+  cat >&2 <<'EOF'
+usage: phone-link-uninstall [--yes] [--check] [--keep-cache]
+
+Stops the phone-link tunnel units, deletes the $PHONE_AP_CON NetworkManager
+profile (including a hand-made copy) and clears /var/cache/phone-link plus the
+invoking user's ~/.cache/phone-link. --check only reports; --yes skips the
+confirmation; --keep-cache leaves the APKs alone. Keep this script in the
+checkout: unwiring the flake removes the installed copy.
+EOF
+}
+
+orig_args=("$@")
+assume_yes=0
+check_only=0
+keep_cache=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    -y | --yes) assume_yes=1 ;;
+    --check) check_only=1 ;;
+    --keep-cache) keep_cache=1 ;;
+    -h | --help) usage; exit 0 ;;
+    *)
+      usage
+      die "unknown argument: $1"
+      ;;
+  esac
+  shift
+done
+
+profile_exists() {
+  nmcli -t -f NAME con show 2>/dev/null | grep -Fxq "$PHONE_AP_CON"
+}
+
+active_device() {
+  nmcli -t -f NAME,DEVICE con show --active 2>/dev/null \
+    | awk -F: -v n="$PHONE_AP_CON" '$1 == n {print $2; exit}'
+}
+
+user_cache() {
+  local home
+  [ -n "${SUDO_USER:-}" ] || return 1
+  home=$(awk -F: -v u="$SUDO_USER" '$1 == u {print $6; exit}' /etc/passwd)
+  [ -n "$home" ] || return 1
+  printf '%s\n' "$home/.cache/phone-link"
+}
+
+if [ "$check_only" = 1 ]; then
+  if profile_exists; then
+    device=$(active_device)
+    log "$PHONE_AP_CON exists${device:+ and is active on $device}"
+  else
+    log "$PHONE_AP_CON is not configured"
+  fi
+  if ap_declarative; then
+    log "phoneLink.ap still declares $PHONE_AP_CON; remove it before uninstalling"
+  fi
+  if [ -d "$PHONE_APK_CACHE" ]; then
+    log "cache $PHONE_APK_CACHE exists"
+  else
+    log "cache $PHONE_APK_CACHE is absent"
+  fi
+  if cache=$(user_cache) && [ -d "$cache" ]; then
+    log "cache $cache exists"
+  fi
+  if [ -r "$PHONE_SECRETS" ]; then
+    log "$PHONE_SECRETS is kept"
+  fi
+  exit 0
+fi
+
+if ap_declarative; then
+  die "phoneLink.ap still declares $PHONE_AP_CON; remove it from configuration.nix and run nixos-rebuild switch first"
+fi
+
+as_root "${orig_args[@]}"
+
+if [ "$assume_yes" = 0 ]; then
+  if [ -t 0 ]; then
+    printf 'Remove the phone-link AP profile and caches? [y/N] ' >&2
+    read -r answer
+    case $answer in
+      y | Y | yes | YES) ;;
+      *)
+        log "aborted"
+        exit 1
+        ;;
+    esac
+  else
+    die "refusing to remove without --yes (not a terminal)"
+  fi
+fi
+
+# Stop the timer before the services it starts, so nothing comes back while the
+# AP is being removed.
+for unit in phone-tun-toggle.timer phone-tun-toggle.service phone-tun.service; do
+  systemctl stop "$unit" 2>/dev/null || true
+done
+
+if profile_exists; then
+  device=$(active_device)
+  if [ -n "$device" ]; then
+    log "bringing $PHONE_AP_CON down (active on $device)"
+    nmcli connection down "$PHONE_AP_CON" || true
+  fi
+  # A declarative and a hand-made profile can share the name; delete until none
+  # is left, then remove any keyfile that NetworkManager did not own.
+  for _ in 1 2 3; do
+    profile_exists || break
+    nmcli connection delete "$PHONE_AP_CON" || break
+  done
+fi
+rm -f "$PHONE_NM_SYSTEM_CONNECTIONS/$PHONE_AP_CON.nmconnection"
+rm -f "$PHONE_NM_RUN_CONNECTIONS/$PHONE_AP_CON.nmconnection"
+nmcli connection reload 2>/dev/null || true
+
+if [ "$keep_cache" = 0 ]; then
+  if [ -e "$PHONE_APK_CACHE" ]; then
+    log "clearing $PHONE_APK_CACHE"
+    rm -rf -- "$PHONE_APK_CACHE"
+  fi
+  if cache=$(user_cache) && [ -d "$cache" ]; then
+    log "clearing $cache"
+    rm -rf -- "$cache"
+  fi
+fi
+
+log "removed $PHONE_AP_CON, stopped the phone-link units and cleared the cache"
+log "kept $PHONE_SECRETS; delete it by hand if its secrets are no longer needed"
+log "phone-side state is untouched; from the checkout run ./bin/phone-wifi-forget PhoneLink and ./bin/phone-proxy-uninstall"

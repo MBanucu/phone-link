@@ -29,6 +29,7 @@
         "phone-fix-internet"
         "phone-fix-mobile-data"
         "phone-fix-tunnel"
+        "phone-link-uninstall"
         "phone-net-status"
         "phone-proxy-battery-whitelist"
         "phone-proxy-check"
@@ -150,6 +151,19 @@
             }
           ];
           off = evalModule [ ];
+          apOn = evalModule [
+            {
+              networking.networkmanager.enable = true;
+              phoneLink = {
+                enable = true;
+                ap = {
+                  enable = true;
+                  ssid = "TestLink";
+                  address = "192.168.99.1/24";
+                };
+              };
+            }
+          ];
           # A path with context, so the check builds the generated config.
           tunnelConfig = on.phoneLink.configFile;
         in
@@ -216,6 +230,32 @@
             assert lib.assertMsg (
               !(off.systemd.services ? phone-tun)
             ) "the module must define nothing unless enabled";
+            assert lib.assertMsg (
+              apOn.networking.networkmanager.ensureProfiles.profiles ? phonelink
+            ) "ap.enable must declare the phonelink profile";
+            assert lib.assertMsg (
+              apOn.networking.networkmanager.ensureProfiles.profiles.phonelink.wifi-security.psk
+              == "$PHONE_AP_PASS"
+            ) "the AP profile must keep the PSK out of the store";
+            assert lib.assertMsg (
+              apOn.networking.networkmanager.ensureProfiles.environmentFiles
+              == [ "/etc/nixos/phone-socks-secrets" ]
+            ) "the AP profile must read the secrets file";
+            assert lib.assertMsg (
+              apOn.networking.networkmanager.ensureProfiles.profiles.phonelink.wifi.ssid == "TestLink"
+            ) "ap.ssid must reach the profile";
+            assert lib.assertMsg (
+              apOn.networking.networkmanager.ensureProfiles.profiles.phonelink.ipv4.address1 == "192.168.99.1/24"
+            ) "ap.address must reach the profile";
+            assert lib.assertMsg
+              (lib.hasInfix "phonelink.nmconnection" apOn.systemd.services.NetworkManager-ensure-profiles.script)
+              "ensure-profiles must write the AP keyfile";
+            assert lib.assertMsg
+              (lib.hasInfix "phonelink.nmconnection" apOn.systemd.services.NetworkManager-ensure-profiles.preStart)
+              "ensure-profiles must migrate a hand-made profile";
+            assert lib.assertMsg (
+              !(on.networking.networkmanager.ensureProfiles.profiles ? phonelink)
+            ) "the AP profile must be opt-in";
             pkgs.runCommand "phone-link-module-check" { } ''
               grep -q '"server": "10.9.9.9"' ${tunnelConfig}
               grep -q '"server_port": 1081' ${tunnelConfig}

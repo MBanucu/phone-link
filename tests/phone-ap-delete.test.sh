@@ -8,6 +8,7 @@ SCRIPT=$ROOT/bin/phone-ap-delete
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
+export PHONE_AP_DECLARATIVE=$TMP/ap-profile
 mkdir -p "$LOG" "$STUBS"
 
 pass=0
@@ -94,7 +95,18 @@ rm -f "$LOG/actions"
 if run >/dev/null 2>&1; then bad "no --yes exits 1"; else ok "no --yes exits 1"; fi
 [ -s "$LOG/actions" ] && bad "no --yes deletes nothing" || ok "no --yes deletes nothing"
 
-# 6. --help.
+# 6. A declarative profile is reported while checking.
+printf 'phonelink\n' >"$PHONE_AP_DECLARATIVE"
+printf 'phonelink\n' >"$LOG/names"
+: >"$LOG/active"
+rm -f "$LOG/actions"
+if run --check; then ok "declarative --check exits 0"; else bad "declarative --check exits 0"; fi
+grep -q 'declared by phoneLink.ap' "$LOG/out" \
+  && ok "reports the declarative owner" || bad "reports the declarative owner" "$(cat "$LOG/out")"
+[ -s "$LOG/actions" ] && bad "declarative --check changes nothing" \
+  || ok "declarative --check changes nothing"
+
+# 7. --help.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
