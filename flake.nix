@@ -17,6 +17,7 @@
       scripts = [
         "adb-wifi-connect"
         "net-check"
+        "phone-adb-wifi"
         "phone-ap-down"
         "phone-ap-up"
         "phone-net-status"

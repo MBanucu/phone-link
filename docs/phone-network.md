@@ -96,3 +96,9 @@ adb -s 10.244.108.165:5555 shell echo -> OK
 - `mdnsd` runs on the phone; it advertises `_adb._tcp` with hostname
   `Android.local`, but only on the interface of its active network (seen on the
   tether, not on the AP/hotspot side). Laptop side: `avahi-browse -art` finds it.
+- Wireless debugging (Android 11+) works headlessly here: `settings put global
+  adb_wifi_enabled 1` starts a TLS adbd on a random port, advertised as
+  `_adb-tls-connect._tcp` with that port, which `avahi-browse -rt` reads. The
+  host's key is already trusted, so `adb connect` needs no pairing. `adb tcpip
+  5555` restarts adbd and leaves wireless debugging on with a new random port,
+  so both listeners work at once.

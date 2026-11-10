@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+# Turn on adb over Wi-Fi on the phone: the legacy TCP port and Android 11+
+# wireless debugging, which listens with TLS on a random port.
+#
+#   phone-adb-wifi            # enable both, connect, report
+#   phone-adb-wifi --legacy   # only `adb tcpip 5555`
+#   phone-adb-wifi --tls      # only wireless debugging
+#   phone-adb-wifi --check    # report only, change nothing
+#
+# `adb tcpip` restarts adbd, so the USB adb session and the USB tether blip,
+# and wireless debugging picks a new random port. Wireless debugging is the
+# `adb_wifi_enabled` global setting; because its port is random and only
+# advertised over mDNS, it is read with avahi-browse. A host that has never
+# paired must pair once in Settings (Wireless debugging -> Pair device with
+# pairing code); this host's USB key is already trusted.
+set -eu
+. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
+
+usage() {
+  cat >&2 <<'EOF'
+usage: phone-adb-wifi [--legacy | --tls] [--check]
+
+Enables adb over Wi-Fi: the legacy `adb tcpip 5555` listener and Android 11+
+wireless debugging on its random TLS port, then connects to both. --legacy or
+--tls picks one; --check only reports the current state.
+EOF
+}
+
+legacy=0
+tls=0
+mode_given=0
+check_only=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --legacy)
+      if [ "$mode_given" -eq 0 ]; then
+        legacy=0
+        tls=0
+        mode_given=1
+      fi
+      legacy=1
+      ;;
+    --tls)
+      if [ "$mode_given" -eq 0 ]; then
+        legacy=0
+        tls=0
+        mode_given=1
+      fi
+      tls=1
+      ;;
+    --check) check_only=1 ;;
+    -h | --help) usage; exit 0 ;;
+    *)
+      usage
+      die "unknown argument: $1"
+      ;;
+  esac
+  shift
+done
+if [ "$mode_given" -eq 0 ]; then
+  legacy=1
+  tls=1
+fi
+
+serial=$(phone_serial) || die "no phone attached (see adb devices)"
+have avahi-browse || log "warning: avahi-browse is missing, cannot read the wireless debugging port"
+
+wifi_debugging() {
+  adb -s "$serial" shell settings get global adb_wifi_enabled 2>/dev/null \
+    | tr -d '\r' | head -1 || true
+}
+legacy_port() {
+  adb -s "$serial" shell getprop service.adb.tcp.port 2>/dev/null \
+    | tr -d '\r' | head -1 || true
+}
+
+# The TLS port is random and not exported as a property; adbd advertises it
+# over mDNS as adb-<serial>-<random>._adb-tls-connect._tcp.
+tls_endpoint() {
+  have avahi-browse || return 1
+  found=$(timeout 12 avahi-browse -rt _adb-tls-connect._tcp 2>/dev/null | awk -v s="adb-$serial" '
+    /^=/ && /IPv4/ && index($0, s) { seen = 1; next }
+    seen && /address = \[/ { ip = $0; sub(/.*\[/, "", ip); sub(/\].*/, "", ip) }
+    seen && /port = \[/ { p = $0; sub(/.*\[/, "", p); sub(/\].*/, "", p) }
+    seen && ip != "" && p != "" { print ip ":" p; exit }')
+  [ -n "$found" ] || return 1
+  printf '%s\n' "$found"
+}
+
+if [ "$check_only" -eq 1 ]; then
+  wifi=$(wifi_debugging)
+  tcp=$(legacy_port)
+  log "wireless debugging: ${wifi:-unknown}"
+  log "legacy tcp port:  ${tcp:-not set}"
+  if endpoint=$(tls_endpoint); then
+    log "tls endpoint:     $endpoint"
+  else
+    log "tls endpoint:     not advertised"
+  fi
+  adb devices
+  exit 0
+fi
+
+ips=$(phone_ips 2>/dev/null || true)
+
+if [ "$tls" -eq 1 ]; then
+  if [ "$(wifi_debugging)" = 1 ]; then
+    log "wireless debugging already enabled"
+  else
+    adb -s "$serial" shell settings put global adb_wifi_enabled 1 >/dev/null
+    log "enabled wireless debugging (random TLS port)"
+  fi
+fi
+
+if [ "$legacy" -eq 1 ]; then
+  if [ "$(legacy_port)" = "$PHONE_ADB_PORT" ]; then
+    log "legacy adbd already on $PHONE_ADB_PORT"
+  else
+    log "warning: adb tcpip $PHONE_ADB_PORT restarts adbd (USB adb and the tether blip)"
+    adb -s "$serial" tcpip "$PHONE_ADB_PORT" >/dev/null || die "adb tcpip failed"
+    sleep 2
+  fi
+  connected=0
+  for ip in $(printf '%s\n%s\n%s\n' "$ips" "$PHONE_HOTSPOT_IP" "$PHONE_AP_IP" \
+    | awk 'NF && !seen[$0]++'); do
+    target=$ip:$PHONE_ADB_PORT
+    timeout 15 adb connect "$target" >/dev/null 2>&1 || continue
+    if [ "$(adb -s "$target" get-state 2>/dev/null)" = device ]; then
+      log "legacy adb on $target"
+      connected=1
+      break
+    fi
+  done
+  [ "$connected" -eq 1 ] || die "no phone address answered on $PHONE_ADB_PORT"
+fi
+
+if [ "$tls" -eq 1 ]; then
+  # adbd may still advertise the old port for a moment after a restart, so
+  # reconnect until one of the advertised endpoints really accepts adb.
+  tls_ok=0
+  tries=0
+  while [ "$tries" -lt 8 ]; do
+    endpoint=$(tls_endpoint || true)
+    if [ -n "$endpoint" ]; then
+      timeout 15 adb connect "$endpoint" >/dev/null 2>&1 || true
+      if [ "$(adb -s "$endpoint" get-state 2>/dev/null)" = device ]; then
+        log "wireless debugging on $endpoint"
+        tls_ok=1
+        break
+      fi
+    fi
+    tries=$((tries + 1))
+    sleep 2
+  done
+  if [ "$tls_ok" -eq 0 ]; then
+    [ "$legacy" -eq 1 ] || die "wireless debugging did not become reachable"
+    log "warning: wireless debugging is on but no TLS port accepted adb"
+  fi
+fi
+
+adb devices
