@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# Disable USB tethering, run the internet health check, enable USB tethering
+# again and report what happened.
+#
+#   phone-tether-cycle            # asks first
+#   phone-tether-cycle --yes      # no prompt
+#
+# adb stays up while tethering is off (functions "adb"), so the phone is still
+# reachable to switch RNDIS back on. If the tether is the laptop's only uplink,
+# the laptop loses internet for the duration of the health check; a trap puts
+# RNDIS back even when the script is interrupted.
+set -eu
+. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
+
+usage() {
+  cat >&2 <<'EOF'
+usage: phone-tether-cycle [--yes]
+
+Removes RNDIS (keeping adb), runs net-check, restores RNDIS with
+phone-usb-tether-default and verifies phone-usb-tether-check. --yes skips the
+prompt.
+EOF
+}
+
+yes=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --yes) yes=1 ;;
+    -h | --help) usage; exit 0 ;;
+    *)
+      usage
+      die "unknown argument: $1"
+      ;;
+  esac
+  shift
+done
+
+here=$(dirname -- "$(readlink -f -- "$0")")
+net_check=${PHONE_NET_CHECK:-$here/net-check}
+tether_default=${PHONE_TETHER_DEFAULT:-$here/phone-usb-tether-default}
+tether_check=${PHONE_TETHER_CHECK:-$here/phone-usb-tether-check}
+for tool in "$net_check" "$tether_default" "$tether_check"; do
+  [ -x "$tool" ] || die "missing helper: $tool"
+done
+
+serial=$(phone_serial) || die "no phone attached (see adb devices)"
+
+usb_config() {
+  adb -s "$serial" shell getprop sys.usb.config 2>/dev/null | tr -d '\r' | head -1
+}
+has_rndis() {
+  printf '%s' "$1" | grep -qi rndis
+}
+
+if [ "$yes" -eq 0 ]; then
+  printf 'Disable USB tethering briefly on %s? [y/N] ' "$serial" >&2
+  answer=""
+  read -r answer </dev/tty || answer=""
+  case $answer in
+    y | Y | yes | YES) ;;
+    *) die "aborted" ;;
+  esac
+fi
+
+restored=0
+restore() {
+  [ "$restored" -eq 1 ] && return 0
+  log "restoring USB tethering"
+  if "$tether_default" >/dev/null 2>&1; then
+    restored=1
+  else
+    log "warning: phone-usb-tether-default failed"
+  fi
+}
+trap 'restore; exit 130' INT TERM
+trap 'if [ "$restored" -eq 0 ]; then restore; fi' EXIT
+
+current=$(usb_config)
+if has_rndis "$current"; then
+  log "disabling USB tethering (adb stays up)"
+  adb -s "$serial" shell svc usb setFunctions adb >/dev/null
+  tries=0
+  while has_rndis "$(usb_config)"; do
+    sleep 1
+    tries=$((tries + 1))
+    [ "$tries" -lt 10 ] || die "USB tethering did not turn off (usb=$(usb_config))"
+  done
+  off_config=$(usb_config)
+else
+  off_config=$current
+  log "USB tethering was already off (usb=$current)"
+fi
+
+log "running the internet health check"
+health=0
+health_out=$("$net_check" 2>&1) || health=$?
+printf '%s\n' "$health_out" | sed 's/^/  /' >&2
+
+log "enabling USB tethering again"
+"$tether_default" >/dev/null
+
+log "waiting for the tether route"
+healthy=0
+tries=0
+while [ $tries -lt 6 ]; do
+  if "$tether_check" >/dev/null 2>&1; then
+    healthy=1
+    break
+  fi
+  sleep 3
+  tries=$((tries + 1))
+done
+[ "$healthy" -eq 1 ] || die "USB tethering was enabled but its route is not healthy"
+restored=1
+
+log "tether cycle: off (usb=$off_config), health check exit $health, on (usb=$(usb_config), route healthy)"
+if [ "$health" -eq 0 ]; then
+  log "the laptop kept internet while tethering was off"
+else
+  log "the laptop had no internet while tethering was off (expected when the tether is the uplink)"
+fi

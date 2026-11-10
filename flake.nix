@@ -29,6 +29,7 @@
         "phone-proxy-stop"
         "phone-proxy-uninstall"
         "phone-reboot-unlock"
+        "phone-tether-cycle"
         "phone-tunnel-run"
         "phone-unlock"
         "phone-usb-tether-check"
