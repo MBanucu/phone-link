@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# Stop the phone's SOCKS proxy by tapping the app's own Stop button.
+#
+#   phone-proxy-stop            unlock, open the app, tap Stop, wait for it
+#   phone-proxy-stop --check    report running or stopped, change nothing
+#
+# The proxy is a foreground service the shell cannot stop directly, so the UI
+# tap is the way. If the phone is locked, phone-unlock needs the PIN: export
+# PHONE_PIN or run this with sudo.
+set -eu
+. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
+. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-ui.sh"
+
+usage() {
+  cat >&2 <<'EOF'
+usage: phone-proxy-stop [--check]
+
+Opens the proxy app and taps Stop, then waits until it reports stopped.
+--check only reports whether the proxy is running.
+EOF
+}
+
+check_only=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --check) check_only=1 ;;
+    -h | --help) usage; exit 0 ;;
+    *)
+      usage
+      die "unknown argument: $1"
+      ;;
+  esac
+  shift
+done
+
+# Two adb transports (USB and Wi-Fi) are normal here, so pin every command.
+serial=$(phone_serial) || die "no phone attached (see adb devices)"
+
+if ! adb -s "$serial" shell pm path "$PHONE_PROXY_PKG" 2>/dev/null | grep -q '^package:'; then
+  die "$PHONE_PROXY_PKG is not installed; run phone-proxy-install first"
+fi
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+ui=$tmp/ui.xml
+
+# --check is read-only and does not unlock, so fail fast on a locked phone.
+if [ "$check_only" = 1 ] && phone_ui_keyguard "$serial"; then
+  die "phone is locked; run phone-unlock, then this again"
+fi
+
+unlock_bin=""
+if [ "$check_only" = 0 ]; then
+  unlock_bin=$(phone_ui_unlock_bin) || die "phone-unlock not found next to this script or in PATH"
+  "$unlock_bin"
+fi
+
+phone_ui_launch "$serial"
+tries=0
+while [ $tries -lt 10 ]; do
+  phone_ui_dump "$serial" "$ui" && break
+  tries=$((tries + 1))
+  sleep 1
+  adb -s "$serial" shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
+  if [ -n "$unlock_bin" ]; then
+    "$unlock_bin" >/dev/null 2>&1 || true
+  fi
+  phone_ui_launch "$serial"
+done
+if [ $tries -ge 10 ]; then
+  if [ "$check_only" = 1 ] && phone_ui_keyguard "$serial"; then
+    die "phone is locked; run phone-unlock, then this again"
+  fi
+  die "cannot read the app UI (unlock with phone-unlock and install the app)"
+fi
+
+stop_button=$(phone_ui_button "$ui" 'Stop Proxy Service')
+if [ -z "$stop_button" ]; then
+  log "proxy is not running"
+  exit 0
+fi
+
+if [ "$check_only" = 1 ]; then
+  log "proxy is running"
+  exit 1
+fi
+
+read -r bx by _ <<<"$stop_button"
+log "tapping Stop"
+adb -s "$serial" shell input tap "$bx" "$by"
+
+tries=0
+while [ $tries -lt 20 ]; do
+  sleep 1
+  tries=$((tries + 1))
+  phone_ui_dump "$serial" "$ui" || continue
+  if [ -n "$(phone_ui_button "$ui" 'Start 5G Proxy')" ]; then
+    log "proxy stopped"
+    exit 0
+  fi
+done
+
+die "proxy did not stop (still showing Stop)"

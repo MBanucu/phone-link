@@ -59,8 +59,12 @@ adb_transport() {
 
 # phone_serial -> serial of any attached device (USB or network)
 phone_serial() {
-  adb devices 2>/dev/null \
-    | awk '$2 == "device" {print $1; found = 1} END {exit found ? 0 : 1}' | head -1
+  local serial
+  # Capture first: piping into head would mask awk's failure status and leave
+  # callers with an empty serial instead of "no phone attached".
+  serial=$(adb devices 2>/dev/null | awk '$2 == "device" {print $1; exit}')
+  [ -n "$serial" ] || return 1
+  printf '%s\n' "$serial"
 }
 
 # phone_ips -> every non-loopback IPv4 address the phone currently owns

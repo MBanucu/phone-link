@@ -24,9 +24,12 @@
         "phone-proxy-data-clear"
         "phone-proxy-install"
         "phone-proxy-setup"
+        "phone-proxy-start"
+        "phone-proxy-stop"
         "phone-proxy-uninstall"
         "phone-tunnel-run"
         "phone-unlock"
+        "phone-wifi-concurrency"
       ];
 
       # Everything the scripts call at runtime.  The wrappers put these on PATH,
@@ -71,6 +74,7 @@
               ''
                 mkdir -p "$out/bin"
                 install -Dm644 ${./lib/phone-net.sh} "$out/share/phone-link/lib/phone-net.sh"
+                install -Dm644 ${./lib/phone-ui.sh} "$out/share/phone-link/lib/phone-ui.sh"
                 ${lib.concatMapStringsSep "\n" (name: ''
                   install -Dm755 ${./bin}/${name} "$out/share/phone-link/bin/${name}"
                   # Point the shebang at the store bash: /usr/bin/env does not
@@ -153,7 +157,7 @@
           '';
 
           shellcheck = pkgs.runCommand "phone-link-shellcheck" { nativeBuildInputs = [ pkgs.shellcheck ]; } ''
-            shellcheck -S warning ${./bin}/* ${./lib}/phone-net.sh
+              shellcheck -S warning ${./bin}/* ${./lib}/*.sh
             touch $out
           '';
 
