@@ -2,6 +2,10 @@ result
 result-*
 .direnv/
 
+# the wrappers set PYTHONDONTWRITEBYTECODE, but a local python3 run may not
+__pycache__/
+*.pyc
+
 # proxy APK backups (not ours to redistribute)
 apk/
 *.apk

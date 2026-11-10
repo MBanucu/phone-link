@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# CLI half of the shared action registry: list, run and check the same actions
+# the GUI shows. The core lives in ../lib/python/phone_link (checkout) or
+# ../share/phone-link/lib/python (store install).
+set -eu
+
+here=$(dirname -- "$(readlink -f -- "$0")")
+for candidate in "$here/../lib/python" "$here/../share/phone-link/lib/python"; do
+  if [ -d "$candidate/phone_link" ]; then
+    export PYTHONPATH="$candidate${PYTHONPATH:+:$PYTHONPATH}"
+    break
+  fi
+done
+export PYTHONDONTWRITEBYTECODE=1
+exec python3 -m phone_link "$@"

@@ -1,0 +1,183 @@
+"""The status page: phone-doctor's findings, rendered from its JSON report."""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import threading
+
+from gi.repository import Adw, GLib, Gtk
+
+from phone_link import actions as registry
+from phone_link.runner import stream
+
+SECTION_TITLES = {
+    "[flake]": "Flake",
+    "[host]": "Host",
+    "[phone]": "Phone",
+    "[secrets]": "Secrets",
+    "[proxy]": "Proxy",
+    "[tunnel]": "Tunnel",
+    "[usb tether]": "USB tether",
+    "[internet]": "Internet",
+    "[adb over wi-fi]": "adb over Wi-Fi",
+}
+
+STATUS_ICONS = {
+    "ok": ("object-select-symbolic", "success"),
+    "warn": ("dialog-warning-symbolic", "warning"),
+    "fail": ("dialog-error-symbolic", "error"),
+    "skip": ("action-unavailable-symbolic", "dim-label"),
+}
+
+AUTH_PROBLEMS = {"secrets", "ap_pass", "proxy_request"}
+
+
+class ProbeError(RuntimeError):
+    """The doctor could not be run or did not answer with JSON."""
+
+
+def probe(*, escalate: bool = False) -> dict:
+    """Run `phone-doctor --json`, as the user or through pkexec."""
+    exe = registry.doctor_bin()
+    if not exe:
+        raise ProbeError("phone-doctor not found on PATH")
+    argv = [exe, "--json"]
+    if escalate and os.geteuid() != 0:
+        pkexec = shutil.which("pkexec")
+        if not pkexec:
+            raise ProbeError("pkexec not found; start the app in a desktop session")
+        argv = [pkexec, *argv]
+
+    outcome = stream(argv, timeout=180)
+    if outcome.error:
+        raise ProbeError(outcome.error)
+    body = outcome.text().strip()
+    if not body:
+        raise ProbeError(f"phone-doctor printed nothing (exit {outcome.exit_code})")
+    try:
+        return json.loads(body)
+    except ValueError as exc:
+        raise ProbeError(f"phone-doctor did not return JSON: {exc}") from exc
+
+
+class StatusPage(Gtk.Box):
+    def __init__(self, window):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self._window = window
+        self._busy = False
+        self._groups: list[Adw.PreferencesGroup] = []
+
+        self._banner = Adw.Banner(
+            title="Secrets are root-only; some checks need authentication.",
+            button_label="Authenticate",
+        )
+        self._banner.set_revealed(False)
+        self._banner.connect("button-clicked", self._on_authenticate)
+        self.append(self._banner)
+
+        self._page = Adw.PreferencesPage()
+        self._page.set_vexpand(True)
+        self.append(self._page)
+
+    # -- probing -------------------------------------------------------
+    def refresh(self, *, escalate: bool = False) -> None:
+        if self._busy:
+            return
+        self._busy = True
+        self._banner.set_revealed(False)
+        self._window.set_status_busy(True)
+        threading.Thread(target=self._probe, args=(escalate,), daemon=True).start()
+
+    def refresh_if_idle(self) -> None:
+        if not self._busy:
+            self.refresh()
+
+    def _probe(self, escalate: bool) -> None:
+        data = None
+        error = ""
+        try:
+            data = probe(escalate=escalate)
+        except Exception as exc:  # the page reports any failure as a toast
+            error = str(exc)
+        GLib.idle_add(self._apply, data, error)
+
+    def _apply(self, data, error) -> bool:
+        self._busy = False
+        self._window.set_status_busy(False)
+        if error:
+            self._window.report_error("Status probe failed", error)
+            return False
+        self._render(data)
+        self._window.report_status(data)
+        self._show_auth_banner(data)
+        return False
+
+    def _on_authenticate(self, _banner) -> None:
+        self.refresh(escalate=True)
+
+    # -- rendering -----------------------------------------------------
+    def _render(self, data: dict) -> None:
+        for group in self._groups:
+            self._page.remove(group)
+        self._groups.clear()
+
+        counts = data.get("counts", {})
+        ready = bool(data.get("ready"))
+        summary = Adw.PreferencesGroup(title="Verdict")
+        row = Adw.ActionRow(
+            title="ready" if ready else "not ready",
+            subtitle=(
+                f"{counts.get('ok', 0)} ok · {counts.get('fail', 0)} failed · "
+                f"{counts.get('warn', 0)} warnings · {counts.get('skip', 0)} skipped"
+            ),
+        )
+        icon = Gtk.Image.new_from_icon_name(
+            "object-select-symbolic" if ready else "dialog-error-symbolic"
+        )
+        icon.add_css_class("success" if ready else "error")
+        row.add_prefix(icon)
+        button = Gtk.Button(label="Run status", valign=Gtk.Align.CENTER)
+        button.connect(
+            "clicked",
+            lambda _b: self._window.start_action(registry.BY_ID["phone-net-status"]),
+        )
+        row.add_suffix(button)
+        summary.add(row)
+        self._page.add(summary)
+        self._groups.append(summary)
+
+        for section in data.get("sections", []):
+            name = section.get("name", "")
+            title = SECTION_TITLES.get(name) or name.strip("[]").title()
+            group = Adw.PreferencesGroup(title=title)
+            for result in section.get("results", []):
+                group.add(self._row(result))
+            self._page.add(group)
+            self._groups.append(group)
+
+    def _row(self, result: dict) -> Adw.ActionRow:
+        status = result.get("status", "skip")
+        icon_name, css = STATUS_ICONS.get(status, STATUS_ICONS["skip"])
+        row = Adw.ActionRow(
+            title=result.get("label", ""),
+            subtitle=result.get("detail", ""),
+        )
+        row.set_subtitle_selectable(True)
+        icon = Gtk.Image.new_from_icon_name(icon_name)
+        icon.add_css_class(css)
+        row.add_prefix(icon)
+        return row
+
+    def _show_auth_banner(self, data: dict) -> None:
+        if os.geteuid() == 0:
+            self._banner.set_revealed(False)
+            return
+        failing = {
+            result.get("id")
+            for section in data.get("sections", [])
+            for result in section.get("results", [])
+            if result.get("status") == "fail"
+        }
+        self._banner.set_revealed(bool(failing & AUTH_PROBLEMS))

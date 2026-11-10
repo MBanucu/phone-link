@@ -122,12 +122,41 @@ module per symptom group (`flake`, `host`, `phone`, `secrets`, `proxy`,
 `phone_ips`, `adb_transport`, …); source it so addresses and ports live in one
 place.
 
+## GUI
+
+`packages.<system>.phone-link-gui` is a GTK4/libadwaita control panel for the
+same setup. It reads the doctor's `--json` report for its status page and runs
+the scripts with the flags declared in `lib/python/phone_link/actions.py`:
+
+```sh
+nix run .#gui            # or: nix build .#phone-link-gui, then phone-link-gui
+```
+
+Every action has its `--check` preview plus its variants (F-Droid install,
+tunnel through `adb reverse`, legacy adb port, keep-cache uninstall, …) in the
+row's menu, and the output streams into a log window exactly as the script
+printed it, exit status included. Nothing is reimplemented: `phone_link.actions`
+decides the argv and `phone_link.runner` streams it for both the GUI and
+`phone-link run`, and the `registry` check fails when a script exists in `bin/`
+without an action entry.
+
+Actions that need root go through `pkexec`, so they run from the desktop session
+with one password prompt; the status banner offers the same for the root-only
+secrets, which otherwise show as unreadable. The layout collapses to a single
+pane below 720sp, so a narrow window or a touch screen still works.
+
+`phone-link list` and `phone-link run <id> [--check] [--yes]` are the CLI half of
+the same table, and `phone-link status` prints the doctor's JSON.
+
 ## Checks
 
-`nix flake check` runs five checks per system:
+`nix flake check` runs these checks per system:
 
 | check | what it proves |
 |---|---|
+| `registry` | every script in `flake.nix` has an action in the GUI's table, and every action has an executable script |
+| `gui-registry` | the packaged GUI imports GTK4/libadwaita and its table matches the scripts |
+| `gui` | the real window, every page and the log window construct under Xvfb |
 | `package` | every script in the flake exists, is executable, kept its wrapped `PATH`, and `phone-net-status` prints a status |
 | `shellcheck` | every script and `lib/phone-net.sh` is clean at shellcheck warning level |
 | `format` | `flake.nix` and `modules/phone-link.nix` are nixfmt-clean |

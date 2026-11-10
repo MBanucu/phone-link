@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=phone-link
+GenericName=Phone uplink control
+Comment=Tunnel, access point and adb control for the phone link
+Exec=phone-link-gui
+Icon=phone-link-gui
+Terminal=false
+Categories=Network;Utility;System;
+Keywords=phone;tether;adb;proxy;wifi;
+StartupNotify=true

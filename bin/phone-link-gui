@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Launch the GTK4/libadwaita control panel. The Python packages live in
+# ../lib/python (checkout) or ../share/phone-link-gui/lib/python (store).
+set -eu
+
+here=$(dirname -- "$(readlink -f -- "$0")")
+for candidate in "$here/../lib/python" "$here/../share/phone-link-gui/lib/python"; do
+  if [ -d "$candidate/phone_link_gui" ]; then
+    export PYTHONPATH="$candidate${PYTHONPATH:+:$PYTHONPATH}"
+    break
+  fi
+done
+export PYTHONDONTWRITEBYTECODE=1
+exec python3 -m phone_link_gui "$@"

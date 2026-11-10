@@ -51,6 +51,11 @@
         "phone-wifi-forget"
       ];
 
+      # Installed next to the scripts but deliberately outside the registry:
+      # the registry check requires exactly one action per script, and these
+      # two are the shared-core CLI and the GUI itself.
+      coreScripts = [ "phone-link" ];
+
       # Everything the scripts call at runtime.  The wrappers put these on PATH,
       # so a script behaves the same from the store and from a checkout.
       runtimeDeps =
@@ -98,8 +103,14 @@
                 # It must live under lib/python so the checkout-relative
                 # PYTHONPATH in bin/phone-doctor also works from the store.
                 mkdir -p "$out/share/phone-link/lib/python"
-                cp -r ${./lib/python}/phone_doctor "$out/share/phone-link/lib/python/phone_doctor"
-                find "$out/share/phone-link/lib/python/phone_doctor" -name __pycache__ \
+                # phone_doctor is the doctor; phone_link is the action registry
+                # and runner that `phone-link` and the GUI both read.
+                cp -r ${./lib/python}/phone_doctor ${./lib/python}/phone_link \
+                  "$out/share/phone-link/lib/python/"
+                # A checkout may carry bytecode; the copy is read-only, so make
+                # it writable before pruning what should never be installed.
+                chmod -R u+w "$out/share/phone-link/lib/python"
+                find "$out/share/phone-link/lib/python" -name __pycache__ \
                   -type d -exec rm -rf {} +
                 ${lib.concatMapStringsSep "\n" (name: ''
                   install -Dm755 ${./bin}/${name} "$out/share/phone-link/bin/${name}"
@@ -109,10 +120,74 @@
                   wrapProgram "$out/share/phone-link/bin/${name}" \
                     --prefix PATH : ${lib.makeBinPath deps}
                   ln -s "$out/share/phone-link/bin/${name}" "$out/bin/${name}"
-                '') scripts}
+                '') (scripts ++ coreScripts)}
               '';
 
           default = phone-link;
+
+          # The desktop shell: the same actions as the scripts, plus the
+          # doctor's findings. It ships the phone-link package for the actions
+          # themselves, so the GUI never reimplements one.
+          phone-link-gui =
+            let
+              guiPython = pkgs.python3.withPackages (ps: [ ps.pygobject3 ]);
+              # makeSearchPath resolves multi-output packages to their "bin"
+              # output, which is not where the typelibs are; ask for "out".
+              typelibs = lib.makeSearchPathOutput "out" "lib/girepository-1.0" [
+                pkgs.gtk4
+                pkgs.libadwaita
+                # cairo-1.0.typelib lives here, not in cairo
+                pkgs.gobject-introspection
+                pkgs.glib
+                pkgs.pango
+                pkgs.cairo
+                pkgs.gdk-pixbuf
+                pkgs.graphene
+                pkgs.harfbuzz
+              ];
+              dataDirs = lib.makeSearchPathOutput "out" "share" [
+                pkgs.gtk4
+                pkgs.libadwaita
+                pkgs.adwaita-icon-theme
+                pkgs.hicolor-icon-theme
+                pkgs.shared-mime-info
+                # glib finds its schemas under $XDG_DATA_DIRS/glib-2.0/schemas
+                pkgs.gsettings-desktop-schemas
+              ];
+            in
+            pkgs.runCommand "phone-link-gui-${version}"
+              {
+                nativeBuildInputs = [ pkgs.makeWrapper ];
+                meta = {
+                  description = "GTK4/libadwaita control panel for the phone link";
+                  license = lib.licenses.mit;
+                  platforms = systems;
+                  mainProgram = "phone-link-gui";
+                };
+              }
+              ''
+                mkdir -p "$out/share/phone-link-gui/lib/python"
+                cp -r ${./lib/python}/phone_link ${./lib/python}/phone_doctor \
+                  ${./lib/python}/phone_link_gui "$out/share/phone-link-gui/lib/python/"
+                chmod -R u+w "$out/share/phone-link-gui/lib/python"
+                find "$out/share/phone-link-gui/lib/python" -name __pycache__ \
+                  -type d -exec rm -rf {} +
+                install -Dm755 ${./bin}/phone-link-gui "$out/bin/phone-link-gui"
+                patchShebangs "$out/bin/phone-link-gui"
+                wrapProgram "$out/bin/phone-link-gui" \
+                  --prefix PATH : ${
+                    lib.makeBinPath [
+                      phone-link
+                      guiPython
+                    ]
+                  } \
+                  --prefix GI_TYPELIB_PATH : ${typelibs} \
+                  --prefix XDG_DATA_DIRS : ${dataDirs}
+                install -Dm644 ${./gui}/phone-link-gui.desktop \
+                  "$out/share/applications/phone-link-gui.desktop"
+                install -Dm644 ${./gui}/phone-link-gui.svg \
+                  "$out/share/icons/hicolor/scalable/apps/phone-link-gui.svg"
+              '';
         }
       );
 
@@ -121,6 +196,7 @@
         let
           inherit (pkgs.stdenv.hostPlatform) system;
           package = self.packages.${system}.phone-link;
+          gui = self.packages.${system}.phone-link-gui;
 
           # Evaluate the module without building a system: once with non-default
           # values so the generated units can be inspected, once untouched to
@@ -195,6 +271,48 @@
             esac
             touch $out
           '';
+
+          # The GUI's table and bin/ must agree: a script with no action fails
+          # here, which is what keeps "every CLI action is in the GUI" true.
+          registry = pkgs.runCommand "phone-link-registry-check" { } ''
+            ${package}/bin/phone-link check-registry ${lib.escapeShellArgs scripts}
+            touch $out
+          '';
+
+          # The packaged GUI resolves the same table and its GTK imports, which
+          # a plain `python3 -m` check would not prove.
+          gui-registry = pkgs.runCommand "phone-link-gui-registry-check" { } ''
+            # GTK/fontconfig want a writable HOME in the build sandbox
+            export HOME=$TMPDIR XDG_CACHE_HOME=$TMPDIR/cache
+            mkdir -p "$XDG_CACHE_HOME"
+            ${gui}/bin/phone-link-gui --check-registry ${lib.escapeShellArgs scripts}
+            touch $out
+          '';
+
+          # Build the real window, every page and a log window under Xvfb: a
+          # widget that cannot construct fails here instead of at first launch.
+          gui =
+            pkgs.runCommand "phone-link-gui-check"
+              {
+                nativeBuildInputs = [
+                  pkgs.dbus
+                  pkgs.xauth
+                  pkgs.xvfb-run
+                ];
+              }
+              ''
+                export GDK_BACKEND=x11 GSK_RENDERER=cairo GTK_A11Y=none
+                export GSETTINGS_BACKEND=memory NO_AT_BRIDGE=1
+                export HOME=$TMPDIR XDG_CACHE_HOME=$TMPDIR/cache
+                mkdir -p "$XDG_CACHE_HOME"
+                export XDG_RUNTIME_DIR=$TMPDIR/runtime
+                mkdir -p "$XDG_RUNTIME_DIR"
+                chmod 700 "$XDG_RUNTIME_DIR"
+                # no /etc in the sandbox: point dbus at the packaged session.conf
+                dbus-run-session --config-file=${pkgs.dbus}/share/dbus-1/session.conf \
+                  -- xvfb-run -a ${gui}/bin/phone-link-gui --selftest
+                touch $out
+              '';
 
           shellcheck = pkgs.runCommand "phone-link-shellcheck" { nativeBuildInputs = [ pkgs.shellcheck ]; } ''
               shellcheck -S warning ${./bin}/* ${./lib}/*.sh
@@ -302,6 +420,11 @@
           program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.phone-link}/bin/phone-net-status";
           meta.description = "Show the state of the phone link";
         };
+        gui = {
+          type = "app";
+          program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.phone-link-gui}/bin/phone-link-gui";
+          meta.description = "Open the phone-link control panel";
+        };
       });
 
       nixosModules = {
@@ -314,7 +437,17 @@
           packages = runtimeDeps pkgs ++ [
             pkgs.shellcheck
             pkgs.nixfmt-rfc-style
+            (pkgs.python3.withPackages (ps: [ ps.pygobject3 ]))
+            pkgs.gtk4
+            pkgs.libadwaita
+            pkgs.gobject-introspection
+            pkgs.dbus
+            pkgs.xauth
+            pkgs.xvfb-run
           ];
+          shellHook = ''
+            export PYTHONPATH="$PWD/lib/python''${PYTHONPATH:+:$PYTHONPATH}"
+          '';
         };
       });
 
