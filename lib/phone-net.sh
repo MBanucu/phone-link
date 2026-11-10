@@ -11,6 +11,7 @@ PHONE_SERIAL=${PHONE_SERIAL:-XPLO2EEA0001541}
 PHONE_HOTSPOT_IP=${PHONE_HOTSPOT_IP:-10.244.108.165}
 PHONE_AP_IP=${PHONE_AP_IP:-192.168.77.232}
 PHONE_AP_CON=${PHONE_AP_CON:-phonelink}
+PHONE_AP_SSID=${PHONE_AP_SSID:-PhoneLink}
 PHONE_HOTSPOT_CON=${PHONE_HOTSPOT_CON:-XPLORE 2}
 PHONE_AP_SUBNET=${PHONE_AP_SUBNET:-192.168.77.0/24}
 PHONE_PROXY_PORT=${PHONE_PROXY_PORT:-1080}
@@ -29,6 +30,19 @@ as_root() {
 # tcp_open IP [SECONDS] [PORT] -> true while something accepts the connection
 tcp_open() {
   timeout "${2:-3}" bash -c "exec 3<>/dev/tcp/$1/${3:-$PHONE_PROXY_PORT}" 2>/dev/null
+}
+
+# phone_ap_pass -> the PhoneLink password, from the environment or secrets
+phone_ap_pass() {
+  if [ -n "${PHONE_AP_PASS:-}" ]; then
+    printf '%s' "$PHONE_AP_PASS"
+    return 0
+  fi
+  [ -r "$PHONE_SECRETS" ] \
+    || die "cannot read $PHONE_SECRETS (run with sudo) or set PHONE_AP_PASS"
+  # shellcheck disable=SC1090
+  . "$PHONE_SECRETS"
+  printf '%s' "${PHONE_AP_PASS:?PHONE_AP_PASS missing in $PHONE_SECRETS}"
 }
 
 # phone_proxy_pass -> the proxy password, read from the root-only secrets file

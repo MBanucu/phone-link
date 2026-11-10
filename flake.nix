@@ -34,6 +34,9 @@
         "phone-usb-tether-check"
         "phone-usb-tether-default"
         "phone-wifi-concurrency"
+        "phone-wifi-connect"
+        "phone-wifi-enable"
+        "phone-wifi-forget"
       ];
 
       # Everything the scripts call at runtime.  The wrappers put these on PATH,
