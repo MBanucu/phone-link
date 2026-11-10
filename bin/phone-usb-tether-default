@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# Make USB tethering the default USB action when the phone is connected.
+#
+#   phone-usb-tether-default            # apply it to this connection
+#   phone-usb-tether-default --check    # report only, change nothing
+#
+# Two knobs are set, both through `svc usb`:
+#   setFunctions rndis,adb              -> tether now, keep adb
+#   setScreenUnlockedFunctions rndis,adb-> tether automatically on unlock
+#
+# The framework may drop adb from the reported function list; sys.usb.config is
+# the authoritative check that both rndis and adb are active.
+set -eu
+. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
+
+usage() {
+  cat >&2 <<'EOF'
+usage: phone-usb-tether-default [--check]
+
+Makes USB tethering (RNDIS) the default USB action while keeping adb. --check
+only reports whether it is already the default.
+EOF
+}
+
+check_only=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --check) check_only=1 ;;
+    -h | --help) usage; exit 0 ;;
+    *)
+      usage
+      die "unknown argument: $1"
+      ;;
+  esac
+  shift
+done
+
+serial=$(phone_serial) || die "no phone attached (see adb devices)"
+
+read_state() {
+  usb_config=$(adb -s "$serial" shell getprop sys.usb.config 2>/dev/null | tr -d '\r' | head -1)
+  screen_unlocked=$(adb -s "$serial" shell dumpsys usb 2>/dev/null \
+    | tr -d '\r' | sed -n 's/.*screen_unlocked_functions=\(.*\)$/\1/p' | head -1)
+}
+
+read_state
+current=no
+if printf '%s' "$usb_config" | grep -qi rndis; then current=yes; fi
+default=no
+if printf '%s' "$screen_unlocked" | grep -qi rndis; then default=yes; fi
+
+if [ "$check_only" -eq 1 ]; then
+  log "current:  ${usb_config:-unknown} (USB tethering ${current/yes/active})"
+  log "default:  ${screen_unlocked:-unknown} (tether on unlock ${default/yes/enabled})"
+  if [ "$current" = yes ] && [ "$default" = yes ]; then
+    log "verdict:  USB tethering is the default USB action"
+    exit 0
+  fi
+  log "verdict:  USB tethering is not the default USB action"
+  exit 1
+fi
+
+if [ "$current" != yes ]; then
+  log "setting current USB functions to rndis,adb"
+  adb -s "$serial" shell svc usb setFunctions rndis,adb >/dev/null
+fi
+if [ "$default" != yes ]; then
+  log "setting screen-unlocked USB functions to rndis,adb"
+  adb -s "$serial" shell svc usb setScreenUnlockedFunctions rndis,adb >/dev/null
+fi
+
+read_state
+printf '%s' "$usb_config" | grep -qi rndis \
+  || die "USB tethering did not become current (sys.usb.config=$usb_config)"
+printf '%s' "$screen_unlocked" | grep -qi rndis \
+  || die "USB tethering did not become the default (screen_unlocked_functions=$screen_unlocked)"
+
+log "USB tethering is now the default USB action (current ${usb_config}, on unlock ${screen_unlocked})"

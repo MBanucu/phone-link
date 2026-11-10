@@ -28,9 +28,11 @@
         "phone-proxy-start"
         "phone-proxy-stop"
         "phone-proxy-uninstall"
+        "phone-reboot-unlock"
         "phone-tunnel-run"
         "phone-unlock"
         "phone-usb-tether-check"
+        "phone-usb-tether-default"
         "phone-wifi-concurrency"
       ];
 
