@@ -12,7 +12,7 @@
         "aarch64-linux"
       ];
       eachSystem = f: lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
-      version = "0.3.7";
+      version = "0.3.8";
 
       scripts = [
         "adb-wifi-connect"
