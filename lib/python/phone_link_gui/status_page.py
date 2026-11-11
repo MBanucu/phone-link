@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import threading
 
 from gi.repository import Adw, GLib, Gtk
@@ -65,10 +64,10 @@ def probe(*, escalate: bool = False) -> dict:
         raise ProbeError("phone-doctor not found on PATH")
     argv = [exe, "--json"]
     if escalate and os.geteuid() != 0:
-        pkexec = shutil.which("pkexec")
-        if not pkexec:
-            raise ProbeError("pkexec not found; start the app in a desktop session")
-        argv = [pkexec, *argv]
+        prefix = registry.escalation_prefix()
+        if not prefix:
+            raise ProbeError("neither sudo nor pkexec is available")
+        argv = [*prefix, *argv]
 
     outcome = stream(argv, timeout=180)
     if outcome.error:

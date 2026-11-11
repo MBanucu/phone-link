@@ -126,7 +126,7 @@ run run phone-fix-mobile-data --yes
 grep -q -- '--yes' "$TMP/out" && bad "no --yes for an action without it" \
   || ok "no --yes for an action without it"
 
-# 5. Root actions plan through pkexec, user actions do not.
+# 5. Root actions escalate (sudo when usable, else pkexec), user actions do not.
 if PYTHONPATH="$ROOT/lib/python" python3 - <<'PY'
 import shutil
 
@@ -136,8 +136,10 @@ root = actions.plan(actions.BY_ID["phone-ap-up"])
 user = actions.plan(actions.BY_ID["phone-fix-mobile-data"])
 assert user[-1].endswith("phone-fix-mobile-data"), user
 assert "pkexec" not in user, user
-if shutil.which("pkexec") and __import__("os").geteuid() != 0:
-    assert root[0].endswith("pkexec"), root
+if __import__("os").geteuid() != 0 and (
+    shutil.which("sudo") or shutil.which("pkexec")
+):
+    assert root[0].endswith(("sudo", "pkexec")), root
     assert "phone-ap-up" in root[-1], root
 PY
 then ok "root actions escalate, user actions do not"; else

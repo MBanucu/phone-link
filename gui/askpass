@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# sudo's SUDO_ASKPASS for phone-link: the wrapper puts the store python and the
+# GTK typelibs on the environment, so this only has to run the module.
+set -eu
+
+exec python3 -m phone_link_gui.askpass

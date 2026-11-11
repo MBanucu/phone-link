@@ -12,7 +12,7 @@
         "aarch64-linux"
       ];
       eachSystem = f: lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
-      version = "0.3.4";
+      version = "0.3.5";
 
       scripts = [
         "adb-wifi-connect"
@@ -191,6 +191,15 @@
                   } \
                   --prefix GI_TYPELIB_PATH : ${typelibs} \
                   --prefix XDG_DATA_DIRS : "$schema_dirs:${dataDirs}"
+                # sudo's askpass: the graphical password prompt for a root
+                # action, wrapped like the app so GTK and the package resolve.
+                install -Dm755 ${./gui}/askpass "$out/libexec/phone-link-gui-askpass"
+                patchShebangs "$out/libexec/phone-link-gui-askpass"
+                wrapProgram "$out/libexec/phone-link-gui-askpass" \
+                  --prefix PATH : ${lib.makeBinPath [ guiPython ]} \
+                  --prefix GI_TYPELIB_PATH : ${typelibs} \
+                  --prefix XDG_DATA_DIRS : "$schema_dirs:${dataDirs}" \
+                  --suffix PYTHONPATH : "$out/share/phone-link-gui/lib/python"
                 install -Dm644 ${./gui}/phone-link-gui.desktop \
                   "$out/share/applications/phone-link-gui.desktop"
                 install -Dm644 ${./gui}/phone-link-gui.svg \

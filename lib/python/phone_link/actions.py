@@ -6,13 +6,15 @@ GUI" is therefore enforced by a check rather than by remembering to add it.
 
 Flags are declared, not guessed: `supports_check` drives the "Check only"
 entry, `supports_yes` decides whether a confirmed GUI run adds `--yes`, and
-`root` decides whether the run goes through pkexec.
+`root` decides whether the run escalates: through sudo when it can (one password
+covers the following runs) and through pkexec otherwise.
 """
 
 from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -417,18 +419,45 @@ def plan(
     if escalate is None:
         escalate = action.root
     if escalate and os.geteuid() != 0:
-        pkexec = shutil.which("pkexec")
-        if pkexec:
-            # pkexec sanitises the environment, so pass the PHONE_* overrides
-            # the scripts document as their configuration.
-            values = env if env is not None else os.environ
-            pairs = [
-                f"{key}={value}"
-                for key, value in sorted(values.items())
-                if key.startswith("PHONE_")
-            ]
-            argv = [pkexec, "env", *pairs, *argv]
+        prefix = escalation_prefix(env)
+        if prefix:
+            argv = [*prefix, *phone_env(env), *argv]
     return argv
+
+
+def phone_env(env: dict[str, str] | None = None) -> list[str]:
+    """The PHONE_* overrides the scripts document, as `env` arguments."""
+    values = env if env is not None else os.environ
+    return [
+        f"{key}={value}"
+        for key, value in sorted(values.items())
+        if key.startswith("PHONE_")
+    ]
+
+
+def escalation_prefix(env: dict[str, str] | None = None) -> list[str]:
+    """How to become root, ending in `env` for the PHONE_* overrides.
+
+    sudo comes first because it remembers an authentication for a few minutes:
+    the first root action asks once (through SUDO_ASKPASS in the GUI) and the
+    following ones run with `-n` and no dialog. pkexec keeps no authorization
+    at all (its policy is auth_admin), so it only serves machines without sudo.
+    """
+    values = env if env is not None else os.environ
+    sudo = shutil.which("sudo")
+    if sudo:
+        cached = subprocess.run(
+            [sudo, "-n", "true"], capture_output=True, check=False
+        )
+        if cached.returncode == 0:
+            return [sudo, "-n", "env"]
+        askpass = values.get("SUDO_ASKPASS")
+        if askpass and os.access(askpass, os.X_OK):
+            return [sudo, "-A", "env"]
+    pkexec = shutil.which("pkexec")
+    if pkexec:
+        return [pkexec, "env"]
+    return []
 
 
 def validate(expected: tuple[str, ...] | list[str] = ()) -> list[str]:

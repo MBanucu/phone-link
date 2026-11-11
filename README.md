@@ -18,7 +18,7 @@ cable.
 ```nix
 # flake.nix
 {
-  inputs.phone-link.url = "github:MBanucu/phone-link/v0.3.4";
+  inputs.phone-link.url = "github:MBanucu/phone-link/v0.3.5";
 
   outputs = { self, nixpkgs, phone-link, ... }: {
     nixosConfigurations.nixos = nixpkgs.lib.nixosSystem {
@@ -137,7 +137,7 @@ status page and runs the scripts with the flags declared in
 
 ```sh
 nix run .#gui                                 # from a checkout
-nix run github:MBanucu/phone-link/v0.3.4#gui  # straight from the tag
+nix run github:MBanucu/phone-link/v0.3.5#gui  # straight from the tag
 nix build .#phone-link-gui                    # or build it and run the binary
 ```
 
@@ -160,9 +160,12 @@ decides the argv and `phone_link.runner` streams it for both the GUI and
 `phone-link run`, and the `registry` check fails when a script exists in `bin/`
 without an action entry.
 
-Actions that need root go through `pkexec`, so they run from the desktop session
-with one password prompt, and their rows carry a lock (searching `root` lists
-them); the status banner offers the same for the root-only secrets, which
+Actions that need root escalate with `sudo`, so the first one asks for the
+password in a small dialog and sudo remembers it for a few minutes: the
+following root actions run without asking again. Where sudo is not usable,
+`pkexec` is the fallback, and that one does ask every time (its policy is
+`auth_admin`). Those rows carry a lock (searching `root` lists them), and the
+status banner offers the same authentication for the root-only secrets, which
 otherwise show as unreadable. The layout collapses to a single
 pane below 720sp, so a narrow window or a touch screen still works.
 

@@ -12,7 +12,9 @@ the same behaviour and the same output as the CLI.
 
 from __future__ import annotations
 
+import os
 import sys
+from pathlib import Path
 
 import gi
 
@@ -33,6 +35,15 @@ PAGES = (("doctor", "Status"),) + tuple(
     (group_id, "Status actions" if group_id == "status" else title)
     for group_id, title in registry.GROUPS
 )
+
+
+def askpass_path() -> str | None:
+    """The packaged askpass helper, wherever the package puts it."""
+    for base in Path(__file__).resolve().parents:
+        candidate = base / "libexec" / "phone-link-gui-askpass"
+        if candidate.is_file():
+            return str(candidate)
+    return None
 
 
 def action_row(
@@ -177,6 +188,12 @@ class Window(Adw.ApplicationWindow):
         super().__init__(application=app, title="phone-link")
         self.set_default_size(1000, 720)
         self._autostart = autostart
+
+        # sudo asks once through this dialog and then remembers; the pkexec
+        # fallback cannot, so only point it at the helper when one is installed.
+        askpass = askpass_path()
+        if askpass and not os.environ.get("SUDO_ASKPASS"):
+            os.environ["SUDO_ASKPASS"] = askpass
 
         self._status = StatusPage(self)
         self._stack = Gtk.Stack(
