@@ -44,6 +44,9 @@ def action_row(
         subtitle=action.summary if subtitle is None else subtitle,
     )
     row.set_subtitle_selectable(True)
+    lock = root_badge(action)
+    if lock is not None:
+        row.add_prefix(lock)
 
     run = Gtk.Button(label="Run", valign=Gtk.Align.CENTER)
     if action.destructive:
@@ -67,6 +70,16 @@ def action_menu(action: registry.Action) -> Gio.Menu:
     for index, variant in enumerate(action.variants):
         menu.append(variant.label, f"win.variant-{action.id}-{index}")
     return menu
+
+
+def root_badge(action: registry.Action) -> Gtk.Image | None:
+    """A lock for the actions that escalate through pkexec, else None."""
+    if not action.root:
+        return None
+    lock = Gtk.Image.new_from_icon_name("system-lock-screen-symbolic")
+    lock.add_css_class("dim-label")
+    lock.set_tooltip_text("Needs root: phone-link asks for your password")
+    return lock
 
 
 class ActionsPage(Adw.PreferencesPage):
@@ -119,8 +132,16 @@ class SearchPage(Gtk.Box):
         groups = dict(registry.GROUPS)
         matches = []
         for action in registry.ACTIONS:
+            # "root"/"sudo" make "which actions need privileges?" answerable
+            # from the search bar, next to the lock on those rows.
             haystack = " ".join(
-                (action.title, action.summary, action.id, groups.get(action.group, ""))
+                (
+                    action.title,
+                    action.summary,
+                    action.id,
+                    groups.get(action.group, ""),
+                    "root sudo pkexec" if action.root else "",
+                )
             ).lower()
             if all(word in haystack for word in words):
                 matches.append(action)
@@ -534,6 +555,10 @@ def selftest() -> int:
                 window.show_page(name)
             if window.search("tunnel") < 1:
                 raise RuntimeError("the search found nothing for 'tunnel'")
+            if root_badge(registry.BY_ID["phone-ap-up"]) is None:
+                raise RuntimeError("a root action carries no lock")
+            if root_badge(registry.BY_ID["phone-net-status"]) is not None:
+                raise RuntimeError("a user action is marked as root")
             probe_window = RunWindow(window, "selftest", ["true"], autostart=False)
             probe_window.destroy()
             window.close()

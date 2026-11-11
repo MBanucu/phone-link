@@ -159,8 +159,9 @@ decides the argv and `phone_link.runner` streams it for both the GUI and
 without an action entry.
 
 Actions that need root go through `pkexec`, so they run from the desktop session
-with one password prompt; the status banner offers the same for the root-only
-secrets, which otherwise show as unreadable. The layout collapses to a single
+with one password prompt, and their rows carry a lock (searching `root` lists
+them); the status banner offers the same for the root-only secrets, which
+otherwise show as unreadable. The layout collapses to a single
 pane below 720sp, so a narrow window or a touch screen still works.
 
 ### Screenshots
