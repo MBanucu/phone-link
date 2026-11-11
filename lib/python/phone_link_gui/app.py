@@ -591,6 +591,14 @@ def selftest() -> int:
             auth = status._fix_button({"id": "secrets", "status": "fail"})
             if auth is None or auth.get_label() != "Authenticate":
                 raise RuntimeError("a secrets failure does not offer Authenticate")
+            if not status._needs_root({"id": "ip_forward", "status": "fail"}):
+                raise RuntimeError("a root fix carries no lock")
+            if status._needs_root({"id": "rndis0", "status": "fail"}):
+                raise RuntimeError("a user fix got a root lock")
+            if not status._needs_root({"id": "secrets", "status": "fail"}):
+                raise RuntimeError("Authenticate carries no lock")
+            if root_badge(registry.BY_ID["phone-doctor"]) is None:
+                raise RuntimeError("the doctor reads root-only secrets without a lock")
             # Once authenticated the page keeps probing through sudo, and the
             # banner must not return after the next action.
             status._is_root = False

@@ -73,11 +73,15 @@ ACTIONS: tuple[Action, ...] = (
         "Overview",
         "Links, routes, resolver, proxy probes, adb transports and phone state.",
     ),
+    # Read-only, but its secrets and proxy_request checks read the root-only
+    # secrets file and probe through the authenticated proxy, so the run
+    # escalates: otherwise every report is incomplete.
     Action(
         "phone-doctor",
         "status",
         "Doctor",
         "Check every runtime condition of the setup. Read-only.",
+        root=True,
         supports_check=False,
     ),
     Action(

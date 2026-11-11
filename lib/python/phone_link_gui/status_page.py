@@ -35,6 +35,14 @@ AUTH_PROBLEMS = {"secrets", "ap_pass", "proxy_request"}
 # phone-doctor-fix already maps one script per problem (its describe_fix), so
 # the rows point at the same registry actions instead of reimplementing a
 # repair. Problems missing here are the manual ones and get no button.
+def _root_lock() -> Gtk.Image:
+    """The lock the action rows show for a run that asks for a password."""
+    lock = Gtk.Image.new_from_icon_name("system-lock-screen-symbolic")
+    lock.add_css_class("dim-label")
+    lock.set_tooltip_text("Needs root: phone-link asks for your password")
+    return lock
+
+
 PROBLEM_FIXES = {
     "apk_cache": "phone-fix-apk",
     "ip_forward": "phone-fix-forwarding",
@@ -258,6 +266,10 @@ class StatusPage(Gtk.Box):
         row.add_prefix(icon)
         button = self._fix_button(result)
         if button is not None:
+            # A repair that escalates carries the same lock as on the action
+            # pages, so "this asks for a password" is visible before the click.
+            if self._needs_root(result):
+                row.add_suffix(_root_lock())
             row.add_suffix(button)
         return row
 
@@ -269,8 +281,6 @@ class StatusPage(Gtk.Box):
         action = registry.BY_ID.get(PROBLEM_FIXES.get(problem, ""))
         if action is not None:
             button = Gtk.Button(label="Fix", valign=Gtk.Align.CENTER)
-            # pkexec rows carry a lock on the action pages; here the tooltip
-            # says the same without a second icon next to one button.
             button.set_tooltip_text(
                 f"Run {action.title}"
                 + (" (asks for your password)" if action.root else "")
@@ -286,6 +296,14 @@ class StatusPage(Gtk.Box):
             button.connect("clicked", lambda _button: self.refresh(escalate=True))
             return button
         return None
+
+    def _needs_root(self, result: dict) -> bool:
+        """Whether repairing this row escalates, and so needs the lock."""
+        problem = result.get("id", "")
+        if problem in AUTH_PROBLEMS:
+            return True
+        action = registry.BY_ID.get(PROBLEM_FIXES.get(problem, ""))
+        return bool(action is not None and action.root)
 
     def _show_auth_banner(self, data: dict) -> None:
         # Already authenticated: the banner must not come back even if a
