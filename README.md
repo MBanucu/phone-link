@@ -163,6 +163,19 @@ with one password prompt; the status banner offers the same for the root-only
 secrets, which otherwise show as unreadable. The layout collapses to a single
 pane below 720sp, so a narrow window or a touch screen still works.
 
+### Screenshots
+
+`bin/phone-link-gui-screenshots` builds the panel from the checkout and writes
+one PNG per state into `screenshots/`: the status page with this machine's
+doctor report, every action page, the search states, the narrow layout and a
+failed run. It needs `nix`, `Xvfb`, `dbus-run-session` and ImageMagick, and
+takes `--out DIR` (and `--scale 1` for smaller files). A capture that comes out
+all black fails the run instead of being written.
+
+```sh
+bin/phone-link-gui-screenshots
+```
+
 `phone-link list` and `phone-link run <id> [--check] [--yes]` are the CLI half of
 the same table, and `phone-link status` prints the doctor's JSON.
 

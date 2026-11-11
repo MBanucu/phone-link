@@ -45,7 +45,9 @@ then ok "list --json parses"; else bad "list --json parses" "$(head -3 "$TMP/out
 for file in "$ROOT"/bin/*; do
   name=$(basename "$file")
   case $name in
-    phone-link | phone-link-gui) continue ;;
+    # Not actions: the shared-core CLI, the panel itself and the release-only
+    # screenshots driver.
+    phone-link | phone-link-gui | phone-link-gui-screenshots) continue ;;
   esac
   printf '%s\n' "$name" >>"$TMP/expected"
 done

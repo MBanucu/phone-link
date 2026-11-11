@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+# Capture the control panel's states as PNGs, e.g. for release notes.
+#
+# Builds packages.phone-link-gui from this checkout, borrows the environment its
+# wrapper gives the app (typelibs, schemas, pygobject) and drives the real window
+# under Xvfb, so the status page shows what the doctor reports on this machine.
+set -euo pipefail
+
+root=$(cd -- "$(dirname -- "$(readlink -f -- "$0")")/.." && pwd)
+out=$root/screenshots
+scale=2
+
+usage() {
+  cat <<'EOF'
+usage: phone-link-gui-screenshots [--out DIR] [--scale N]
+
+Writes one PNG per window state: the status page, every action page, the
+search states, the narrow layout and a failed run.
+
+  --out DIR    output directory (default: ./screenshots)
+  --scale N    device scale of the captures (default: 2)
+  -h, --help   this text
+
+Needs nix, Xvfb, dbus-run-session and ImageMagick (import, convert).
+EOF
+}
+
+while [ $# -gt 0 ]; do
+  case $1 in
+    --out)
+      out=${2:?--out needs a directory}
+      shift 2
+      ;;
+    --scale)
+      scale=${2:?--scale needs a number}
+      shift 2
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *)
+      printf 'unknown option: %s\n\n' "$1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+case $scale in
+  '' | *[!0-9]*)
+    printf -- '--scale must be a positive integer\n' >&2
+    exit 2
+    ;;
+esac
+[ "$scale" -ge 1 ] || {
+  printf -- '--scale must be at least 1\n' >&2
+  exit 2
+}
+
+for tool in nix Xvfb dbus-run-session import convert; do
+  command -v "$tool" >/dev/null 2>&1 || {
+    printf 'missing %s\n' "$tool" >&2
+    exit 2
+  }
+done
+
+# The wrapper is where the typelibs, the gsettings schemas and the pygobject
+# python live, so source its environment instead of rebuilding one here.
+gui=$(nix build "$root#phone-link-gui" --no-link --print-out-paths 2>/dev/null | tail -n 1)
+if [ -z "$gui" ] || [ ! -x "$gui/bin/phone-link-gui" ]; then
+  printf 'could not build .#phone-link-gui\n' >&2
+  exit 1
+fi
+eval "$(sed '/^exec /,$d' "$gui/bin/phone-link-gui")"
+export PYTHONPATH="$gui/share/phone-link-gui/lib/python"
+export PYTHONDONTWRITEBYTECODE=1
+
+tmp=$(mktemp -d)
+xpid=
+cleanup() {
+  if [ -n "$xpid" ]; then
+    kill "$xpid" 2>/dev/null || true
+  fi
+  rm -rf "$tmp"
+}
+trap cleanup EXIT
+
+runtime=$tmp/runtime
+mkdir -p "$runtime"
+chmod 700 "$runtime"
+
+# The window is 1000x720 and the narrow capture 430x780, so leave room for the
+# largest state at the requested scale.
+screen="$((1000 * scale + 240))x$((780 * scale + 240))x24"
+Xvfb -displayfd 3 -screen 0 "$screen" -nolisten tcp 3>"$tmp/display" \
+  >"$tmp/xvfb.log" 2>&1 &
+xpid=$!
+for _ in {1..100}; do
+  [ -s "$tmp/display" ] && break
+  sleep 0.1
+done
+if [ ! -s "$tmp/display" ]; then
+  printf 'Xvfb did not start\n' >&2
+  cat "$tmp/xvfb.log" >&2
+  exit 1
+fi
+display=":$(cat "$tmp/display")"
+
+# no /etc in every environment this runs in: point dbus at the packaged
+# session configuration when the platform one is not there.
+session_conf=$(dirname -- "$(dirname -- "$(command -v dbus-run-session)")")/share/dbus-1/session.conf
+dbus_args=()
+if [ -r "$session_conf" ]; then
+  dbus_args=(--config-file="$session_conf")
+fi
+
+# cairo instead of the GL renderer (no DRI3 on a bare Xvfb) and no a11y bridge:
+# both otherwise fill stderr with warnings the captures do not need.
+dbus-run-session "${dbus_args[@]}" -- env DISPLAY="$display" GDK_BACKEND=x11 \
+  GDK_SCALE="$scale" GSK_RENDERER=cairo GTK_A11Y=none GSETTINGS_BACKEND=memory \
+  NO_AT_BRIDGE=1 XDG_RUNTIME_DIR="$runtime" \
+  python3 "$root/gui/screenshot.py" --out "$out"
