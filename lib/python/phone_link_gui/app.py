@@ -24,7 +24,7 @@ from gi.repository import Adw, Gio, GObject, Gtk
 from phone_link import actions as registry
 
 from .log_window import RunWindow
-from .status_page import StatusPage
+from .status_page import PROBLEM_FIXES, StatusPage
 
 APP_ID = "org.phonelink.Gui"
 # The doctor's findings get their own page, separate from the "status" action
@@ -518,6 +518,11 @@ class PhoneLinkApp(Adw.Application):
 def check_registry(expected: list[str]) -> int:
     """Headless check: the table matches bin/, and the toolkit is wired."""
     problems = registry.validate(tuple(expected))
+    unknown = sorted(
+        {name for name in PROBLEM_FIXES.values() if name not in registry.BY_ID}
+    )
+    if unknown:
+        problems.append("fix buttons point at unknown actions: " + ", ".join(unknown))
     try:
         gi.require_version("Gtk", "4.0")
         gi.require_version("Adw", "1")
@@ -559,6 +564,16 @@ def selftest() -> int:
                 raise RuntimeError("a root action carries no lock")
             if root_badge(registry.BY_ID["phone-net-status"]) is not None:
                 raise RuntimeError("a user action is marked as root")
+            status = window._status
+            if status._fix_button({"id": "ip_forward", "status": "fail"}) is None:
+                raise RuntimeError("a fixable failure has no Fix button")
+            if status._fix_button({"id": "flake_update", "status": "fail"}) is not None:
+                raise RuntimeError("a manual failure got a Fix button")
+            if status._fix_button({"id": "ip_forward", "status": "ok"}) is not None:
+                raise RuntimeError("a passing check got a Fix button")
+            auth = status._fix_button({"id": "secrets", "status": "fail"})
+            if auth is None or auth.get_label() != "Authenticate":
+                raise RuntimeError("a secrets failure does not offer Authenticate")
             probe_window = RunWindow(window, "selftest", ["true"], autostart=False)
             probe_window.destroy()
             window.close()

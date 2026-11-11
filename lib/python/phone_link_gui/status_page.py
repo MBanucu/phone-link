@@ -33,6 +33,26 @@ STATUS_ICONS = {
 
 AUTH_PROBLEMS = {"secrets", "ap_pass", "proxy_request"}
 
+# phone-doctor-fix already maps one script per problem (its describe_fix), so
+# the rows point at the same registry actions instead of reimplementing a
+# repair. Problems missing here are the manual ones and get no button.
+PROBLEM_FIXES = {
+    "apk_cache": "phone-fix-apk",
+    "ip_forward": "phone-fix-forwarding",
+    "ap_profile": "phone-ap-create",
+    "ap_address": "phone-ap-up",
+    "phone_unlocked": "phone-unlock",
+    "phone_address": "phone-wifi-connect",
+    "phone_default": "phone-fix-mobile-data",
+    "proxy_app": "phone-proxy-install",
+    "proxy_request": "phone-proxy-setup",
+    "phone_tun": "phone-fix-tunnel",
+    "tunnel_route": "phone-fix-tunnel",
+    "rndis0": "phone-usb-tether-default",
+    "network_transport": "phone-adb-wifi",
+    "https": "phone-fix-internet",
+}
+
 
 class ProbeError(RuntimeError):
     """The doctor could not be run or did not answer with JSON."""
@@ -219,7 +239,36 @@ class StatusPage(Gtk.Box):
         icon = Gtk.Image.new_from_icon_name(icon_name)
         icon.add_css_class(css)
         row.add_prefix(icon)
+        button = self._fix_button(result)
+        if button is not None:
+            row.add_suffix(button)
         return row
+
+    def _fix_button(self, result: dict) -> Gtk.Button | None:
+        """A button that repairs a failing or warning row, when one exists."""
+        if result.get("status") not in ("fail", "warn"):
+            return None
+        problem = result.get("id", "")
+        action = registry.BY_ID.get(PROBLEM_FIXES.get(problem, ""))
+        if action is not None:
+            button = Gtk.Button(label="Fix", valign=Gtk.Align.CENTER)
+            # pkexec rows carry a lock on the action pages; here the tooltip
+            # says the same without a second icon next to one button.
+            button.set_tooltip_text(
+                f"Run {action.title}"
+                + (" (asks for your password)" if action.root else "")
+            )
+            button.connect(
+                "clicked", lambda _button, a=action: self._window.start_action(a)
+            )
+            return button
+        if problem in AUTH_PROBLEMS:
+            # The repair is reading root-only state, not running a script.
+            button = Gtk.Button(label="Authenticate", valign=Gtk.Align.CENTER)
+            button.set_tooltip_text("Re-check with root so the secrets can be read")
+            button.connect("clicked", lambda _button: self.refresh(escalate=True))
+            return button
+        return None
 
     def _show_auth_banner(self, data: dict) -> None:
         if os.geteuid() == 0:
