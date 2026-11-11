@@ -33,6 +33,75 @@ def _source_from_lock(lock: Path) -> str:
     return ""
 
 
+def _input_original(lock: Path) -> dict:
+    try:
+        data = json.loads(lock.read_text())
+        original = data["nodes"]["phone-link"].get("original") or {}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+    return original if isinstance(original, dict) else {}
+
+
+def _input_remote(lock: Path) -> str:
+    """A clone URL for the phone-link input when the lock names one."""
+    original = _input_original(lock)
+    if original.get("type") == "github":
+        owner = original.get("owner")
+        repo = original.get("repo")
+        if owner and repo:
+            return f"https://github.com/{owner}/{repo}"
+        return ""
+    url = original.get("url")
+    return url if isinstance(url, str) else ""
+
+
+def _locked_rev(lock: Path) -> str:
+    try:
+        data = json.loads(lock.read_text())
+        rev = data["nodes"]["phone-link"]["locked"]["rev"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return ""
+    return rev if isinstance(rev, str) else ""
+
+
+def _check_remote(ctx: Context, lock: Path) -> list[Result]:
+    """Without a checkout, compare the locked revision with the input's remote.
+
+    A GitHub input (what the README pins) leaves no local `.git` behind, and
+    the doctor runs from the store, so there is nothing on disk to diff; the
+    lock is still comparable with the remote it came from.
+    """
+    remote = _input_remote(lock)
+    locked_rev = _locked_rev(lock)
+    if not remote or not locked_rev:
+        return [skip("flake_update", "flake update", "no source checkout to compare")]
+
+    head = ""
+    for line in ctx.text(["git", "ls-remote", remote, "HEAD"], timeout=10).splitlines():
+        fields = line.split()
+        if fields:
+            head = fields[0]
+            break
+    if not head:
+        return [
+            skip(
+                "flake_update",
+                "flake update",
+                "origin unreachable; upstream not checked",
+            )
+        ]
+    if head != locked_rev:
+        return [
+            warn(
+                "flake_update",
+                "flake update",
+                f"origin is at {head[:12]}, the lock has {locked_rev[:12]} "
+                "(nix flake update phone-link && nixos-rebuild switch)",
+            )
+        ]
+    return [ok("flake_update", "flake update", f"up to date ({head[:12]})")]
+
+
 def check(ctx: Context) -> list[Result]:
     nixos = Path(ctx.get("PHONE_NIXOS_DIR", "/etc/nixos"))
     lock = nixos / "flake.lock"
@@ -43,7 +112,7 @@ def check(ctx: Context) -> list[Result]:
         src = str(ctx.source_root)
 
     if not src or not (Path(src) / ".git").is_dir() or not ctx.have("git"):
-        return [skip("flake_update", "flake update", "no source checkout to compare")]
+        return _check_remote(ctx, lock)
 
     head = ctx.text(["git", "-C", src, "rev-parse", "HEAD"]).strip()
     if not head:

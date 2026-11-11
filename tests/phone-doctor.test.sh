@@ -89,7 +89,10 @@ while [ "${1:-}" = "-C" ]; do shift 2; done
 case "$*" in
   "rev-parse HEAD") cat "$LOG/local_head" ;;
   "log -1 --format=%ct") cat "$LOG/head_time" ;;
-  "ls-remote origin HEAD") printf '%s\tHEAD\n' "$(cat "$LOG/remote_head")" ;;
+  "ls-remote "*)
+    head=$(cat "$LOG/remote_head")
+    if [ -n "$head" ]; then printf '%s\tHEAD\n' "$head"; else exit 128; fi
+    ;;
 esac
 EOF
 sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/git"
@@ -237,6 +240,26 @@ if run; then ok "stale flake still exits 0"; else bad "stale flake still exits 0
 grep -q 'warn  flake update.*older' "$LOG/out" && ok "warns about the stale lock" \
   || bad "warns about the stale lock" "$(cat "$LOG/out")"
 unset PHONE_FLAKE_SRC PHONE_NIXOS_DIR
+
+# 14b. A GitHub input has no checkout; the lock is compared with the remote.
+fresh_state
+mkdir -p "$TMP/nixos"
+printf '{\n  "nodes": {\n    "phone-link": {\n      "original": {"owner": "MBanucu", "repo": "phone-link", "type": "github", "ref": "v0.3.6"},\n      "locked": {"lastModified": 100, "rev": "aaaaaaaaaaaa", "type": "github"}\n    }\n  }\n}\n' >"$TMP/nixos/flake.lock"
+export PHONE_NIXOS_DIR=$TMP/nixos PHONE_FLAKE_SRC=$TMP/no-src
+printf 'bbbbbbbbbbbb\n' >"$LOG/remote_head"
+if run; then ok "an outdated remote lock still exits 0"; else bad "an outdated remote lock still exits 0"; fi
+grep -q 'warn  flake update.*origin is at bbbbbbbbbbbb, the lock has aaaaaaaaaaaa' "$LOG/out" \
+  && ok "warns when the lock is behind the remote" \
+  || bad "warns when the lock is behind the remote" "$(cat "$LOG/out")"
+printf 'aaaaaaaaaaaa\n' >"$LOG/remote_head"
+if run; then ok "a matching remote still exits 0"; else bad "a matching remote still exits 0"; fi
+grep -q 'ok    flake update.*up to date (aaaaaaaaaaaa)' "$LOG/out" \
+  && ok "accepts a matching remote" || bad "accepts a matching remote" "$(cat "$LOG/out")"
+: >"$LOG/remote_head"
+if run; then ok "an unreachable remote still exits 0"; else bad "an unreachable remote still exits 0"; fi
+grep -q 'skip  flake update.*unreachable' "$LOG/out" \
+  && ok "skips an unreachable remote" || bad "skips an unreachable remote" "$(cat "$LOG/out")"
+unset PHONE_NIXOS_DIR PHONE_FLAKE_SRC
 
 # 15. --analyze prints only the problems, as stable ids.
 fresh_state
