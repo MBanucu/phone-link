@@ -87,6 +87,12 @@ class StatusPage(Gtk.Box):
         self._window = window
         self._busy = False
         self._groups: list[Adw.PreferencesGroup] = []
+        # Once the user has authenticated, later probes keep going through
+        # sudo. A plain re-probe would see the root-only checks failing again
+        # and put the Authenticate banner back after every action.
+        self._escalated = False
+        self._pending_escalation = False
+        self._is_root = os.geteuid() == 0
 
         self._banner = Adw.Banner(
             title="Secrets are root-only; some checks need authentication.",
@@ -119,10 +125,12 @@ class StatusPage(Gtk.Box):
         self.append(self._view)
 
     # -- probing -------------------------------------------------------
-    def refresh(self, *, escalate: bool = False) -> None:
+    def refresh(self, *, escalate: bool | None = None) -> None:
         if self._busy:
             return
+        escalate = self._escalation_for(escalate)
         self._busy = True
+        self._pending_escalation = escalate
         self._banner.set_revealed(False)
         self._show_progress()
         self._window.set_status_busy(True)
@@ -143,6 +151,10 @@ class StatusPage(Gtk.Box):
         if not self._busy:
             self.refresh()
 
+    def _escalation_for(self, escalate: bool | None) -> bool:
+        """An explicit request wins; otherwise stay as authenticated."""
+        return self._escalated if escalate is None else escalate
+
     def _probe(self, escalate: bool) -> None:
         data = None
         error = ""
@@ -154,9 +166,14 @@ class StatusPage(Gtk.Box):
 
     def _apply(self, data, error) -> bool:
         self._busy = False
+        escalated = self._pending_escalation
         self._window.set_status_busy(False)
         self._spinner.stop()
         if error:
+            # sudo's timestamp is gone or the prompt was declined: drop the
+            # stickiness so the banner can offer authentication again.
+            if escalated and not self._is_root:
+                self._escalated = False
             self._placeholder.set_title("Could not check the setup")
             self._placeholder.set_description(error)
             self._placeholder.set_icon_name("dialog-error-symbolic")
@@ -164,6 +181,7 @@ class StatusPage(Gtk.Box):
             self._view.set_visible_child_name("placeholder")
             self._window.report_error("Status probe failed", error)
             return False
+        self._escalated = escalated
         self._render(data)
         self._view.set_visible_child_name("page")
         self._window.report_status(data)
@@ -270,7 +288,9 @@ class StatusPage(Gtk.Box):
         return None
 
     def _show_auth_banner(self, data: dict) -> None:
-        if os.geteuid() == 0:
+        # Already authenticated: the banner must not come back even if a
+        # stale report still lists the root-only checks as failing.
+        if self._is_root or self._escalated:
             self._banner.set_revealed(False)
             return
         failing = {

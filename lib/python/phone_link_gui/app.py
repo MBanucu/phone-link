@@ -591,6 +591,27 @@ def selftest() -> int:
             auth = status._fix_button({"id": "secrets", "status": "fail"})
             if auth is None or auth.get_label() != "Authenticate":
                 raise RuntimeError("a secrets failure does not offer Authenticate")
+            # Once authenticated the page keeps probing through sudo, and the
+            # banner must not return after the next action.
+            status._is_root = False
+            root_only = {
+                "counts": {"fail": 1},
+                "sections": [
+                    {"name": "[secrets]", "results": [{"id": "secrets", "status": "fail"}]}
+                ],
+            }
+            status._escalated = False
+            status._show_auth_banner(root_only)
+            if not status._banner.get_revealed():
+                raise RuntimeError("a root-only failure does not offer Authenticate")
+            status._escalated = True
+            status._show_auth_banner(root_only)
+            if status._banner.get_revealed():
+                raise RuntimeError("the banner returns after authenticating")
+            if status._escalation_for(None) is not True:
+                raise RuntimeError("a later probe drops the escalation")
+            if status._escalation_for(False) is not False:
+                raise RuntimeError("an explicit user-level probe escalates")
             probe_window = RunWindow(window, "selftest", ["true"], autostart=False)
             probe_window.destroy()
             window.close()
