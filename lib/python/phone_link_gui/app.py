@@ -72,9 +72,11 @@ def action_menu(action: registry.Action) -> Gio.Menu:
 class ActionsPage(Adw.PreferencesPage):
     """Every action of one group, with its check and variants in a menu."""
 
-    def __init__(self, window, group_id: str, title: str):
+    def __init__(self, window, group_id: str):
         super().__init__()
-        group = Adw.PreferencesGroup(title=title)
+        # The header carries the page name; repeating it as the group's title
+        # printed the same words twice.
+        group = Adw.PreferencesGroup()
         self.add(group)
         for action in registry.actions_in(group_id):
             group.add(action_row(window, action))
@@ -160,12 +162,15 @@ class Window(Adw.ApplicationWindow):
             transition_type=Gtk.StackTransitionType.CROSSFADE, vexpand=True
         )
         self._stack.add_named(self._status, "doctor")
-        for group_id, title in registry.GROUPS:
-            self._stack.add_named(ActionsPage(self, group_id, title), group_id)
+        for group_id, _title in registry.GROUPS:
+            self._stack.add_named(ActionsPage(self, group_id), group_id)
 
         self._search_page = SearchPage(self)
         self._stack.add_named(self._search_page, "search")
         self._last_page = PAGES[0][0]
+        # What the header subtitle reports; the narrow layout shortens it.
+        self._ready: bool | None = None
+        self._fails = 0
 
         self._title = Adw.WindowTitle(title="Status")
         self._spinner = Gtk.Spinner()
@@ -219,6 +224,9 @@ class Window(Adw.ApplicationWindow):
         self.set_content(self._split)
 
         self._install_breakpoint()
+        self._split.connect(
+            "notify::collapsed", lambda *_args: self._update_subtitle()
+        )
         self._register_actions()
         self._list.connect("row-selected", self._on_row_selected)
         self._list.select_row(self._list.get_row_at_index(0))
@@ -333,13 +341,25 @@ class Window(Adw.ApplicationWindow):
 
     def report_status(self, data: dict) -> None:
         counts = data.get("counts", {})
-        fails = counts.get("fail", 0)
-        warns = counts.get("warn", 0)
-        if data.get("ready"):
+        self._ready = bool(data.get("ready"))
+        self._fails = counts.get("fail", 0)
+        self._set_badge(self._fails, counts.get("warn", 0))
+        self._update_subtitle()
+
+    def _update_subtitle(self) -> None:
+        """Name the verdict, shortened when the panes collapse into one."""
+        if self._ready is None:
+            return
+        if self._ready:
             self._title.set_subtitle("ready")
+        elif not self._fails:
+            self._title.set_subtitle("not ready")
+        elif self._split.get_collapsed():
+            # "not ready (2 failing)" does not fit beside the header buttons
+            # at 430sp; the count is the part that has to survive.
+            self._title.set_subtitle(f"{self._fails} failing")
         else:
-            self._title.set_subtitle(f"not ready ({fails} failing)")
-        self._set_badge(fails, warns)
+            self._title.set_subtitle(f"not ready ({self._fails} failing)")
 
     def _set_badge(self, fails: int, warns: int) -> None:
         for css in ("error", "warning"):
