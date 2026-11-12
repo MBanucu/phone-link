@@ -167,6 +167,14 @@ public final class ProxyService extends Service
     public void onUplinkChanged(boolean allowed, String why) {
         Log.i(TAG, "uplink " + (allowed ? "allowed" : "paused") + ": " + why);
         if (allowed) {
+            // The port adb uses lives only while wireless debugging is on, and
+            // a reboot can switch it off; this is the one moment that matters
+            // for the host, because the SSID just matched.
+            if (ConfigStore.adbWireless(this)) {
+                AdbWireless.enable(this);
+            } else {
+                Log.i(TAG, "wireless debugging left alone: the panel switch is off");
+            }
             startListening();
             if (server == null) {
                 // startListening() failed and already stopped the service.

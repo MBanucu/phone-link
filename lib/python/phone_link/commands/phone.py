@@ -676,6 +676,36 @@ def phone_proxy_install(args: list[str]) -> int:
             status(["adb", "-s", serial, "install-multiple", "-r", "-g", *apks]) != 0
         ):
             die("adb install-multiple failed")
+        grant_settings()
+
+    def grant_settings() -> None:
+        """Let our own app switch wireless debugging back on.
+
+        WRITE_SECURE_SETTINGS is a development permission: adb can hand it out
+        and nothing on the phone can, so it belongs to the install rather than
+        to a step somebody has to remember. Only for the APK this repository
+        builds — a third-party proxy has no business holding it, and the grant
+        fails harmlessly for one that does not declare it.
+        """
+        if package != settings.PHONE_APP_PKG:
+            return
+        argv = [
+            "adb",
+            "-s",
+            serial,
+            "shell",
+            "pm",
+            "grant",
+            package,
+            "android.permission.WRITE_SECURE_SETTINGS",
+        ]
+        if status(argv) != 0:
+            log(
+                "warning: cannot grant WRITE_SECURE_SETTINGS; the panel's "
+                "wireless-debugging switch will not work"
+            )
+            return
+        log("granted WRITE_SECURE_SETTINGS: the app can turn wireless debugging back on")
 
     if mode == "status":
         return show_status()

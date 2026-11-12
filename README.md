@@ -124,6 +124,7 @@ Or straight from the checkout: `./bin/phone-net-status`.
 | `adb-wifi-connect` | connect adb to the phone over TCP |
 | `adb-wifi-connect --prepare` | once over USB: `adb tcpip 5555` (the tether blips) |
 | `phone-adb-wifi` | enable adb over Wi-Fi on the phone: legacy `adb tcpip 5555` and Android 11+ wireless debugging on its random TLS port, then connect (`--legacy`, `--tls`, `--check`) |
+| `phone-proxy-install` | install the APK with `-r -g`; for this repository's own app it also grants `WRITE_SECURE_SETTINGS`, which lets the app turn wireless debugging back on itself |
 | `phone-tunnel-run` | run the built tunnel config in the foreground |
 | `phone-tunnel-run --via-adb` | same, with the upstream reached through `adb reverse` |
 
@@ -281,8 +282,18 @@ alone, and when a network serial is gone it reads the phone's
 the advertised port and runs the command again there. Resolving the serial in
 the first place goes through the same lookup, so a rebooted phone is found
 instead of reported missing. `PHONE_ADB_MDNS=0` disables the lookup for a
-machine whose mDNS cannot be trusted; `phone-adb-wifi` is still the way to turn
-wireless debugging back on after a reboot that cleared it.
+machine whose mDNS cannot be trusted.
+
+There has to be something to find, though: this phone clears wireless debugging
+on some reboots, and while it is off nothing advertises a port at all. The proxy
+app closes that gap itself — rejoining `PhoneLink` makes it write
+`adb_wifi_enabled` back to `1`, the same write `phone-adb-wifi` makes over adb,
+controlled by the panel checkbox "Turn wireless debugging back on when the phone
+joins the SSID" (extra `adb_wifi`, on by default). That write is a secure
+setting, so `phone-proxy-install` grants the app
+`android.permission.WRITE_SECURE_SETTINGS` after installing its own APK; a build
+installed by other means only logs that it cannot help, and
+`phone-adb-wifi` remains the override.
 
 ## One-time setup
 

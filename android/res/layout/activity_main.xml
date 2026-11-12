@@ -84,6 +84,13 @@
             android:paddingTop="8dp"
             android:text="@string/label_auto_start" />
 
+        <CheckBox
+            android:id="@+id/adb_wifi"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="8dp"
+            android:text="@string/label_adb_wifi" />
+
         <TextView
             android:id="@+id/battery"
             android:layout_width="match_parent"

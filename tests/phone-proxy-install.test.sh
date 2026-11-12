@@ -168,5 +168,28 @@ else
   ok "--check with an APK never installs"
 fi
 
+run_own() {
+  HOME="$WORK/home" PATH="$WORK/stub:$PATH" PHONE_APK_DIR="$WORK/cache" \
+    PHONE_PROXY_PKG=org.phonelink.proxy bash "$SCRIPT" "$@" 2>&1
+}
+
+# 20. This repository's own app is granted the one permission that lets it turn
+#     wireless debugging back on; the vendored proxy is not.
+: > "$WORK/adb.log"
+run_own "$WORK/local.apk" >/dev/null
+if grep -q 'shell pm grant org.phonelink.proxy android.permission.WRITE_SECURE_SETTINGS' \
+    "$WORK/adb.log"; then
+  ok "our APK is granted WRITE_SECURE_SETTINGS"
+else
+  bad "our APK is granted WRITE_SECURE_SETTINGS" "$(cat "$WORK/adb.log")"
+fi
+: > "$WORK/adb.log"
+run "$WORK/local.apk" >/dev/null
+if grep -q 'pm grant' "$WORK/adb.log"; then
+  bad "the vendored proxy is granted nothing" "$(grep grant "$WORK/adb.log")"
+else
+  ok "the vendored proxy is granted nothing"
+fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

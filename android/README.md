@@ -177,6 +177,30 @@ adb shell am start-foreground-service -n org.phonelink.proxy/.ProxyService \
 adb shell cmd deviceidle whitelist +org.phonelink.proxy
 ```
 
+Wireless debugging is the other half of that. This phone clears
+`adb_wifi_enabled` on some reboots, and while it is off nothing advertises the
+port the laptop needs — the old way back was Developer options → Wireless
+debugging, which asks for a human on the phone. The checkbox "Turn wireless
+debugging back on when the phone joins the SSID" (`adb_wifi`, on by default)
+has the app write that setting whenever the uplink gate opens, which is the same
+write `phone-adb-wifi` makes over adb. A normal app cannot write a secure
+setting, so it needs the one permission adb can hand out:
+
+```sh
+# phone-proxy-install runs this after installing this APK
+adb shell pm grant org.phonelink.proxy android.permission.WRITE_SECURE_SETTINGS
+```
+
+Both preference checkboxes follow the store, so `--ez auto_start …` or
+`--ez adb_wifi …` while the panel is open shows up there without reopening it.
+
+Measured on the phone (Android 15): with the switch on, `settings put global
+adb_wifi_enabled 0` plus the phone re-joining `PhoneLink` ends with
+`wireless debugging enabled (it was off)` in the log, the mDNS record back on a
+new port and `adb connect` working again; with the switch off the log says
+`wireless debugging left alone: the panel switch is off` and the setting keeps
+the value it had.
+
 Measured on the phone (Android 15): without the allowlist the receiver logs
 `Background started FGS: Disallowed`, the service record stays behind with
 `app=null` and no port opens. With it, the service comes back at boot —
@@ -218,6 +242,7 @@ sticky restart or the boot receiver reuses them:
 | `ssid` (`--es`) | `PhoneLink` | SSID the listener may run on |
 | `any_network` (`--ez`) | `false` | ignore the predicate and always listen (tests) |
 | `auto_start` (`--ez`) | `false` | come back after a reboot and stay up (the SSID still gates the port) |
+| `adb_wifi` (`--ez`) | `true` | turn wireless debugging back on when the phone joins the SSID (needs `WRITE_SECURE_SETTINGS`) |
 
 Every extra is persisted, so a later start without one reuses the stored value;
 pass it explicitly to change a setting.

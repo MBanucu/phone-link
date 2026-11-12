@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.PowerManager;
@@ -30,8 +31,23 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     private EditText ssid;
     private CheckBox anyNetwork;
     private CheckBox autoStart;
+    private CheckBox adbWireless;
     private TextView battery;
     private TextView status;
+
+    /**
+     * The two preferences behind the checkboxes can also be changed over adb
+     * ({@code --ez auto_start …}, {@code --ez adb_wifi …}), so the panel follows
+     * the store instead of trusting what it wrote itself.
+     */
+    private final SharedPreferences.OnSharedPreferenceChangeListener preferences =
+            (sharedPreferences, key) -> runOnUiThread(() -> {
+                if (ConfigStore.KEY_ADB_WIFI.equals(key)) {
+                    adbWireless.setChecked(ConfigStore.adbWireless(this));
+                } else if (ConfigStore.KEY_AUTO_START.equals(key)) {
+                    autoStart.setChecked(ConfigStore.autoStart(this));
+                }
+            });
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -44,6 +60,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         ssid = findViewById(R.id.ssid);
         anyNetwork = findViewById(R.id.any_network);
         autoStart = findViewById(R.id.auto_start);
+        adbWireless = findViewById(R.id.adb_wifi);
         battery = findViewById(R.id.battery);
         status = findViewById(R.id.status);
 
@@ -54,6 +71,16 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         ssid.setText(stored.ssid);
         anyNetwork.setChecked(stored.anyNetwork);
         autoStart.setChecked(ConfigStore.autoStart(this));
+        adbWireless.setChecked(ConfigStore.adbWireless(this));
+        // Unlike the fields above this is one preference, not part of a start:
+        // it takes effect on the next SSID match either way, so saving it now
+        // is what the checkbox appears to promise.
+        adbWireless.setOnCheckedChangeListener((button, checked) -> {
+            ConfigStore.setAdbWireless(this, checked);
+            if (checked && !AdbWireless.granted(this)) {
+                Toast.makeText(this, R.string.adb_wifi_ungranted, Toast.LENGTH_LONG).show();
+            }
+        });
 
         Button start = findViewById(R.id.start);
         start.setOnClickListener(view -> startListening());
@@ -67,6 +94,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     protected void onStart() {
         super.onStart();
         ProxyRuntime.addListener(this);
+        ConfigStore.shared(this).registerOnSharedPreferenceChangeListener(preferences);
         render(ProxyRuntime.state());
     }
 
@@ -81,6 +109,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     @Override
     protected void onStop() {
         ProxyRuntime.removeListener(this);
+        ConfigStore.shared(this).unregisterOnSharedPreferenceChangeListener(preferences);
         super.onStop();
     }
 

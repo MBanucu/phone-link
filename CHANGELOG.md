@@ -20,6 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The app turns Android's wireless debugging back on by itself when the phone
+  joins the configured SSID, because this phone clears the setting on some
+  reboots and nothing advertises the adb port while it is off. The panel has a
+  checkbox for it ("Turn wireless debugging back on when the phone joins the
+  SSID", also `--ez adb_wifi true|false`), and both preference checkboxes now
+  follow the store, so a change made over adb while the panel is open appears
+  there at once. The write needs `WRITE_SECURE_SETTINGS`, which adb can grant,
+  so `phone-proxy-install` grants it after installing this repository's own
+  APK. Measured: with the switch on, switching the setting off and having the
+  phone re-join `PhoneLink` ends with the app logging `wireless debugging
+  enabled (it was off)`, a fresh mDNS record and a working `adb connect`.
 - `android/`: a SOCKS5 proxy APK of our own, built with `aapt2`/`javac`/`d8`
   instead of Gradle from the new `nix develop .#android` shell. It holds an
   explicit cellular `NetworkRequest` for its egress, listens on the wildcard

@@ -31,6 +31,8 @@ PHONE_HOTSPOT_SSID = _env("PHONE_HOTSPOT_SSID", PHONE_HOTSPOT_CON)
 PHONE_PROXY_PORT = int(_env("PHONE_PROXY_PORT", "1080"))
 PHONE_PROXY_USER = _env("PHONE_PROXY_USER", "proxy")
 PHONE_PROXY_PKG = _env("PHONE_PROXY_PKG", "com.tokyoxpa3.androidproxy")
+# The APK this repository builds, as opposed to the vendored proxy above.
+PHONE_APP_PKG = _env("PHONE_APP_PKG", "org.phonelink.proxy")
 PHONE_ADB_PORT = _env("PHONE_ADB_PORT", "5555")
 PHONE_SECRETS = _env("PHONE_SECRETS", "/etc/nixos/phone-socks-secrets")
 PHONE_NM_SYSTEM_CONNECTIONS = _env(

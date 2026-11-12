@@ -37,6 +37,12 @@
          and the listener stays shut. -->
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Wireless debugging is switched off by the reboot on this phone, and the
+         port the scripts need only exists while it is on. WRITE_SECURE_SETTINGS
+         is a development permission, so `adb shell pm grant` (done by
+         phone-proxy-install) hands it over; AdbWireless then turns the setting
+         back on whenever the phone joins the configured SSID. -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
 
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />

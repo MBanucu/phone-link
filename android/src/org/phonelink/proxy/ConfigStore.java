@@ -22,6 +22,7 @@ final class ConfigStore {
     static final String EXTRA_SSID = "ssid";
     static final String EXTRA_ANY_NETWORK = "any_network";
     static final String EXTRA_AUTO_START = "auto_start";
+    static final String EXTRA_ADB_WIFI = "adb_wifi";
 
     private static final String PREFS = "config";
     private static final String KEY_PORT = "port";
@@ -30,13 +31,21 @@ final class ConfigStore {
     private static final String KEY_ANONYMOUS = "anonymous";
     private static final String KEY_SSID = "ssid";
     private static final String KEY_ANY_NETWORK = "any_network";
-    private static final String KEY_AUTO_START = "auto_start";
+    // Package-private so the panel can follow a preference that adb changed
+    // while it is open, through a shared-preferences listener.
+    static final String KEY_AUTO_START = "auto_start";
+    static final String KEY_ADB_WIFI = "adb_wifi";
 
     private ConfigStore() {
     }
 
     private static SharedPreferences prefs(Context context) {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    /** The same store, for a listener the panel registers while it is visible. */
+    static SharedPreferences shared(Context context) {
+        return prefs(context);
     }
 
     static boolean isConfigured(Context context) {
@@ -55,6 +64,20 @@ final class ConfigStore {
 
     static void setAutoStart(Context context, boolean enabled) {
         prefs(context).edit().putBoolean(KEY_AUTO_START, enabled).apply();
+    }
+
+    /**
+     * Whether joining the configured SSID should also switch Android's wireless
+     * debugging back on. Off by choice is a real choice — the setting is also
+     * reachable from Developer options — so the panel owns it, and it is on by
+     * default because the host has no other way in after a reboot.
+     */
+    static boolean adbWireless(Context context) {
+        return prefs(context).getBoolean(KEY_ADB_WIFI, true);
+    }
+
+    static void setAdbWireless(Context context, boolean enabled) {
+        prefs(context).edit().putBoolean(KEY_ADB_WIFI, enabled).apply();
     }
 
     /** Stored values, unvalidated: the panel uses them to fill its fields. */
@@ -96,6 +119,10 @@ final class ConfigStore {
 
         if (intent != null && intent.hasExtra(EXTRA_AUTO_START)) {
             setAutoStart(context, intent.getBooleanExtra(EXTRA_AUTO_START, autoStart(context)));
+        }
+        if (intent != null && intent.hasExtra(EXTRA_ADB_WIFI)) {
+            setAdbWireless(
+                    context, intent.getBooleanExtra(EXTRA_ADB_WIFI, adbWireless(context)));
         }
 
         if (intent != null) {
