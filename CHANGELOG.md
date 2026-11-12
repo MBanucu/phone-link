@@ -73,6 +73,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `New proxy` is pinned under the list instead of sitting at the end of it: with
+  ten proxies saved the button was ten cards away, which the live harness's new
+  ten-proxy check made plain. Only the cards scroll now.
+- The live harness takes its dumps from its own accessibility service
+  (`android/capture/`, a test-only APK installed and removed by a run)  instead of `adb shell uiautomator dump`: a requested capture is 0.1–0.4 s against
+  2.5 s (a cold JVM plus the wait for a quiet accessibility window), which took
+  a whole run from 530 s to under 380 s, and it records a capture for every
+  changed screen by itself — 387 in that run against 122 polled ones. It writes
+  what `uiautomator` would have: only what is visible and only the windows of the
+  app in front, so the harness's lookups behave the same on either source.
+- A live run no longer hangs behind Play Protect: the offer to send an unknown
+  app for a security check keeps `adb install` waiting on a dialog nobody can
+  see, so `verifier_verify_adb_installs` is off for the run and put back after.
+- The harness clears the `harness-*` profiles an interrupted run left behind,
+  and `panel_open` scrolls to a card instead of requiring it on the first
+  screen: a killed run used to poison the next one with its leftovers.
 - `RENAME_PROFILE` renames a saved configuration over adb (`--es profile NAME
   --es to NEW`), and `Rename` in the panel's menu does the same on the phone:
   the settings, the two service switches and the mark of which proxy is in use

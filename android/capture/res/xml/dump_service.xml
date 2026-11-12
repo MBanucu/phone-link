@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  typeAllMask because the change we care about is "anything happened":
+  a window switch, a content subtree replaced, a text or state description
+  updated. notificationTimeout is the system's own throttle, in milliseconds —
+  the service debounces again on top of it, because one tap is several events.
+  flagReportViewIds is what puts `resource-id="pkg:id/name"` in the XML, which
+  is what the harness looks controls up by.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeAllMask"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/service_description"
+    android:notificationTimeout="60" />

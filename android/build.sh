@@ -1,7 +1,14 @@
 #!/bin/sh
-# Build the phone-link proxy APK without Gradle: aapt2, javac, d8, zipalign,
+# Build the APKs of this project without Gradle: aapt2, javac, d8, zipalign,
 # apksigner. No AndroidX and no third-party dependencies means no repository to
 # resolve, so the build works offline once the SDK is in the store.
+#
+# Two APKs come out of it:
+#
+#   build/phone-link-proxy.apk  the proxy itself (sources in src/, res/)
+#   build/capture.apk           the test-only accessibility service that writes
+#                               the screen as XML for the live harness
+#                               (sources in capture/)
 set -eu
 
 here=$(cd -- "$(dirname -- "$0")" && pwd -P)
@@ -40,31 +47,7 @@ echo "build-tools: $build_tools"
 echo "platform:    $android_jar"
 
 rm -rf "$build"
-mkdir -p "$build/res" "$build/gen" "$build/classes" "$build/dex"
-
-"$build_tools/aapt2" compile --dir "$here/res" -o "$build/res/resources.zip"
-"$build_tools/aapt2" link \
-    --manifest "$here/AndroidManifest.xml" \
-    --java "$build/gen" \
-    -I "$android_jar" \
-    -o "$build/unaligned.apk" \
-    "$build/res/resources.zip"
-
-find "$here/src" "$build/gen" -name '*.java' -print | sort > "$build/sources.txt"
-javac --release 11 -encoding UTF-8 -Xlint:all -Werror \
-    -classpath "$android_jar" \
-    -d "$build/classes" \
-    @"$build/sources.txt"
-
-# shellcheck disable=SC2046 # the build directory is ours and holds no spaces
-"$build_tools/d8" --lib "$android_jar" --min-api 29 --output "$build/dex" \
-    $(find "$build/classes" -name '*.class' -print)
-
-cp "$build/unaligned.apk" "$build/base.apk"
-# Stored, not deflated: ART maps the dex in place rather than unpacking it.
-(cd "$build/dex" && zip -q -0 "$build/base.apk" classes.dex)
-
-"$build_tools/zipalign" -f -p 4 "$build/base.apk" "$build/aligned.apk"
+mkdir -p "$build"
 
 # One fixed key, tracked in the repository, so every build carries the same
 # signature and `adb install -r` updates the app instead of refusing it. Only
@@ -78,11 +61,48 @@ if [ ! -f "$keystore" ]; then
         -dname "CN=phone-link proxy debug" >/dev/null 2>&1
 fi
 
-apk="$build/phone-link-proxy.apk"
-"$build_tools/apksigner" sign \
-    --ks "$keystore" --ks-pass pass:android --key-pass pass:android \
-    --ks-key-alias androiddebugkey \
-    --out "$apk" "$build/aligned.apk"
-"$build_tools/apksigner" verify --print-certs "$apk" | head -3
+# build_apk NAME SOURCE_DIR RESOURCE_DIR MANIFEST
+build_apk() {
+    name=$1
+    src=$2
+    res=$3
+    manifest=$4
+    work="$build/$name"
+    mkdir -p "$work/res" "$work/gen" "$work/classes" "$work/dex"
 
-echo "built $apk ($(wc -c < "$apk") bytes)"
+    "$build_tools/aapt2" compile --dir "$res" -o "$work/res/resources.zip"
+    "$build_tools/aapt2" link \
+        --manifest "$manifest" \
+        --java "$work/gen" \
+        -I "$android_jar" \
+        -o "$work/unaligned.apk" \
+        "$work/res/resources.zip"
+
+    find "$src" "$work/gen" -name '*.java' -print | sort > "$work/sources.txt"
+    javac --release 11 -encoding UTF-8 -Xlint:all -Werror \
+        -classpath "$android_jar" \
+        -d "$work/classes" \
+        @"$work/sources.txt"
+
+    # shellcheck disable=SC2046 # the build directory is ours and holds no spaces
+    "$build_tools/d8" --lib "$android_jar" --min-api 29 --output "$work/dex" \
+        $(find "$work/classes" -name '*.class' -print)
+
+    cp "$work/unaligned.apk" "$work/base.apk"
+    # Stored, not deflated: ART maps the dex in place rather than unpacking it.
+    (cd "$work/dex" && zip -q -0 "$work/base.apk" classes.dex)
+
+    "$build_tools/zipalign" -f -p 4 "$work/base.apk" "$work/aligned.apk"
+
+    apk="$build/$name.apk"
+    "$build_tools/apksigner" sign \
+        --ks "$keystore" --ks-pass pass:android --key-pass pass:android \
+        --ks-key-alias androiddebugkey \
+        --out "$apk" "$work/aligned.apk"
+    "$build_tools/apksigner" verify --print-certs "$apk" | head -3
+
+    echo "built $apk ($(wc -c < "$apk") bytes)"
+}
+
+build_apk phone-link-proxy "$here/src" "$here/res" "$here/AndroidManifest.xml"
+build_apk capture "$here/capture/src" "$here/capture/res" "$here/capture/AndroidManifest.xml"

@@ -268,8 +268,8 @@ ignores clicks there) and uninstalls. It leaves the vendored proxy alone
 
 Every run records the evidence a failure needs: `result-live/<timestamp>/`
 holds the phone's screen as `screen.mp4` for the length of the run and the
-screen as XML for every dump uiautomator served (about every two and a half
-seconds, `ui-index.csv` says when each was taken);
+screen as XML for every change the capture service recorded (`ui-index.csv`
+says when each was taken and what caused it);
 `tests/live/frames.sh result-live/<timestamp>/screen.mp4 0:42` turns any moment
 of the recording into a still. One row per step is appended to
 `result-live/timings.csv` with its seconds and its pass/fail counts, and the

@@ -57,7 +57,8 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     private View back;
     private TextView headerTitle;
     private View warning;
-    private ScrollView homeScreen;
+    /** The list page, cards and the button under them, as one thing to hide. */
+    private View homeScreen;
     private LinearLayout profileScreen;
     private LinearLayout profileList;
     private TextView homeEmpty;

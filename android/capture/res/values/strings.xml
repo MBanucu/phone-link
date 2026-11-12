@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Phone link capture</string>
+    <string name="service_label">Phone link capture</string>
+    <string name="service_description">Writes the screen as XML for the phone-link live harness: once for every changed screen while watching, and once per request from adb.</string>
+</resources>

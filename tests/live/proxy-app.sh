@@ -27,6 +27,8 @@
 #      saved configuration to hold the form — including an auto-start switch
 #      that was toggled in the same visit, and create a proxy from the list's
 #      New proxy button, which has to save it and open it,
+#  10c. save ten proxies and require New proxy to stay reachable under them
+#      and to save an eleventh,
 #  10b. require the open proxy's own log to show the traffic counters, the
 #      events it caused and their port, and Clear to empty the list,
 #  11. stop it,
@@ -43,7 +45,8 @@
 #
 # Every run keeps its evidence in result-live/<UTC start>/ (or
 # PHONE_LIVE_ARTIFACTS): the phone's screen as an mp4 (frames.sh pulls stills
-# out of it), the screen as XML about once a second, and the timing of each
+# out of it), the screen as XML for every dump uiautomator serves, and the
+# timing of each
 # step appended to result-live/timings.csv, which is never rewritten — the
 # history is what makes "is this cheap enough to run before a commit"
 # answerable. PHONE_LIVE_CAPTURE=0 skips the recording and the snapshots.
@@ -58,6 +61,16 @@ START=org.phonelink.proxy.action.START
 STOP=org.phonelink.proxy.action.STOP
 USER_NAME=phonelink-test
 PASSWORD=phonelink-test-password
+# The capture app: a test-only accessibility service that writes the screen as
+# XML in about a tenth of a second, where `adb shell uiautomator dump` costs
+# seconds. It is installed for the run and removed afterwards;
+# PHONE_LIVE_DUMPS=uiautomator uses the slow path on purpose.
+CAPTURE_APK=${PROXY_CAPTURE_APK:-$ROOT/android/build/capture.apk}
+CAPTURE_PKG=${PROXY_CAPTURE_PKG:-org.phonelink.capture}
+CAPTURE_DIR=/sdcard/Android/data/$CAPTURE_PKG/files
+capture_dumps=0
+capture_old_services=""
+capture_old_enabled=""
 
 pass=0
 fail=0
@@ -174,10 +187,67 @@ ui_snapshots() {
     shell timeout 8 uiautomator dump /sdcard/proxy-app-shot.xml >/dev/null 2>&1
     shell cat /sdcard/proxy-app-shot.xml 2>/dev/null | tr -d '\r' \
       >"$ARTIFACTS/ui-$(printf '%05d' "$index").xml"
-    printf '%s,%s\n' "$index" "$(now_ms)" >>"$ARTIFACTS/ui-index.csv"
+    printf '%s,%s,poll\n' "$index" "$(now_ms)" >>"$ARTIFACTS/ui-index.csv"
     dump_unlock
     sleep 0.2
   done
+}
+
+# Install the capture app and point the phone's accessibility settings at it,
+# remembering what they were so the phone is put back exactly as it was found.
+# It is a separate package, so nothing here touches the app under test.
+capture_start() {
+  [ "$capture_dumps" = 1 ] && return 0
+  [ -f "$CAPTURE_APK" ] || return 1
+  [ "${PHONE_LIVE_DUMPS:-capture}" = uiautomator ] && return 1
+  phone install -r -g "$CAPTURE_APK" >/dev/null 2>&1 || return 1
+  capture_old_services=$(shell settings get secure enabled_accessibility_services |
+    tr -d '\r')
+  capture_old_enabled=$(shell settings get secure accessibility_enabled | tr -d '\r')
+  local services="$CAPTURE_PKG/.DumpService"
+  case $capture_old_services in
+    '' | null) ;;
+    *) services="$capture_old_services:$services" ;;
+  esac
+  shell settings put secure enabled_accessibility_services "$services" >/dev/null 2>&1
+  shell settings put secure accessibility_enabled 1 >/dev/null 2>&1
+  shell rm -rf "$CAPTURE_DIR" >/dev/null 2>&1
+  sleep 3
+  # Only believe it when a capture comes back: a service that could not bind
+  # looks exactly like one that was never enabled.
+  if capture_dump | grep -q '<hierarchy'; then
+    capture_dumps=1
+    return 0
+  fi
+  capture_stop
+  return 1
+}
+
+capture_stop() {
+  capture_watch false
+  if [ -n "$capture_old_services$capture_old_enabled" ]; then
+    shell settings put secure enabled_accessibility_services \
+      "$capture_old_services" >/dev/null 2>&1
+    shell settings put secure accessibility_enabled "$capture_old_enabled" \
+      >/dev/null 2>&1
+    capture_old_services=""
+    capture_old_enabled=""
+  fi
+  capture_dumps=0
+}
+
+# One capture through the service: the broadcast writes the file before it
+# returns, so this is two adb round trips and no waiting.
+capture_dump() {
+  shell am broadcast -a "$CAPTURE_PKG.DUMP" -n "$CAPTURE_PKG/.DumpReceiver" \
+    >/dev/null 2>&1
+  shell cat "$CAPTURE_DIR/latest.xml" 2>/dev/null | tr -d '\r'
+}
+
+# Automatic captures on or off: one XML per changed screen.
+capture_watch() { # capture_watch true|false
+  shell am broadcast -a "$CAPTURE_PKG.WATCH" --ez watch "$1" \
+    -n "$CAPTURE_PKG/.DumpReceiver" >/dev/null 2>&1
 }
 
 start_capture() {
@@ -188,9 +258,15 @@ start_capture() {
   screenrecord_pid=$(shell "screenrecord --bit-rate 4000000 --time-limit 1800 \
 /sdcard/proxy-app.mp4 >/dev/null 2>&1 & echo \$!")
   screenrecord_pid=$(printf '%s' "$screenrecord_pid" | tr -d '\r\n ')
-  : >"$ARTIFACTS/.capturing"
-  ui_snapshots &
-  snapshot_pid=$!
+  if [ "$capture_dumps" = 1 ]; then
+    # The service records a screen per change by itself; there is nothing to
+    # poll, and its files are pulled when the run ends.
+    capture_watch true
+  else
+    : >"$ARTIFACTS/.capturing"
+    ui_snapshots &
+    snapshot_pid=$!
+  fi
   capturing=1
   printf 'capture: screen.mp4 and ui-*.xml in %s\n' "$ARTIFACTS"
 }
@@ -198,6 +274,15 @@ start_capture() {
 stop_capture() {
   [ "$capturing" = 1 ] || return 0
   capturing=0
+  if [ "$capture_dumps" = 1 ]; then
+    capture_watch false
+    phone pull "$CAPTURE_DIR/." "$ARTIFACTS/" >/dev/null 2>&1
+    shell rm -rf "$CAPTURE_DIR" >/dev/null 2>&1
+    if [ -f "$ARTIFACTS/index.csv" ]; then
+      mv -f "$ARTIFACTS/index.csv" "$ARTIFACTS/ui-index.csv"
+    fi
+    rm -f "$ARTIFACTS/latest.xml"
+  fi
   rm -f "$ARTIFACTS/.capturing"
   if [ -n "$snapshot_pid" ]; then
     wait "$snapshot_pid" 2>/dev/null
@@ -215,7 +300,12 @@ stop_capture() {
 
 cleanup() {
   stop_capture
+  # Off the phone again: the settings go back to what they were and the test
+  # package is uninstalled, so nothing of this run is left behind.
+  capture_stop
+  phone uninstall "$CAPTURE_PKG" >/dev/null 2>&1
   restore_autofill
+  restore_play_protect
   shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
   shell cmd statusbar collapse >/dev/null 2>&1
   # Whatever this run saved: a crash halfway through must not leave the phone
@@ -331,14 +421,20 @@ ui_dump() {
   # animating ("could not get idle state"), and a toast, which takes the focus
   # and makes the dump contain only the toast window. Both are waited out: the
   # answer is only accepted when the panel itself is in it.
-  local attempt xml
-  for attempt in 1 2 3 4 5 6; do
-    # A dump can hang while a window never goes idle, so give it a deadline,
-    # and it waits for a snapshot to finish instead of colliding with it.
-    dump_lock
-    shell timeout 8 uiautomator dump /sdcard/proxy-app-ui.xml >/dev/null 2>&1
-    xml=$(shell cat /sdcard/proxy-app-ui.xml 2>/dev/null | tr -d '\r')
-    dump_unlock
+  local attempt xml recovered=0
+  for attempt in 1 2 3 4 5 6 7 8; do
+    if [ "$capture_dumps" = 1 ]; then
+      # The capture app answers in about a tenth of a second and writes the
+      # file before the broadcast returns, so nothing is waited for.
+      xml=$(capture_dump)
+    else
+      # A dump can hang while a window never goes idle, so give it a deadline,
+      # and it waits for a snapshot to finish instead of colliding with it.
+      dump_lock
+      shell timeout 8 uiautomator dump /sdcard/proxy-app-ui.xml >/dev/null 2>&1
+      xml=$(shell cat /sdcard/proxy-app-ui.xml 2>/dev/null | tr -d '\r')
+      dump_unlock
+    fi
     # Accept the panel, or one of the app's own dialogs: the battery request is
     # a window of its own and the dump then holds only that one.
     if printf '%s' "$xml" | grep -q '<hierarchy' &&
@@ -348,12 +444,23 @@ ui_dump() {
       printf '%s\n' "$xml"
       return 0
     fi
-    # Nothing of the app in the dump means something else has the focus, most
-    # often a system or password-manager sheet that a typed field called up,
-    # and Back is the way past it. The app's own dialogs carry its package and
-    # are left alone; on the launcher Back does nothing.
+    # Nothing of the app in the dump means something else has the focus. The
+    # app gets one chance to come back first, and only then Back, which is what
+    # dismisses a system or password-manager sheet (or the keyboard, a window of
+    # its own). Once each per call: a Back per retry walks out of the app and
+    # then off its home screen, which is how a whole run ends up on the
+    # launcher.
     if ! printf '%s' "$xml" | grep -q "package=\"$PKG\""; then
-      shell input keyevent 4 >/dev/null 2>&1
+      case $recovered in
+        0)
+          shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
+          recovered=1
+          ;;
+        1)
+          shell input keyevent 4 >/dev/null 2>&1
+          recovered=2
+          ;;
+      esac
     fi
     sleep 1
   done
@@ -418,17 +525,30 @@ panel_toggle() {
 }
 
 ui_tap_text() { # ui_tap_text TEXT -> taps the one node carrying that text
-  local x y
-  x=""
-  y=""
-  read -r x y <<EOF
+  # The position has to hold still for two captures first: a menu that is still
+  # animating in is in the dump, but at a place it is about to leave, and a tap
+  # there lands on the item that is moving into it.
+  local x y px py attempt
+  px=""
+  py=""
+  for attempt in 1 2 3 4 5 6; do
+    x=""
+    y=""
+    read -r x y <<EOF
 $(ui_dump | tr '>' '\n' | grep "text=\"$1\"" | head -1 |
   sed -n 's/.*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/p' |
   awk '{ if (NF == 4) print int(($1 + $3) / 2), int(($2 + $4) / 2) }')
 EOF
-  [ -n "$x" ] || return 1
-  shell input tap "$x" "$y"
-  sleep 1
+    if [ -n "$x" ] && [ "$x" = "$px" ] && [ "$y" = "$py" ]; then
+      shell input tap "$x" "$y"
+      sleep 1
+      return 0
+    fi
+    px=$x
+    py=$y
+    sleep 0.5
+  done
+  return 1
 }
 
 # The menu is a popup over the header, opened by the burger.
@@ -481,7 +601,10 @@ panel_home() {
   local attempt xml
   for attempt in 1 2 3; do
     xml=$(ui_dump) || xml=""
-    if printf '%s' "$xml" | grep -q "id/new_profile\""; then
+    # The list shows either the button that makes a new proxy or the list's
+    # own scroll area; a dump holds only what is visible, so either one being
+    # there is what "the list is showing" means.
+    if printf '%s' "$xml" | grep -q 'id/new_profile"\|id/home_scroll"'; then
       return 0
     fi
     if printf '%s' "$xml" | grep -q "id/header_title"; then
@@ -500,17 +623,26 @@ panel_home() {
 panel_open() { # panel_open NAME -> taps that proxy's card
   panel_home || return 1
   local x y
-  x=""
-  y=""
-  read -r x y <<EOF
+  # A card below the fold is not in a dump, and a long list can put any card
+  # there, so the list is scrolled down until the name shows up.
+  for _ in 1 2 3 4 5 6 7 8; do
+    x=""
+    y=""
+    read -r x y <<EOF
 $(ui_dump | tr '>' '\n' | grep "id/card_name\"" | grep "text=\"$1\"" | head -1 |
   sed -n 's/.*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/p' |
   awk '{ if (NF == 4) print int(($1 + $3) / 2), int(($2 + $4) / 2) }')
 EOF
-  [ -n "$x" ] || return 1
-  shell input tap "$x" "$y"
-  sleep 1
-  ui_dump | grep -q "id/back\""
+    if [ -n "$x" ]; then
+      shell input tap "$x" "$y"
+      sleep 1
+      ui_dump | grep -q "id/back\""
+      return $?
+    fi
+    shell input swipe 1300 2200 1300 1200 200
+    sleep 1
+  done
+  return 1
 }
 
 # The keyboard covers the lower half of a form and would take a tap meant for a
@@ -529,15 +661,24 @@ close_keyboard() {
 }
 
 ui_tap_id() { # ui_tap_id ID -> taps that node where it is, without scrolling
-  local x y
-  x=""
-  y=""
-  read -r x y <<EOF
+  # A node that a tap has just caused to appear — a dialog's button, say — is
+  # not in the capture taken a moment later, and a capture is cheap enough to
+  # keep asking for a few seconds.
+  local x y attempt
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    x=""
+    y=""
+    read -r x y <<EOF
 $(ui_bounds "$1")
 EOF
-  [ -n "$x" ] || return 1
-  shell input tap "$x" "$y"
-  sleep 1
+    if [ -n "$x" ]; then
+      shell input tap "$x" "$y"
+      sleep 1
+      return 0
+    fi
+    sleep 0.5
+  done
+  return 1
 }
 
 ui_text_seek() { # ui_text_seek ID, scrolling down until the line is on screen
@@ -558,7 +699,8 @@ ui_text_seek() { # ui_text_seek ID, scrolling down until the line is on screen
 panel_tap() { # panel_tap ID, scrolling down until the control is on screen
   local id=$1 x y
   panel_top
-  for _ in 1 2 3 4 5 6; do
+  # The Log page is the tall one: its Clear button sits under a long log.
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
     x=""
     y=""
     read -r x y <<EOF
@@ -598,6 +740,25 @@ restore_autofill() {
     '' | null | *://*) return 0 ;;
   esac
   shell settings put secure autofill_service "$autofill_service" >/dev/null 2>&1
+}
+
+# Play Protect offers to send an app it does not know for a security check on
+# install, and `adb install` waits for that answer — a run then hangs in its
+# install step behind a dialog nobody can see. It is off for the run and put
+# back afterwards.
+verifier_setting=""
+quiet_play_protect() {
+  verifier_setting=$(shell settings get global verifier_verify_adb_installs |
+    tr -d '\r')
+  shell settings put global verifier_verify_adb_installs 0 >/dev/null 2>&1
+}
+
+restore_play_protect() {
+  case $verifier_setting in
+    '' | null) return 0 ;;
+  esac
+  shell settings put global verifier_verify_adb_installs "$verifier_setting" \
+    >/dev/null 2>&1
 }
 
 unlock_phone() {
@@ -666,6 +827,18 @@ fi
 # screenrecord needs an unlocked screen, and the snapshots are only useful
 # once the app is on it.
 quiet_autofill
+quiet_play_protect
+# The fast path for every dump in the run, when the capture app is there. It is
+# installed and its service enabled here, so even the first step uses it, and
+# it does not depend on PHONE_LIVE_CAPTURE: that switch is about the artifacts,
+# this is about how the steps read the screen.
+if capture_start; then
+  ok 'the capture service answers a request'
+else
+  printf 'SKIP the capture service (%s); dumps stay on uiautomator, which is\n' \
+    "$CAPTURE_APK"
+  printf '     about 2.5 s each instead of about 0.3 s.\n'
+fi
 start_capture
 
 step 'install'
@@ -675,6 +848,20 @@ else
   bad 'installs'
   printf '\n%d passed, %d failed\n' "$pass" "$fail"
   exit 1
+fi
+# A run that was killed leaves its own harness-* profiles behind, and a pile of
+# them pushes the next run's cards off the screen. They belong to this harness,
+# so they go before anything looks at the list.
+leftovers=$(shell dumpsys activity service "$SERVICE" 2>/dev/null |
+  grep -o '"harness-[0-9a-z-]*"' | tr -d '"' | sort -u)
+if [ -n "$leftovers" ]; then
+  printf '  clearing profiles left by an earlier run: %s\n' "$(echo $leftovers)"
+  for name in $leftovers; do
+    shell am start-foreground-service -n "$SERVICE" \
+      -a org.phonelink.proxy.action.DELETE_PROFILE --es profile "$name" \
+      >/dev/null 2>&1
+    sleep 1
+  done
 fi
 
 
@@ -1186,6 +1373,87 @@ else
 fi
 delete_profile_by_adb harness-new
 
+step 'ten proxies'
+# Ten saved proxies push the list past one screen. `New proxy` sits under it,
+# so it has to stay reachable by scrolling and still save an eleventh.
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  shell am start-foreground-service -n "$SERVICE" \
+    -a org.phonelink.proxy.action.SAVE_PROFILE --es profile "harness-$i" >/dev/null 2>&1
+  sleep 1
+done
+shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
+sleep 1
+if panel_home; then
+  ok 'the list is showing'
+else
+  bad 'the list is showing'
+  panel_where
+fi
+total=$(shell dumpsys activity service "$SERVICE" 2>/dev/null |
+  grep -o '"harness-[0-9]*"' | wc -l)
+if [ "$total" -ge 10 ]; then
+  ok 'ten proxies are saved'
+else
+  bad "ten proxies are saved ($total in the dump)"
+fi
+# A dump holds only what is on screen, so the button is reached the way a hand
+# would reach it: by scrolling the list to its end.
+scrolled=no
+for _ in 1 2 3 4 5 6 7 8; do
+  if ui_dump | grep -q 'id/new_profile"'; then
+    scrolled=yes
+    break
+  fi
+  shell input swipe 1300 2200 1300 1200 200
+  sleep 1
+done
+if [ "$scrolled" = yes ]; then
+  ok 'New proxy is still reachable under ten cards'
+  if ui_tap_id new_profile; then
+    sleep 1
+    shell input text harness-eleven
+    sleep 1
+    close_keyboard
+    sleep 1
+    if ui_tap_id button1; then
+      sleep 2
+      if shell dumpsys activity service "$SERVICE" | sed -n '/  saved/,$p' |
+        grep -q '"harness-eleven"'; then
+        ok 'and it saves an eleventh proxy'
+      else
+        bad 'and it saves an eleventh proxy'
+        panel_where
+      fi
+    else
+      bad 'the name dialog can be answered'
+    fi
+  else
+    bad 'New proxy can be tapped'
+  fi
+else
+  bad 'New proxy is still reachable under ten cards'
+  panel_where
+fi
+# Leave the list as short as the next steps expect: the panel reads the store
+# on resume, so it is left and re-opened after the ten are gone.
+for i in 1 2 3 4 5 6 7 8 9 10 eleven; do
+  shell am start-foreground-service -n "$SERVICE" \
+    -a org.phonelink.proxy.action.DELETE_PROFILE --es profile "harness-$i" \
+    >/dev/null 2>&1
+  sleep 1
+done
+shell input keyevent KEYCODE_HOME >/dev/null 2>&1
+sleep 1
+shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
+sleep 1
+report=$(shell dumpsys activity service "$SERVICE" 2>/dev/null |
+  sed -n '/  saved/,$p' | grep -o '"harness-[0-9]*"' | wc -l)
+if [ "${report:-1}" -eq 0 ]; then
+  ok 'the ten are gone again'
+else
+  bad "the ten are gone again ($report left)"
+fi
+
 step 'proxy log'
 # Start the saved proxy by name so its events carry its name, and move some
 # bytes through it: the page shows this run's counters and this proxy's log.
@@ -1235,11 +1503,20 @@ else
   bad 'and the state changes with their port'
 fi
 panel_tap log_clear
-sleep 1
-if ui_dump | grep -q 'saved configuration'; then
-  bad 'Clear empties the log'
-else
+# Clearing is a redraw like any other: it is asserted to happen, not to have
+# happened before the next dump could be taken.
+cleared=no
+for _ in 1 2 3 4 5; do
+  if ! ui_dump | grep -q 'saved configuration'; then
+    cleared=yes
+    break
+  fi
+  sleep 1
+done
+if [ "$cleared" = yes ]; then
   ok 'Clear empties the log'
+else
+  bad 'Clear empties the log'
 fi
 delete_profile_by_adb harness-panel
 

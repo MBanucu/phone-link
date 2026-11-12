@@ -62,5 +62,8 @@ in
         chmod -R u+w app
         ./app/build.sh
         install -Dm644 app/build/phone-link-proxy.apk $out/phone-link-proxy.apk
+        # The test-only accessibility service the live harness takes its dumps
+        # from; nothing installs it but a test run.
+        install -Dm644 app/build/capture.apk $out/capture.apk
       '';
 }

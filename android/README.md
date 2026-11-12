@@ -98,23 +98,41 @@ deleted the app's stored configuration.
   closed with the service up, `any_network` bypassing the predicate, profiles
   saved and loaded over adb, `Save` on both segments, a card starting and
   stopping its proxy, `Rename` from the menu and `RENAME_PROFILE` over adb, the
-  info marks and `About this app`, `New proxy`, the traffic counters and the log
+  info marks and `About this app`, `New proxy`, ten saved proxies without losing
+  the button under them, the traffic counters and the log
   on the `Log` segment, stop, start and stop again from the Quick Settings tile,
   and uninstall. A phone that stays locked skips the steps that need the screen
   instead of failing. Not part of `nix flake check`.
 
   Every run leaves its evidence in `result-live/<UTC start>/` (gitignored, or
   `PHONE_LIVE_ARTIFACTS`): `screen.mp4`, the phone's screen recorded for the
-  whole run, and `ui-NNNNN.xml`, uiautomator's dump of the screen as often as a
-  dump is served — about every two and a half seconds on this phone, which is
-  what one costs — with `ui-index.csv` giving each one's timestamp, so what the
-  phone showed at a moment can be re-read afterwards. `tests/live/frames.sh
-  result-live/<run>/screen.mp4 0:42 95.5` writes a still per moment; it needs
-  ffmpeg on the host. Each step's duration and pass/fail counts are appended to
-  `result-live/timings.csv`, one row per step plus a `TOTAL` row: the file is
-  never rewritten, which is what makes "how long does this run cost" a question
-  with an answer. `PHONE_LIVE_CAPTURE=0` turns the recording and the snapshots
-  off for a quick run.
+  whole run, and `ui-NNNNN.xml`, the screen as XML for every change the
+  accessibility capture recorded — 387 of them in the last run, against 122
+  from polling — with `ui-index.csv` giving each one's timestamp and what
+  caused it, so what the phone showed at a moment can be re-read afterwards.
+  `tests/live/frames.sh result-live/<run>/screen.mp4 0:42 95.5` writes a still
+  per moment; it needs ffmpeg on the host. Each step's duration and pass/fail
+  counts are appended to `result-live/timings.csv`, one row per step plus a
+  `TOTAL` row: the file is never rewritten, which is what makes "how long does
+  this run cost" a question with an answer. `PHONE_LIVE_CAPTURE=0` turns the
+  recording and the snapshots off for a quick run.
+
+  The XML comes from `capture/` — a second, test-only APK with an
+  `AccessibilityService` that writes the screen on demand and once per changed
+  screen. `adb shell uiautomator dump` costs about 2.5 s here (a cold JVM, then
+  the wait for a quiet accessibility window); the service is already connected,
+  so a requested capture is 0.1–0.4 s, and the whole run went from 530 s to
+  under 380 s while making 6 more checks. The harness installs it, enables it through
+  `settings put secure enabled_accessibility_services` (and puts the phone's
+  previous value back), and uninstalls it at the end; `PHONE_LIVE_DUMPS=uiautomator`
+  keeps the slow path, which is also what happens when the capture APK is not
+  built.
+
+  It writes what `uiautomator` would have: only what is visible (an off-screen
+  child of a scroll view has no place in a dump, and a caller that taps the
+  centre of one taps something else), and only the windows of the app in front
+  plus its own dialogs, so the status bar and the launcher behind it stay out
+  of the way.
 
 ## Run
 
@@ -248,8 +266,12 @@ The card of the one the service is using says `in use · …` and follows the
 service as clients come and go. With nothing saved the page says so, and
 `New proxy` is the way in either way: it copies the configuration in use — same
 credentials and network — takes the next free port, and opens the result, so
-the wizard is the opened proxy itself. A name that already exists is refused
-rather than overwritten; `Save as…` is the way to make a copy on purpose.
+the wizard is the opened proxy itself. Only the cards scroll: `New proxy` is
+pinned under them, because with a dozen saved proxies a button at the end of
+the list is a dozen cards away (measured with ten: the button stays on screen
+and the eleventh proxy is created without scrolling). A name that already
+exists is refused rather than overwritten; `Save as…` is the way to make a copy
+on purpose.
 
 That shape is also where several proxies will report into once the service can
 run more than one at a time: a card's state is already that proxy's own state,

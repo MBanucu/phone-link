@@ -66,53 +66,67 @@
         android:layout_weight="1">
 
         <!-- Every saved proxy, each with its own state and its own button. -->
-        <ScrollView
+        <LinearLayout
             android:id="@+id/screen_home"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:fillViewport="true">
+            android:orientation="vertical">
 
-            <LinearLayout
+            <!-- Only the cards scroll: with a dozen saved proxies the button
+                 below them would be a dozen cards away. -->
+            <ScrollView
+                android:id="@+id/home_scroll"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:paddingTop="6dp">
-
-                <TextView
-                    android:id="@+id/home_empty"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:paddingBottom="12dp"
-                    android:alpha="0.75"
-                    android:text="@string/home_empty"
-                    android:textAppearance="?android:attr/textAppearanceSmall"
-                    android:visibility="gone" />
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:fillViewport="true">
 
                 <LinearLayout
-                    android:id="@+id/profile_list"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical" />
+                    android:orientation="vertical"
+                    android:paddingTop="6dp">
 
-                <LinearLayout
-                    style="@style/FieldLabelRow"
-                    android:layout_height="wrap_content"
-                    android:paddingTop="4dp">
-
-                    <Button
-                        android:id="@+id/new_profile"
-                        style="?android:attr/buttonStyleSmall"
-                        android:layout_width="0dp"
+                    <TextView
+                        android:id="@+id/home_empty"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="@string/action_new" />
+                        android:paddingBottom="12dp"
+                        android:alpha="0.75"
+                        android:text="@string/home_empty"
+                        android:textAppearance="?android:attr/textAppearanceSmall"
+                        android:visibility="gone" />
 
-                    <ImageButton
-                        android:id="@+id/info_new"
-                        style="@style/InfoMark" />
+                    <LinearLayout
+                        android:id="@+id/profile_list"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical" />
                 </LinearLayout>
+            </ScrollView>
+
+            <!-- The way in stays where the thumb is, however long the list is,
+                 on its own surface so the cards scroll behind it. -->
+            <LinearLayout
+                style="@style/FieldLabelRow"
+                android:layout_height="wrap_content"
+                android:background="?android:attr/windowBackground"
+                android:paddingTop="6dp"
+                android:paddingBottom="4dp">
+
+                <Button
+                    android:id="@+id/new_profile"
+                    style="?android:attr/buttonStyleSmall"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/action_new" />
+
+                <ImageButton
+                    android:id="@+id/info_new"
+                    style="@style/InfoMark" />
             </LinearLayout>
-        </ScrollView>
+        </LinearLayout>
 
         <!-- One proxy: three segments, one toggle, one line of state. -->
         <LinearLayout
