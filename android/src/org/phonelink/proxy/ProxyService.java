@@ -19,14 +19,20 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Keeps a SOCKS5 listener alive and reports it in the notification shade.
+ * Keeps a SOCKS5 listener alive while the uplink makes sense, and reports it in
+ * the notification shade.
  *
  * <p>Control surface, exported for adb only: the service is guarded by
  * {@code android.permission.DUMP}, which the shell user holds and ordinary apps
  * do not, so {@code am start-foreground-service} can drive it and nothing else
  * can. That is what makes starting the proxy independent of the lock screen.
+ *
+ * <p>The listener is only open while {@link Uplink} says the phone is on the
+ * configured Wi-Fi or tethering; otherwise the service stays up, reports why,
+ * and binds nothing.
  */
-public final class ProxyService extends Service implements Socks5Server.Listener {
+public final class ProxyService extends Service
+        implements Socks5Server.Listener, Uplink.Listener {
 
     static final String TAG = "phone-link-proxy";
 
@@ -37,14 +43,19 @@ public final class ProxyService extends Service implements Socks5Server.Listener
     static final String EXTRA_USER = "user";
     static final String EXTRA_PASSWORD = "password";
     static final String EXTRA_ANONYMOUS = "anonymous";
+    static final String EXTRA_SSID = "ssid";
+    static final String EXTRA_ANY_NETWORK = "any_network";
 
     private static final String PREFS = "config";
     private static final String KEY_PORT = "port";
     private static final String KEY_USER = "user";
     private static final String KEY_PASSWORD = "password";
     private static final String KEY_ANONYMOUS = "anonymous";
+    private static final String KEY_SSID = "ssid";
+    private static final String KEY_ANY_NETWORK = "any_network";
 
     private static final int DEFAULT_PORT = 1080;
+    private static final String DEFAULT_SSID = "PhoneLink";
     private static final int NOTIFICATION_ID = 1;
     private static final int ERROR_NOTIFICATION_ID = 2;
     private static final String CHANNEL = "proxy";
@@ -56,6 +67,8 @@ public final class ProxyService extends Service implements Socks5Server.Listener
     private NotificationManager notifications;
     private Egress egress;
     private Socks5Server server;
+    private Uplink uplink;
+    private Config config;
     private String detail = "starting";
 
     static boolean isConfigured(Context context) {
@@ -90,19 +103,22 @@ public final class ProxyService extends Service implements Socks5Server.Listener
         // Must happen within five seconds of startForegroundService().
         startForeground(NOTIFICATION_ID, buildNotification("starting"));
 
-        Config config;
         try {
             config = readConfig(intent);
         } catch (IllegalArgumentException e) {
             fail(e.getMessage());
             return START_NOT_STICKY;
         }
-        startListening(config);
+        startWatching();
         return START_STICKY;
     }
 
     @Override
     public void onDestroy() {
+        if (uplink != null) {
+            uplink.close();
+            uplink = null;
+        }
         stopListening();
         stopForeground(STOP_FOREGROUND_REMOVE);
         notifications.cancel(NOTIFICATION_ID);
@@ -114,8 +130,10 @@ public final class ProxyService extends Service implements Socks5Server.Listener
         return null;
     }
 
+    /** Called from connection threads. */
     @Override
     public void onClientsChanged(int connected) {
+        String text;
         synchronized (lock) {
             if (connected > 0) {
                 if (!wakeLock.isHeld()) {
@@ -128,29 +146,67 @@ public final class ProxyService extends Service implements Socks5Server.Listener
                 wakeLock.release();
             }
             detail = describe(connected);
+            text = detail;
+        }
+        if (server != null) {
+            notifications.notify(NOTIFICATION_ID, buildNotification(text));
+        }
+    }
+
+    /** Called on the main thread by {@link Uplink}. */
+    @Override
+    public void onUplinkChanged(boolean allowed, String why) {
+        Log.i(TAG, "uplink " + (allowed ? "allowed" : "paused") + ": " + why);
+        if (allowed) {
+            startListening();
+            if (server == null) {
+                // startListening() failed and already stopped the service.
+                return;
+            }
+            synchronized (lock) {
+                detail = describe(clients.get());
+            }
+        } else {
+            stopListening();
+            synchronized (lock) {
+                detail = "not listening: " + why;
+            }
         }
         notifications.notify(NOTIFICATION_ID, buildNotification(detail));
     }
 
-    private void startListening(Config config) {
+    private void startWatching() {
+        if (uplink != null) {
+            uplink.close();
+            uplink = null;
+        }
         stopListening();
-        egress = new Egress(this);
-        egress.start();
+        synchronized (lock) {
+            detail = "waiting for an allowed network";
+        }
+        uplink = new Uplink(this, config.ssid, config.anyNetwork, this::onUplinkChanged);
+        uplink.start();
+    }
+
+    private void startListening() {
+        if (server != null) {
+            return;
+        }
+        if (egress == null) {
+            egress = new Egress(this);
+            egress.start();
+        }
         Socks5Server candidate =
                 new Socks5Server(config.port, config.user, config.password, egress, this);
         try {
             candidate.start();
         } catch (IOException e) {
-            egress.close();
-            egress = null;
             fail("cannot listen on 0.0.0.0:" + config.port + ": " + e.getMessage());
             return;
         }
         server = candidate;
-        detail = describe(0);
         Log.i(TAG, "listening on 0.0.0.0:" + config.port
                 + (config.user.isEmpty() ? " without authentication" : " with authentication"));
-        notifications.notify(NOTIFICATION_ID, buildNotification(detail));
     }
 
     private void stopListening() {
@@ -159,6 +215,8 @@ public final class ProxyService extends Service implements Socks5Server.Listener
             server = null;
         }
         if (egress != null) {
+            // No client can arrive while nothing is bound, so the cellular
+            // request would only keep the radio busy.
             egress.close();
             egress = null;
         }
@@ -222,6 +280,12 @@ public final class ProxyService extends Service implements Socks5Server.Listener
         String password = intent != null && intent.hasExtra(EXTRA_PASSWORD)
                 ? value(intent.getStringExtra(EXTRA_PASSWORD))
                 : prefs.getString(KEY_PASSWORD, "");
+        String ssid = intent != null && intent.hasExtra(EXTRA_SSID)
+                ? value(intent.getStringExtra(EXTRA_SSID))
+                : prefs.getString(KEY_SSID, DEFAULT_SSID);
+        boolean anyNetwork = intent != null && intent.hasExtra(EXTRA_ANY_NETWORK)
+                ? intent.getBooleanExtra(EXTRA_ANY_NETWORK, false)
+                : prefs.getBoolean(KEY_ANY_NETWORK, false);
 
         if (port < 1024 || port > 65535) {
             throw new IllegalArgumentException("port must be 1024..65535, got " + port);
@@ -240,14 +304,20 @@ public final class ProxyService extends Service implements Socks5Server.Listener
                 throw new IllegalArgumentException("user and password must be at most 255 bytes");
             }
         }
+        if (!anyNetwork && ssid.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "no SSID to match: pass ssid, or any_network=true");
+        }
 
         prefs.edit()
                 .putInt(KEY_PORT, port)
                 .putString(KEY_USER, user)
                 .putString(KEY_PASSWORD, password)
                 .putBoolean(KEY_ANONYMOUS, anonymous)
+                .putString(KEY_SSID, ssid)
+                .putBoolean(KEY_ANY_NETWORK, anyNetwork)
                 .apply();
-        return new Config(port, user, password);
+        return new Config(port, user, password, ssid, anyNetwork);
     }
 
     private static String value(String given) {
@@ -262,11 +332,15 @@ public final class ProxyService extends Service implements Socks5Server.Listener
         final int port;
         final String user;
         final String password;
+        final String ssid;
+        final boolean anyNetwork;
 
-        Config(int port, String user, String password) {
+        Config(int port, String user, String password, String ssid, boolean anyNetwork) {
             this.port = port;
             this.user = user;
             this.password = password;
+            this.ssid = ssid;
+            this.anyNetwork = anyNetwork;
         }
     }
 }

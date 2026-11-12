@@ -26,6 +26,32 @@ network once the SDK is in the store.
   nothing else does. Starting or stopping the proxy does not need the phone
   unlocked, a uiautomator dump, or a button text.
 
+## When it listens
+
+The port is only open while the uplink makes sense, so the phone can sit on a
+hotel or café Wi-Fi without offering a relay to it:
+
+| phone state | verdict |
+|---|---|
+| client of the configured SSID (`PhoneLink` by default) | listening |
+| tethering: `ap0` (hotspot) or `rndis0` (USB) has an IPv4 address | listening |
+| joined any other Wi-Fi | paused, port closed |
+| no Wi-Fi, no tether | paused, port closed |
+
+The service stays in the foreground while paused and reports why
+(`not listening: on "FRITZ!Box 7530 XJ", not "PhoneLink"`), so it opens by
+itself when the phone rejoins `PhoneLink` or the hotspot comes up. SSID changes
+arrive as connectivity callbacks; tethering has no callback, so it is polled
+every 30 s.
+
+Reading the SSID is reading location data, and three things are needed for it,
+all in the manifest: `ACCESS_FINE_LOCATION` granted and location switched on;
+`ACCESS_WIFI_STATE`, because `WifiManager` is the source that is not redacted on
+this build (the copy in `NetworkCapabilities` reports `<unknown ssid>`); and a
+foreground service of type `location` alongside `specialUse`, because a
+`specialUse`-only service counts as a background app for location access. A
+redacted SSID is treated as "not the configured one", never as a match.
+
 ## Build
 
 ```sh
@@ -78,6 +104,11 @@ sticky restart or the boot receiver reuses them:
 | `user` (`--es`) | — | RFC 1929 username, required |
 | `password` (`--es`) | — | RFC 1929 password, required |
 | `anonymous` (`--ez`) | `false` | listen without authentication |
+| `ssid` (`--es`) | `PhoneLink` | SSID the listener may run on |
+| `any_network` (`--ez`) | `false` | ignore the predicate and always listen |
+
+Every extra is persisted, so a later start without one reuses the stored value;
+pass it explicitly to change a setting.
 
 Passing the credential on the `am` command line puts it in the shell process's
 argv for the moment the command runs — the same exposure as any `adb shell`
@@ -87,9 +118,12 @@ wildcard listener on a Wi-Fi LAN is an open relay.
 
 ## What this scaffold does not do yet
 
-- No SSID/uplink predicate: it listens wherever the phone is. On an unrelated
-  Wi-Fi with the service running, port 1080 is reachable by that LAN (behind the
-  password).
+- The tether branches are unexercised: only the SSID path was measured on the
+  phone. Hotspot and USB tether are detected from `ap0`/`rndis0` and have not
+  been seen to allow a listener end to end.
+- Restarting after a reboot with a `location` foreground service is unverified.
+  Android may refuse to start that type from `BOOT_COMPLETED`; the receiver then
+  logs and leaves the listener off until the next explicit start.
 - No settings activity; everything is driven by adb intents.
 - The `phone-proxy-*` scripts still talk to the old app's screen and its
   `Start 5G Proxy` / `Stop Proxy Service` buttons. Repointing them at this
