@@ -30,7 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   network — so the tile is for the cold case, not the daily one. The service
   now declares the `location` foreground type alone, because Android 15 refuses
   a `specialUse` service from `BOOT_COMPLETED`; a start from the shade without
-  background location now reports why instead of crashing.
+  background location now reports why instead of crashing. The boot restart
+  also needs the app on the battery-optimization allowlist — Android 15 treats a
+  `location` start from `BOOT_COMPLETED` as a background start — so the README
+  names that one command and records the measurement: with the allowlist the
+  service comes back at boot and serves `200`; without it the system logs
+  `Background started FGS: Disallowed` and no port opens.
 - The same start and stop are on a Quick Settings tile whose subtitle says
   `listening`, `paused` or `off`. A tile click may start a foreground service
   from the background, but Android only accepts the `location` type there when
@@ -77,6 +82,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   what the live harness cleans up with) never reached the foreground, so the
   system reported a foreground service that did not start in time. The service
   now promotes itself before acting on either action.
+- A reboot rotates the phone's wireless-debugging port, which left the adb
+  connection gone and a full-range port scan as the only way back. The phone
+  advertises the port over mDNS, so the README replaces the minute-long scan
+  with an `avahi-browse _adb-tls-connect._tcp` one-liner that answers in about a
+  second.
 - `phone-unlock` woke the panel with a single `KEYCODE_WAKEUP` and then typed
   the PIN on faith, so a press that landed while the display was still powering
   on left the phone locked and every caller saw a stale screen. It now reads

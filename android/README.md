@@ -161,11 +161,33 @@ from the AP, so the tile is not needed in the common case. The boot start is
 best effort: Android 15 refuses some foreground service types from
 `BOOT_COMPLETED`, which is why the service declares `location` alone — a
 `specialUse` type, which would describe a proxy better, cannot be started there
-at all. The adb path has the same switch:
+at all, and Android 15 counts a `location` start from `BOOT_COMPLETED` as a
+background start, which it denies unless an exemption applies. The exemption to
+use is the battery-optimization allowlist:
 
 ```sh
 adb shell am start-foreground-service -n org.phonelink.proxy/.ProxyService \
     -a org.phonelink.proxy.action.START --ez auto_start true
+
+# the boot restart needs this once; it survives reboots
+adb shell cmd deviceidle whitelist +org.phonelink.proxy
+# or: Settings -> Apps -> Phone link proxy -> Battery -> Unrestricted
+```
+
+Measured on the phone (Android 15): without the allowlist the receiver logs
+`Background started FGS: Disallowed`, the service record stays behind with
+`app=null` and no port opens. With it, the service comes back at boot —
+`types=0x00000008`, `uplink allowed: on "PhoneLink"`, `listening on
+0.0.0.0:1081` — and a request through it answers `200`.
+
+A reboot also rotates the wireless-debugging port, so adb needs the new one.
+The phone advertises it over mDNS, which Avahi reads in about a second — much
+faster than scanning 32768–60999, where an aggressive scan can also miss it:
+
+```sh
+ADDR=$(avahi-browse -rtp _adb-tls-connect._tcp 2>/dev/null |
+    awk -F';' '$1=="=" && $3=="IPv4" {print $8":"$9; exit}')
+adb connect "$ADDR"
 ```
 
 Check it:
@@ -207,12 +229,9 @@ wildcard listener on a Wi-Fi LAN is an open relay.
 
 - Tethering is excluded on purpose, so a phone in hotspot or USB-tether mode has
   no listener from this app. Use the vendored proxy for that mode.
-- The boot restart is written but not proven on a device: the wireless adb
-  port changes with a reboot, so the harness cannot reattach to check it.
-  Android 15 refuses some foreground service types from `BOOT_COMPLETED`, which
-  is why the service declares `location` alone; if the start is refused anyway
-  the receiver falls back to a plain start and then logs, and the listener stays
-  off until the next explicit start or the tile.
+- The boot restart depends on the battery-optimization allowlist (see
+  `Run`): with it the start is allowed, without it Android 15 denies the start
+  and the listener stays off until the next explicit start or the tile.
 - No settings activity; everything is driven by adb intents.
 - The `phone-proxy-*` scripts still talk to the old app's screen and its
   `Start 5G Proxy` / `Stop Proxy Service` buttons. Repointing them at this
