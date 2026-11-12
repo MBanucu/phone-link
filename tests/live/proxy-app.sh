@@ -6,16 +6,20 @@
 #      is up (a phone that stays locked skips those steps),
 #   1. install the APK built by android/build.sh and open its panel,
 #   2. require auto_start to reach the service and show up in the panel,
-#   3. start it on a spare port with throwaway credentials,
-#   4. require a request through the tunnel to answer 200,
-#   5. require a wrong password to be refused,
-#   6. require an unrelated SSID to keep the port closed with the service up,
-#   7. require any_network=true to bypass the predicate,
-#   8. stop it,
-#   9. start and stop it from the Quick Settings tile, which needs the phone
+#   3. require the panel to say what wireless debugging is doing,
+#   4. start it on a spare port with throwaway credentials,
+#   5. require a request through the tunnel to answer 200,
+#   6. require a wrong password to be refused,
+#   7. require the panel's "Listen without authentication" checkbox to drop
+#      the password on Start and unticking it to demand one again (both go
+#      through Reset, so the form matches the running service first),
+#   8. require an unrelated SSID to keep the port closed with the service up,
+#   9. require any_network=true to bypass the predicate,
+#  10. stop it,
+#  11. start and stop it from the Quick Settings tile, which needs the phone
 #      unlocked: the shade ignores clicks on a locked screen, so that step is
 #      skipped there,
-#  10. uninstall (KEEP_APP=1 keeps it installed).
+#  12. uninstall (KEEP_APP=1 keeps it installed).
 #
 #   tests/live/proxy-app.sh
 #
@@ -98,6 +102,65 @@ panel_opens() {
 panel_auto_start_checked() {
   shell uiautomator dump /sdcard/proxy-app-ui.xml >/dev/null 2>&1 || return 1
   shell cat /sdcard/proxy-app-ui.xml | grep -q 'id/auto_start"[^/]*checked="true"'
+}
+
+# The panel is taller than the screen, and uiautomator only reports what is on
+# it, so every control is found by scrolling. Drags start on the right edge,
+# outside the edit fields, so the ScrollView owns the gesture.
+ui_dump() {
+  shell uiautomator dump /sdcard/proxy-app-ui.xml >/dev/null 2>&1 || return 1
+  shell cat /sdcard/proxy-app-ui.xml | tr -d '\r'
+}
+
+ui_text() { # ui_text ID -> the node's text
+  ui_dump | tr '>' '\n' | grep "id/$1\"" | head -1 |
+    sed -n 's/.*text="\([^"]*\)".*/\1/p'
+}
+
+ui_bounds() { # ui_bounds ID -> "x y" of the node's centre
+  ui_dump | tr '>' '\n' | grep "id/$1\"" | head -1 |
+    sed -n 's/.*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/p' |
+    awk '{ if (NF == 4) print int(($1 + $3) / 2), int(($2 + $4) / 2) }'
+}
+
+panel_top() {
+  for _ in 1 2 3 4; do shell input swipe 1390 700 1390 2200 150; done
+  sleep 1
+}
+
+ui_text_seek() { # ui_text_seek ID, scrolling down until the line is on screen
+  local id=$1 value
+  panel_top
+  for _ in 1 2 3 4 5 6; do
+    value=$(ui_text "$id")
+    if [ -n "$value" ]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
+    shell input swipe 1390 2200 1390 700 200
+    sleep 1
+  done
+  return 1
+}
+
+panel_tap() { # panel_tap ID, scrolling down until the control is on screen
+  local id=$1 x y
+  panel_top
+  for _ in 1 2 3 4 5 6; do
+    x=""
+    y=""
+    read -r x y <<EOF
+$(ui_bounds "$id")
+EOF
+    if [ -n "$x" ]; then
+      shell input tap "$x" "$y"
+      sleep 1
+      return 0
+    fi
+    shell input swipe 1390 2200 1390 700 200
+    sleep 1
+  done
+  return 1
 }
 
 # Tile clicks are ignored while the keyguard is up, and uiautomator cannot
@@ -195,6 +258,18 @@ if panel_auto_start_checked; then ok 'the panel shows auto_start on'; else
   bad 'the panel shows auto_start on'
 fi
 
+step 'panel state'
+shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
+sleep 1
+state=$(ui_text_seek adb_state)
+case $state in
+  'Wireless debugging: on'*|'Wireless debugging: off'*|\
+  'Wireless debugging: this build cannot change it'*)
+    ok 'the panel says what wireless debugging is doing' ;;
+  *)
+    bad 'the panel says what wireless debugging is doing' "$state" ;;
+esac
+
 step 'allowed network'
 start_app --es ssid "$SSID" --ez any_network false
 if wait_foreground; then ok 'service is foreground'; else bad 'service is foreground'; fi
@@ -204,6 +279,37 @@ if curl -sS -m 10 -o /dev/null --socks5-hostname \
   bad 'a wrong password is refused'
 else
   ok 'a wrong password is refused'
+fi
+
+step 'anonymous from the panel'
+# Reset first: the adb-driven steps above changed what the service runs with,
+# while the panel still holds the values it was created with.
+if panel_tap reset && panel_tap anonymous && panel_tap start; then
+  sleep 3
+  if curl -sS -m 10 -o /dev/null --socks5-hostname "$ADDRESS:$PORT" \
+    https://example.com >/dev/null 2>&1; then
+    ok 'the anonymous checkbox is applied by Start'
+  else
+    bad 'the anonymous checkbox is applied by Start'
+  fi
+  # Put authentication back through the same controls: the tunnel works with
+  # credentials again, and nobody without them does.
+  panel_tap anonymous
+  panel_tap start
+  sleep 3
+  if through_proxy; then
+    ok 'unticking it asks for a password again'
+  else
+    bad 'unticking it asks for a password again'
+  fi
+  if curl -sS -m 10 -o /dev/null --socks5-hostname "$ADDRESS:$PORT" \
+    https://example.com >/dev/null 2>&1; then
+    bad 'without the checkbox a password is required'
+  else
+    ok 'without the checkbox a password is required'
+  fi
+else
+  bad 'the panel controls are reachable'
 fi
 
 step 'unrelated SSID'
