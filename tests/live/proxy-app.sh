@@ -1,13 +1,21 @@
 #!/usr/bin/env bash
 # Live end-to-end test of the proxy app on the phone:
 #
+#   0. unlock the phone if the project's own phone-unlock can: the shade
+#      ignores tile clicks and nothing can read the panel while the keyguard
+#      is up (a phone that stays locked skips those steps),
 #   1. install the APK built by android/build.sh and open its panel,
-#   2. start it on a spare port with throwaway credentials,
-#   3. require a request through the tunnel to answer 200,
-#   4. require a wrong password to be refused,
-#   5. require an unrelated SSID to keep the port closed with the service up,
-#   6. require any_network=true to bypass the predicate,
-#   7. stop it and uninstall (KEEP_APP=1 keeps it installed).
+#   2. require auto_start to reach the service and show up in the panel,
+#   3. start it on a spare port with throwaway credentials,
+#   4. require a request through the tunnel to answer 200,
+#   5. require a wrong password to be refused,
+#   6. require an unrelated SSID to keep the port closed with the service up,
+#   7. require any_network=true to bypass the predicate,
+#   8. stop it,
+#   9. start and stop it from the Quick Settings tile, which needs the phone
+#      unlocked: the shade ignores clicks on a locked screen, so that step is
+#      skipped there,
+#  10. uninstall (KEEP_APP=1 keeps it installed).
 #
 #   tests/live/proxy-app.sh
 #
@@ -54,9 +62,16 @@ fi
 phone() { adb -s "$serial" "$@"; }
 shell() { phone shell "$@"; }
 
+# Set when this run woke the phone, so it can be put back to sleep.
+unlocked=0
+
 cleanup() {
   shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
+  shell cmd statusbar collapse >/dev/null 2>&1
   sleep 1
+  if [ "$unlocked" = 1 ]; then
+    shell input keyevent KEYCODE_SLEEP >/dev/null 2>&1
+  fi
   if [ -z "${KEEP_APP:-}" ]; then
     phone uninstall "$PKG" >/dev/null 2>&1
   fi
@@ -77,6 +92,32 @@ panel_opens() {
   sleep 1
   shell dumpsys activity activities | grep -q "$PKG/.MainActivity" || return 1
   ! phone logcat -d -b crash 2>/dev/null | grep -q "$PKG"
+}
+
+# The panel's auto_start checkbox reflects what the service stored.
+panel_auto_start_checked() {
+  shell uiautomator dump /sdcard/proxy-app-ui.xml >/dev/null 2>&1 || return 1
+  shell cat /sdcard/proxy-app-ui.xml | grep -q 'id/auto_start"[^/]*checked="true"'
+}
+
+# Tile clicks are ignored while the keyguard is up, and uiautomator cannot
+# dump a sleeping panel, so unlock through the project's own command. It reads
+# the root-only secrets, so a run without sudo leaves the phone locked and the
+# steps that need it say so instead of failing.
+keyguard_showing() {
+  shell dumpsys window policy | grep -q 'showing=true'
+}
+
+unlock_phone() {
+  keyguard_showing || return 0
+  if PHONE_SERIAL="$serial" sudo -n -E "$ROOT/bin/phone-unlock" >/dev/null 2>&1; then
+    if keyguard_showing; then
+      return 1
+    fi
+    unlocked=1
+    return 0
+  fi
+  return 1
 }
 
 wait_foreground() {
@@ -116,6 +157,13 @@ if [ -z "$ADDRESS" ] || [ -z "$SSID" ]; then
 fi
 printf 'phone %s on "%s" at %s, port %s\n' "$serial" "$SSID" "$ADDRESS" "$PORT"
 
+step 'unlock'
+if unlock_phone; then
+  ok 'the phone is unlocked'
+else
+  printf 'SKIP unlocking: needs the root-only PIN (sudo -n %s/bin/phone-unlock)\n' "$ROOT"
+fi
+
 step 'install'
 if phone install -r -g "$APK" >/dev/null 2>&1; then
   ok 'installs'
@@ -127,7 +175,25 @@ fi
 
 
 step 'panel'
+# Only a crash from this run should fail the step, and the buffer can still
+# hold one from before.
+phone logcat -b crash -c >/dev/null 2>&1
 if panel_opens; then ok 'the panel opens'; else bad 'the panel opens'; fi
+
+step 'auto start'
+start_app --es ssid "$SSID" --ez any_network false --ez auto_start true
+if wait_foreground; then
+  ok 'auto_start starts the service'
+else
+  bad 'auto_start starts the service'
+  shell dumpsys activity services "$PKG" | head -3
+  phone logcat -d -s phone-link-proxy | tail -5
+fi
+shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
+sleep 1
+if panel_auto_start_checked; then ok 'the panel shows auto_start on'; else
+  bad 'the panel shows auto_start on'
+fi
 
 step 'allowed network'
 start_app --es ssid "$SSID" --ez any_network false
@@ -158,6 +224,40 @@ shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
 sleep 2
 if foreground; then bad 'stop leaves no service'; else ok 'stop leaves no service'; fi
 if port_closed; then ok 'the port is closed after stop'; else bad 'the port is closed after stop'; fi
+
+step 'tile'
+if unlock_phone; then :; fi
+if keyguard_showing; then
+  printf 'SKIP the tile: the shade ignores clicks while the phone is locked\n'
+else
+  # The tile starts whatever the last start stored, so store the good settings
+  # first and stop the service the adb start created.
+  start_app --es ssid "$SSID" --ez any_network false
+  sleep 1
+  shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
+  sleep 2
+  shell cmd statusbar add-tile "$PKG/.ProxyTile" >/dev/null 2>&1
+  shell cmd statusbar expand-settings >/dev/null 2>&1
+  sleep 2
+  shell cmd statusbar click-tile "$PKG/.ProxyTile" >/dev/null 2>&1
+  if wait_foreground; then ok 'the tile starts the service'; else
+    bad 'the tile starts the service'
+  fi
+  if through_proxy; then ok 'the tile start serves requests'; else
+    bad 'the tile start serves requests'
+  fi
+  shell cmd statusbar expand-settings >/dev/null 2>&1
+  sleep 2
+  shell cmd statusbar click-tile "$PKG/.ProxyTile" >/dev/null 2>&1
+  sleep 3
+  if foreground; then bad 'the tile stops the service'; else
+    ok 'the tile stops the service'
+  fi
+  if port_closed; then ok 'the tile stop closes the port'; else
+    bad 'the tile stop closes the port'
+  fi
+  shell cmd statusbar collapse >/dev/null 2>&1
+fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

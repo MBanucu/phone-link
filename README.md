@@ -238,13 +238,16 @@ sudo tests/live/doctor-fix-proxy.sh
 ```
 
 `tests/live/proxy-app.sh` exercises the app in `android/` end to end on a phone
-that has a Wi-Fi client link: it installs the APK, opens the panel and requires it
-to stay up, starts the listener on a spare port with throwaway credentials,
-requires `200` through the tunnel, requires a wrong
-password to be refused, requires an unrelated SSID to keep the port closed while
-the service stays up, requires `any_network=true` to bypass the predicate, then
-stops and uninstalls. It leaves the vendored proxy alone (`KEEP_APP=1` keeps the
-new app installed, `PROXY_APP_PORT` picks another port).
+that has a Wi-Fi client link: it unlocks the phone when `sudo -n` can run
+`bin/phone-unlock`, installs the APK, opens the panel and requires it to stay
+up, requires `auto_start` to reach the service and show in the panel, starts
+the listener on a spare port with throwaway credentials, requires `200` through
+the tunnel, requires a wrong password to be refused, requires an unrelated SSID
+to keep the port closed while the service stays up, requires `any_network=true`
+to bypass the predicate, stops it, then starts and stops it again from the
+Quick Settings tile (skipped when the phone stays locked, since the shade
+ignores clicks there) and uninstalls. It leaves the vendored proxy alone
+(`KEEP_APP=1` keeps the new app installed, `PROXY_APP_PORT` picks another port).
 
 ```sh
 tests/live/proxy-app.sh

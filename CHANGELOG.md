@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   counting, configuration rules, status text, runtime listener) on a plain JDK,
   inside the `script` check;
   `tests/live/proxy-app.sh` exercises the installed app on the phone from
-  install to uninstall. `checks.proxy-apk` and `packages.proxy-apk` build the
+  install to uninstall, including the Quick Settings tile and `auto_start`. `checks.proxy-apk` and `packages.proxy-apk` build the
   APK in the sandbox, so a compile break fails `nix flake check`.
 - `docs/phone-network.md` records why the proxy works at all: the phone's default
   network on the AP link is the laptop, so the app holds an explicit cellular
