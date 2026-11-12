@@ -29,6 +29,59 @@ The tether address is assigned per connection (it has been `172.26.192.42`,
 `10.207.119.29` and `10.186.76.251`); the hotspot and AP addresses below are
 stable.
 
+## How the proxy gets out over cellular
+
+Measured on the AP link, with the phone joined to `PhoneLink`. The phone's
+default network was the **laptop's AP**, not mobile data:
+
+```
+Active default network: 102
+NetworkAgentInfo{network{102} ... ni{WIFI CONNECTED ...}
+  lp{{InterfaceName: wlan0 LinkAddresses: [ ... 192.168.77.232/24 ]
+      DnsAddresses: [ /192.168.77.1 ]
+      Routes: [ ... 0.0.0.0/0 -> 192.168.77.1 wlan0 ]}}
+  nc{[ Transports: WIFI Capabilities: NOT_METERED&INTERNET&...&VALIDATED ...]}
+```
+
+A plain SOCKS server that just connects on the default route would therefore
+send the tunnel's traffic back to the laptop, which forwards it to the phone's
+proxy again: a loop that never reaches the internet. The app avoids that with an
+explicit, bound cellular request, visible in the same dump:
+
+```
+NetworkRequest [ REQUEST id=326, [ Transports: CELLULAR
+  Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VPN&NOT_VCN_MANAGED
+  Forbidden: LOCAL_NETWORK Uid: 10323 RequestorUid: 10323
+  RequestorPkg: com.tokyoxpa3.androidproxy ] ]
+uid/pid:10323/6913 activeRequest: 326
+```
+
+So the proxy's egress is cellular by construction, and the name is literal: the
+app asks for a cellular `Network` and opens its upstream sockets and DNS lookups
+on it (`Network.socketFactory` / `Network.getAllByName` in API terms) rather than
+on the default network.
+
+Consequences worth knowing:
+
+- No cellular means no tunnel, even though the proxy still accepts connections on
+  `wlan0`. Check `phone-fix-mobile-data` / `phone-net-status` before blaming the
+  tunnel for `curl` exiting `000`.
+- On this build the AP link is `NOT_METERED` and even `VALIDATED` (the laptop's
+  shared uplink answers the phone's validation probe), so Android does **not**
+  hand the default route back to mobile data by itself. The 90 s observation in
+  trap 8 does not generalise.
+- Anything replacing the app must make the same request and bind to it.
+  `Socket(host, port)` on an unvalidated/validated Wi-Fi default is exactly the
+  loop described above.
+
+Reproduce with the dump written to a file first — `dumpsys connectivity | grep`
+dies with `/system/bin/printf: Argument list too long`:
+
+```sh
+adb shell 'dumpsys connectivity > /data/local/tmp/conn.txt'
+adb shell 'grep -n 10323 /data/local/tmp/conn.txt'
+```
+
 ## Traps, in the order they cost time
 
 1. **A hotspot phone is not a Wi-Fi client.** `cmd wifi status` prints
@@ -54,7 +107,11 @@ stable.
    `10.244.108.165` and on `127.0.0.1`/`172.26.192.42`, but not on
    `192.168.77.232`, so the tunnel could not connect. Workarounds: restart the
    app while the AP link is up, or use `--via-adb` (`adb reverse tcp:1080`) which
-   reaches the `127.0.0.1` listener.
+   reaches the `127.0.0.1` listener. The binding is a property of this app, not
+   of a SOCKS server: a wildcard listen on `0.0.0.0:1080` covers every current
+   and future address, which is why the address never has to be known in
+   advance (see the cellular section above for the other thing the app does
+   behind the port).
 6. **DNS loop.** With the tether, the laptop's resolver is the phone's tether DNS
    (`rndis0`'s address, which changes per connection). That forwards to the
    phone's default network, which in AP mode is the `PhoneLink` Wi-Fi whose DNS
@@ -69,7 +126,9 @@ stable.
 8. **Android's no-internet Wi-Fi.** An AP without an uplink is unvalidated. The
    phone kept `PhoneLink` connected for 90 s of watching, with mobile data still
    the default network, but expect an "no internet" notification and possible
-   network-selection games on other builds.
+   network-selection games on other builds. With the module's shared uplink the
+   AP can instead come up `VALIDATED` and take the default route itself — that is
+   the state the cellular section above was measured in.
 
 ## Verified results
 
