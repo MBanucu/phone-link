@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `android/`: a SOCKS5 proxy APK of our own, built with `aapt2`/`javac`/`d8`
+  instead of Gradle from the new `nix develop .#android` shell. It holds an
+  explicit cellular `NetworkRequest` for its egress, listens on the wildcard
+  address, takes a wake lock only while a client is connected, and is driven by
+  `am start-foreground-service` through a `DUMP`-guarded service, so starting
+  the proxy no longer needs the phone unlocked. The `phone-proxy-*` scripts
+  still drive the vendored app.
+- `docs/phone-network.md` records why the proxy works at all: the phone's default
+  network on the AP link is the laptop, so the app holds an explicit cellular
+  `NetworkRequest` and sends its egress out on that network instead. Trap 5 now
+  names the wildcard-bind fix and trap 8 the validated-AP case.
+
 ### Changed
 
 - The 34 scripts in `bin/` are thin shims over one Python function per script in
@@ -19,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `lib/phone-ui.sh`, the uiautomator helpers, superseded by `phone_link.ui`.
   `lib/phone-net.sh` stays for the live harness in `tests/live`.
+
 
 ## [0.3.8] - 2026-11-11
 

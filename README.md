@@ -10,7 +10,10 @@ cable.
   0.2.0)
 - `nixosModules.default` — the tunnel, the declarative access-point profile and
   its firewall holes
-- `devShells.default`, `formatter`, `checks`
+- `devShells.default`, `devShells.android` (the APK toolchain), `formatter`,
+  `checks`
+- `android/` — the SOCKS5 proxy APK of our own, built without Gradle:
+  `nix develop .#android && ./android/build.sh`, see `android/README.md`
 - `CHANGELOG.md` — released changes, Keep a Changelog format
 - `docs/phone-network.md` — measured behaviour, evidence and the traps
 
@@ -300,6 +303,9 @@ to remove those (`phone-wifi-forget PhoneLink`, `phone-proxy-uninstall`). Use
 `--check` to preview and `--keep-cache` to keep the APKs. A reboot is a simpler
 alternative for the profile, but it will not clear the caches or the secrets
 file.
+
+A replacement of our own is scaffolded in `android/`; the `phone-proxy-*`
+scripts still drive the F-Droid app, and moving them over is a separate change.
 
 The proxy APK is not vendored (it is not ours to ship), but the app is on
 F-Droid, so the script can use F-Droid as its update channel:

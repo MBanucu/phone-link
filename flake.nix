@@ -449,6 +449,10 @@
       };
 
       devShells = eachSystem (pkgs: {
+        # The APK build needs a JDK and the Android SDK; both are in
+        # android/shell.nix so this shell stays light and the flake thin.
+        android = import ./android/shell.nix { inherit pkgs nixpkgs; };
+
         default = pkgs.mkShell {
           packages = runtimeDeps pkgs ++ [
             pkgs.shellcheck

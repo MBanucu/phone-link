@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Phone link proxy</string>
+    <string name="channel_name">SOCKS5 proxy</string>
+    <string name="notification_title">SOCKS5 proxy</string>
+    <string name="action_stop">Stop</string>
+</resources>
