@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A rotated wireless-debugging port no longer breaks a command. Every adb call
+  now goes through `phone_link/adb.py`, which leaves an attached target alone
+  (a USB serial costs nothing) and, when a network serial is gone or a command
+  failed on it, reads the phone's `_adb-tls-connect._tcp` record, reconnects and
+  runs the command again on the advertised port. Resolving a serial
+  (`phone_serial()`, the doctor's `Context.serial`) uses the same lookup, so
+  "no phone attached" is reported only when the phone really is absent.
+  `PHONE_ADB_MDNS=0` disables the lookup.
+
 ### Added
 
 - `android/`: a SOCKS5 proxy APK of our own, built with `aapt2`/`javac`/`d8`

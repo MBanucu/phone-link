@@ -8,6 +8,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
+# The doctor shares the adb transport fallback with the commands: a phone that
+# rebooted keeps its address and changes only its wireless-debugging port.
+from phone_link.adb import discover, prepare, retry
+
 
 class Context:
     def __init__(self, env: dict[str, str] | None = None) -> None:
@@ -68,8 +72,8 @@ class Context:
         return Path(__file__).resolve().parents[3]
 
     # -- commands ------------------------------------------------------
-    def run(
-        self, argv: list[str], timeout: float | None = None
+    def _spawn(
+        self, argv: list[str], timeout: float | None
     ) -> subprocess.CompletedProcess[str] | None:
         try:
             return subprocess.run(
@@ -82,6 +86,18 @@ class Context:
             )
         except (OSError, subprocess.TimeoutExpired):
             return None
+
+    def run(
+        self, argv: list[str], timeout: float | None = None
+    ) -> subprocess.CompletedProcess[str] | None:
+        argv = prepare(argv)
+        proc = self._spawn(argv, timeout)
+        if proc is None or proc.returncode == 0:
+            return proc
+        recovered = retry(argv)
+        if recovered is None:
+            return proc
+        return self._spawn(recovered, timeout)
 
     def text(self, argv: list[str], timeout: float | None = None) -> str:
         """stdout even on a non-zero exit (systemctl is-active does that)."""
@@ -96,12 +112,17 @@ class Context:
     def serial(self) -> str | None:
         if not self._serial_loaded:
             self._serial_loaded = True
-            for line in self.text(["adb", "devices"]).splitlines():
-                fields = line.split()
-                if len(fields) >= 2 and fields[1] == "device":
-                    self._serial = fields[0]
-                    break
+            self._serial = self._first_device()
+            if self._serial is None and discover() is not None:
+                self._serial = self._first_device()
         return self._serial
+
+    def _first_device(self) -> str | None:
+        for line in self.text(["adb", "devices"]).splitlines():
+            fields = line.split()
+            if len(fields) >= 2 and fields[1] == "device":
+                return fields[0]
+        return None
 
     def adb(self, *args: str, timeout: float | None = None) -> str:
         if self.serial is None:

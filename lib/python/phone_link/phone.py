@@ -12,26 +12,40 @@ import glob
 import os
 import urllib.parse
 
-from . import settings
+from . import adb, settings
 from .shell import capture, die, log, status
 
 
-def phone_serial() -> str | None:
-    """Serial of any attached device, USB or network, or None."""
+def _attached(network_only: bool = False) -> str | None:
     for line in capture(["adb", "devices"]).splitlines():
         fields = line.split()
-        if len(fields) >= 2 and fields[1] == "device":
-            return fields[0]
+        if len(fields) < 2 or fields[1] != "device":
+            continue
+        if network_only and ":" not in fields[0]:
+            continue
+        return fields[0]
     return None
+
+
+def phone_serial() -> str | None:
+    """Serial of any attached device, USB or network, or None.
+
+    A phone that rebooted is still on the network and still advertises its new
+    wireless-debugging port, so an empty `adb devices` is retried through the
+    mDNS record before the caller reports that nothing is attached.
+    """
+    serial = _attached()
+    if serial is None and adb.discover() is not None:
+        serial = _attached()
+    return serial
 
 
 def adb_transport() -> str | None:
     """Serial of a network (non-USB) adb transport, or None."""
-    for line in capture(["adb", "devices"]).splitlines():
-        fields = line.split()
-        if len(fields) >= 2 and fields[1] == "device" and ":" in fields[0]:
-            return fields[0]
-    return None
+    transport = _attached(network_only=True)
+    if transport is None and adb.discover() is not None:
+        transport = _attached(network_only=True)
+    return transport
 
 
 def phone_ips(serial: str | None = None) -> list[str]:
