@@ -1,7 +1,5 @@
 package org.phonelink.proxy;
 
-import android.util.Log;
-
 import java.io.Closeable;
 import java.io.DataInputStream;
 import java.io.IOException;
@@ -29,10 +27,11 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>It listens on the wildcard address, so the port is the same on the hotspot
  * ({@code ap0}), USB tether ({@code rndis0}) and the AP link ({@code wlan0}),
  * whatever addresses those interfaces get and whenever they appear.
+ *
+ * <p>Deliberately free of Android types: the logger and the upstream are seams,
+ * so this class and its tests run on a plain JDK.
  */
 final class Socks5Server implements Closeable {
-
-    private static final String TAG = "phone-link-proxy";
 
     static final int REPLY_SUCCEEDED = 0x00;
     static final int REPLY_GENERAL_FAILURE = 0x01;
@@ -59,6 +58,11 @@ final class Socks5Server implements Closeable {
         void onClientsChanged(int clients);
     }
 
+    /** Where diagnostics go on the phone; the tests pass a no-op. */
+    interface Logger {
+        void log(String message);
+    }
+
     private static final class Request {
         final int command;
         final String host;
@@ -74,8 +78,9 @@ final class Socks5Server implements Closeable {
     private final int port;
     private final String user;
     private final String password;
-    private final Egress egress;
+    private final Upstream upstream;
     private final Listener listener;
+    private final Logger logger;
     private final AtomicInteger clients = new AtomicInteger();
 
     private final ExecutorService handlers = Executors.newCachedThreadPool();
@@ -88,12 +93,25 @@ final class Socks5Server implements Closeable {
         return socket == null ? 0 : socket.getLocalPort();
     }
 
-    Socks5Server(int port, String user, String password, Egress egress, Listener listener) {
+    Socks5Server(
+            int port,
+            String user,
+            String password,
+            Upstream upstream,
+            Listener listener,
+            Logger logger) {
         this.port = port;
         this.user = user;
         this.password = password;
-        this.egress = egress;
+        this.upstream = upstream;
         this.listener = listener;
+        this.logger = logger;
+    }
+
+    private void log(String message) {
+        if (logger != null) {
+            logger.log(message);
+        }
     }
 
     /** Bind and start accepting. Throws if the port is taken. */
@@ -115,7 +133,7 @@ final class Socks5Server implements Closeable {
                 client = server.accept();
             } catch (IOException e) {
                 if (running) {
-                    Log.w(TAG, "accept failed", e);
+                    log("accept failed: " + e.getMessage());
                     continue;
                 }
                 return;
@@ -127,7 +145,7 @@ final class Socks5Server implements Closeable {
     private void handle(Socket client) {
         int count = clients.incrementAndGet();
         listener.onClientsChanged(count);
-        Socket upstream = null;
+        Socket connected = null;
         try {
             client.setSoTimeout(HANDSHAKE_TIMEOUT_MS);
             client.setTcpNoDelay(true);
@@ -146,20 +164,20 @@ final class Socks5Server implements Closeable {
                 return;
             }
             try {
-                upstream = egress.connect(request.host, request.port, CONNECT_TIMEOUT_MS);
-            } catch (Egress.Failure failure) {
-                Log.w(TAG, failure.getMessage());
+                connected = upstream.connect(request.host, request.port, CONNECT_TIMEOUT_MS);
+            } catch (Upstream.Failure failure) {
+                log(failure.getMessage());
                 writeReply(out, failure.reply, null);
                 return;
             }
-            writeReply(out, REPLY_SUCCEEDED, upstream);
+            writeReply(out, REPLY_SUCCEEDED, connected);
             client.setSoTimeout(0);
-            relay(client, upstream);
+            relay(client, connected);
         } catch (IOException e) {
-            Log.d(TAG, "connection ended: " + e.getMessage());
+            log("connection ended: " + e.getMessage());
         } finally {
-            Egress.closeQuietly(upstream);
-            Egress.closeQuietly(client);
+            Closeables.closeQuietly(connected);
+            Closeables.closeQuietly(client);
             listener.onClientsChanged(clients.decrementAndGet());
         }
     }
@@ -212,7 +230,7 @@ final class Socks5Server implements Closeable {
         out.write(new byte[] {0x01, (byte) (granted ? 0x00 : 0x01)});
         out.flush();
         if (!granted) {
-            Log.w(TAG, "rejected a client with bad credentials");
+            log("rejected a client with bad credentials");
         }
         return granted;
     }
@@ -282,8 +300,8 @@ final class Socks5Server implements Closeable {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
-        Egress.closeQuietly(client);
-        Egress.closeQuietly(upstream);
+        Closeables.closeQuietly(client);
+        Closeables.closeQuietly(upstream);
     }
 
     private static void pump(Socket from, Socket to, CountDownLatch done) {
@@ -300,8 +318,8 @@ final class Socks5Server implements Closeable {
                 to.shutdownOutput();
             } catch (IOException e) {
                 // One side is gone; closing both unblocks the other pump.
-                Egress.closeQuietly(from);
-                Egress.closeQuietly(to);
+                Closeables.closeQuietly(from);
+                Closeables.closeQuietly(to);
             } finally {
                 done.countDown();
             }
@@ -313,7 +331,7 @@ final class Socks5Server implements Closeable {
     @Override
     public void close() {
         running = false;
-        Egress.closeQuietly(server);
+        Closeables.closeQuietly(server);
         server = null;
         handlers.shutdownNow();
     }

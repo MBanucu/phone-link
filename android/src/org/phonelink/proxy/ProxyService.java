@@ -196,8 +196,9 @@ public final class ProxyService extends Service
             egress = new Egress(this);
             egress.start();
         }
-        Socks5Server candidate =
-                new Socks5Server(config.port, config.user, config.password, egress, this);
+        Socks5Server candidate = new Socks5Server(
+                config.port, config.user, config.password, egress, this,
+                message -> Log.i(TAG, message));
         try {
             candidate.start();
         } catch (IOException e) {

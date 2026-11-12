@@ -65,6 +65,25 @@ The SDK (build-tools 35.0.0 + platform 35) comes from the flake's `android`
 dev shell. `debug.keystore` is created on the first build and kept, so
 `adb install -r` accepts the next build; both it and `build/` are ignored.
 
+`nix flake check` builds the same APK in the sandbox (`proxy-apk`), and
+`nix build .#proxy-apk` gives the artifact without a phone.
+
+## Tests
+
+- `tests/proxy-socks5.test.sh` — hermetic, plain JDK. It compiles `Upstream`,
+  `Closeables` and `Socks5Server` **without** `android.jar` and runs 14 protocol
+  cases against a local echo upstream: method negotiation, both credential
+  failures, unauthenticated mode, CONNECT for IPv4 and for a domain name,
+  relaying 32 KiB, half-close, a refused command, an unknown address type, an
+  upstream failure reply, client counting and a non-SOCKS greeting. This is why
+  the code has a `Logger` seam and an `Upstream` interface instead of `Log.i`
+  and `Egress` calls, and why the `script` check carries a JDK.
+- `tests/live/proxy-app.sh` — needs a phone with a Wi-Fi client link and the
+  built APK: install, start, `200` through the tunnel, a wrong password
+  refused, an unrelated SSID keeping the port closed with the service up,
+  `any_network` bypassing the predicate, stop and uninstall. Not part of
+  `nix flake check`.
+
 ## Run
 
 ```sh

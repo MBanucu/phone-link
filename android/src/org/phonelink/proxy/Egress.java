@@ -27,24 +27,12 @@ import java.net.UnknownHostException;
  * {@code TRANSPORT_CELLULAR} and binds its egress to the result, which is what
  * makes the tunnel leave the phone at all; this class does the same.
  */
-final class Egress implements Closeable {
+final class Egress implements Upstream, Closeable {
 
     private static final String TAG = "phone-link-proxy";
 
     /** Upper bound on waiting for a cellular network to come up, per CONNECT. */
     private static final long AWAIT_MS = 10_000;
-
-    /** Why a CONNECT could not be honoured, carrying the SOCKS5 reply code. */
-    static final class Failure extends Exception {
-        private static final long serialVersionUID = 1L;
-
-        final int reply;
-
-        Failure(int reply, String message) {
-            super(message);
-            this.reply = reply;
-        }
-    }
 
     private final ConnectivityManager manager;
     private final Object lock = new Object();
@@ -123,10 +111,11 @@ final class Egress implements Closeable {
      * the system resolver would answer over the Wi-Fi link, whose DNS server is
      * the laptop, which forwards back into this proxy.
      */
-    Socket connect(String host, int port, int timeoutMs) throws Failure {
+    @Override
+    public Socket connect(String host, int port, int timeoutMs) throws Failure {
         Network network = awaitCellular();
         if (network == null) {
-            throw new Failure(Socks5Server.REPLY_NETWORK_UNREACHABLE,
+            throw new Upstream.Failure(Socks5Server.REPLY_NETWORK_UNREACHABLE,
                     "no cellular network with internet for " + host + ":" + port);
         }
 
@@ -134,7 +123,7 @@ final class Egress implements Closeable {
         try {
             addresses = network.getAllByName(host);
         } catch (UnknownHostException e) {
-            throw new Failure(Socks5Server.REPLY_HOST_UNREACHABLE,
+            throw new Upstream.Failure(Socks5Server.REPLY_HOST_UNREACHABLE,
                     "cannot resolve " + host + " on the cellular network");
         }
 
@@ -148,10 +137,10 @@ final class Egress implements Closeable {
                 return socket;
             } catch (IOException e) {
                 last = e;
-                closeQuietly(socket);
+                Closeables.closeQuietly(socket);
             }
         }
-        throw new Failure(replyFor(last),
+        throw new Upstream.Failure(replyFor(last),
                 "cannot reach " + host + ":" + port + " over cellular: " + last);
     }
 
@@ -184,14 +173,4 @@ final class Egress implements Closeable {
         return Socks5Server.REPLY_GENERAL_FAILURE;
     }
 
-    static void closeQuietly(Closeable closeable) {
-        if (closeable == null) {
-            return;
-        }
-        try {
-            closeable.close();
-        } catch (IOException ignored) {
-            // Closing is best effort; the caller already has the failure it cares about.
-        }
-    }
 }

@@ -82,8 +82,13 @@
         pkgs:
         let
           deps = runtimeDeps pkgs;
+          android = import ./android/default.nix { inherit pkgs nixpkgs; };
         in
         rec {
+          # The SOCKS5 proxy app the tunnel can talk to instead of the vendored
+          # one; built without Gradle, so no dependency resolution is involved.
+          proxy-apk = android.apk;
+
           phone-link =
             pkgs.runCommand "phone-link-${version}"
               {
@@ -213,6 +218,7 @@
           inherit (pkgs.stdenv.hostPlatform) system;
           package = self.packages.${system}.phone-link;
           gui = self.packages.${system}.phone-link-gui;
+          android = import ./android/default.nix { inherit pkgs nixpkgs; };
 
           # Evaluate the module without building a system: once with non-default
           # values so the generated units can be inspected, once untouched to
@@ -330,6 +336,10 @@
                 touch $out
               '';
 
+          # Compiling the app is part of the check set: a break in android/
+          # then fails `nix flake check` instead of waiting for a manual build.
+          proxy-apk = android.apk;
+
           shellcheck = pkgs.runCommand "phone-link-shellcheck" { nativeBuildInputs = [ pkgs.shellcheck ]; } ''
               shellcheck -S warning ${./bin}/* ${./lib}/*.sh
             touch $out
@@ -337,7 +347,7 @@
 
           format = pkgs.runCommand "phone-link-format-check" { nativeBuildInputs = [ pkgs.nixfmt ]; } ''
             nixfmt --check ${./flake.nix} ${./modules/phone-link.nix} \
-              ${./android/shell.nix}
+              ${./android/default.nix}
             touch $out
           '';
 
@@ -417,6 +427,9 @@
                   pkgs.gnugrep
                   pkgs.gnused
                   pkgs.python3
+                  # tests/proxy-socks5.test.sh compiles the app's protocol
+                  # classes with javac; no Android SDK needed for that.
+                  pkgs.jdk17
                 ];
               }
               ''
@@ -449,28 +462,34 @@
         phone-link = import ./modules/phone-link.nix;
       };
 
-      devShells = eachSystem (pkgs: {
-        # The APK build needs a JDK and the Android SDK; both are in
-        # android/shell.nix so this shell stays light and the flake thin.
-        android = import ./android/shell.nix { inherit pkgs nixpkgs; };
+      devShells = eachSystem (
+        pkgs:
+        let
+          # The APK build needs a JDK and the Android SDK; both are in
+          # android/default.nix so this shell stays light and the flake thin.
+          android = import ./android/default.nix { inherit pkgs nixpkgs; };
+        in
+        {
+          android = android.shell;
 
-        default = pkgs.mkShell {
-          packages = runtimeDeps pkgs ++ [
-            pkgs.shellcheck
-            pkgs.nixfmt
-            (pkgs.python3.withPackages (ps: [ ps.pygobject3 ]))
-            pkgs.gtk4
-            pkgs.libadwaita
-            pkgs.gobject-introspection
-            pkgs.dbus
-            pkgs.xauth
-            pkgs.xvfb-run
-          ];
-          shellHook = ''
-            export PYTHONPATH="$PWD/lib/python''${PYTHONPATH:+:$PYTHONPATH}"
-          '';
-        };
-      });
+          default = pkgs.mkShell {
+            packages = runtimeDeps pkgs ++ [
+              pkgs.shellcheck
+              pkgs.nixfmt
+              (pkgs.python3.withPackages (ps: [ ps.pygobject3 ]))
+              pkgs.gtk4
+              pkgs.libadwaita
+              pkgs.gobject-introspection
+              pkgs.dbus
+              pkgs.xauth
+              pkgs.xvfb-run
+            ];
+            shellHook = ''
+              export PYTHONPATH="$PWD/lib/python''${PYTHONPATH:+:$PYTHONPATH}"
+            '';
+          };
+        }
+      );
 
       formatter = eachSystem (
         pkgs:

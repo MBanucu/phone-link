@@ -51,7 +51,7 @@ mkdir -p "$build/res" "$build/gen" "$build/classes" "$build/dex"
     "$build/res/resources.zip"
 
 find "$here/src" "$build/gen" -name '*.java' -print | sort > "$build/sources.txt"
-javac --release 11 -Xlint:all -Werror \
+javac --release 11 -encoding UTF-8 -Xlint:all -Werror \
     -classpath "$android_jar" \
     -d "$build/classes" \
     @"$build/sources.txt"
