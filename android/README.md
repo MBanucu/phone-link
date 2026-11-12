@@ -163,15 +163,18 @@ best effort: Android 15 refuses some foreground service types from
 `specialUse` type, which would describe a proxy better, cannot be started there
 at all, and Android 15 counts a `location` start from `BOOT_COMPLETED` as a
 background start, which it denies unless an exemption applies. The exemption to
-use is the battery-optimization allowlist:
+use is the battery-optimization allowlist, and the panel asks for it itself:
+the line under the auto-start checkbox says whether it is granted, tapping it
+opens the system request, and pressing Start with auto-start on asks when it is
+missing. The adb path has the same switch, and the exemption can be granted
+without touching the phone:
 
 ```sh
 adb shell am start-foreground-service -n org.phonelink.proxy/.ProxyService \
     -a org.phonelink.proxy.action.START --ez auto_start true
 
-# the boot restart needs this once; it survives reboots
+# same as the panel's "Open settings" + Allow; survives reboots
 adb shell cmd deviceidle whitelist +org.phonelink.proxy
-# or: Settings -> Apps -> Phone link proxy -> Battery -> Unrestricted
 ```
 
 Measured on the phone (Android 15): without the allowlist the receiver logs

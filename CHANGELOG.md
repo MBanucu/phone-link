@@ -32,8 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `specialUse` service from `BOOT_COMPLETED`; a start from the shade without
   background location now reports why instead of crashing. The boot restart
   also needs the app on the battery-optimization allowlist — Android 15 treats a
-  `location` start from `BOOT_COMPLETED` as a background start — so the README
-  names that one command and records the measurement: with the allowlist the
+  `location` start from `BOOT_COMPLETED` as a background start — so the panel
+  asks for that exemption: a line under the auto-start checkbox reports whether
+  it is granted, tapping it opens the system request, and Start asks when
+  auto-start is on without it. The measurement behind it: with the allowlist the
   service comes back at boot and serves `200`; without it the system logs
   `Background started FGS: Disallowed` and no port opens.
 - The same start and stop are on a Quick Settings tile whose subtitle says

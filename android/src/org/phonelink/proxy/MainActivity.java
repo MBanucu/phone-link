@@ -1,8 +1,13 @@
 package org.phonelink.proxy;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
+import android.os.PowerManager;
+import android.provider.Settings;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -25,6 +30,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     private EditText ssid;
     private CheckBox anyNetwork;
     private CheckBox autoStart;
+    private TextView battery;
     private TextView status;
 
     @Override
@@ -38,6 +44,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         ssid = findViewById(R.id.ssid);
         anyNetwork = findViewById(R.id.any_network);
         autoStart = findViewById(R.id.auto_start);
+        battery = findViewById(R.id.battery);
         status = findViewById(R.id.status);
 
         ProxyConfig stored = ConfigStore.load(this);
@@ -64,6 +71,14 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        // The exemption is granted in the system's own screen, so the answer
+        // arrives with the next resume rather than with a result code.
+        renderBattery();
+    }
+
+    @Override
     protected void onStop() {
         ProxyRuntime.removeListener(this);
         super.onStop();
@@ -77,6 +92,44 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
 
     private void render(ProxyState state) {
         status.setText(state.describe());
+    }
+
+    /**
+     * A restart at boot is a background start, which Android only allows with
+     * an exemption; the one a user can grant here is "no battery optimization".
+     */
+    private boolean batteryExempt() {
+        PowerManager power = getSystemService(PowerManager.class);
+        return power != null && power.isIgnoringBatteryOptimizations(getPackageName());
+    }
+
+    private void renderBattery() {
+        boolean exempt = batteryExempt();
+        battery.setText(getString(exempt ? R.string.battery_exempt : R.string.battery_optimized));
+        battery.setClickable(!exempt);
+        battery.setOnClickListener(exempt ? null : view -> askForExemption());
+    }
+
+    private void askForExemption() {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.battery_title)
+                .setMessage(R.string.battery_message)
+                .setPositiveButton(R.string.battery_open,
+                        (dialog, which) -> openBatterySettings())
+                .setNegativeButton(R.string.battery_later, null)
+                .show();
+    }
+
+    private void openBatterySettings() {
+        Intent request = new Intent(
+                        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        Uri.parse("package:" + getPackageName()));
+        try {
+            startActivity(request);
+        } catch (ActivityNotFoundException e) {
+            // Some builds only offer the list of all apps.
+            startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+        }
     }
 
     private void startListening() {
@@ -95,6 +148,9 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         }
         ConfigStore.save(this, config);
         ConfigStore.setAutoStart(this, autoStart.isChecked());
+        if (autoStart.isChecked() && !batteryExempt()) {
+            askForExemption();
+        }
         startForegroundService(
                 new Intent(this, ProxyService.class).setAction(ProxyService.ACTION_START));
     }

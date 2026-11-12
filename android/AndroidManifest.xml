@@ -24,6 +24,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Asked for from the panel: without it Android refuses to restart the
+         proxy at boot. Requesting the exemption needs this permission. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- The SSID of the current Wi-Fi is redacted without location permission
          and location switched on; the uplink predicate matches on it. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />

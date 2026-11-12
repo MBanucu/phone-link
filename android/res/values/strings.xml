@@ -13,6 +13,12 @@
     <string name="label_ssid">SSID the listener may run on</string>
     <string name="label_any_network">Ignore the SSID and always listen</string>
     <string name="label_auto_start">Start automatically and keep running (also after a reboot)</string>
+    <string name="battery_exempt">Battery: unrestricted — the proxy can come back after a reboot</string>
+    <string name="battery_optimized">Battery: optimized — Android will not restart the proxy after a reboot (tap to change)</string>
+    <string name="battery_title">Let the proxy restart by itself</string>
+    <string name="battery_message">Android only restarts a proxy from boot when this app is exempt from battery optimization. Without the exemption the tile still works, but the proxy does not come back after a reboot.</string>
+    <string name="battery_open">Open settings</string>
+    <string name="battery_later">Not now</string>
     <string name="tile_label">Proxy</string>
     <string name="tile_listening">listening</string>
     <string name="tile_paused">paused</string>
