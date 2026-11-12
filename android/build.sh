@@ -66,7 +66,10 @@ cp "$build/unaligned.apk" "$build/base.apk"
 
 "$build_tools/zipalign" -f -p 4 "$build/base.apk" "$build/aligned.apk"
 
-# Outside build/ so rebuilding keeps the signature and `adb install -r` works.
+# One fixed key, tracked in the repository, so every build carries the same
+# signature and `adb install -r` updates the app instead of refusing it. Only
+# generated when the file is missing, e.g. in a checkout that lost it; the key
+# is a throwaway debug key, which is why nothing here is secret.
 keystore="$here/debug.keystore"
 if [ ! -f "$keystore" ]; then
     keytool -genkeypair \

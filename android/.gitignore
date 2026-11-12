@@ -1,2 +1,6 @@
 build/
-debug.keystore
+
+# debug.keystore is deliberately tracked: the APK is signed with one fixed
+# debug key so `adb install -r` updates the sideloaded app instead of failing
+# on a rotated signature. It is a throwaway key for a personal build, not a
+# release key — never distribute this app with it.

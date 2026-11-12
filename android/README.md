@@ -62,8 +62,13 @@ nix develop .#android
 ```
 
 The SDK (build-tools 35.0.0 + platform 35) comes from the flake's `android`
-dev shell. `debug.keystore` is created on the first build and kept, so
-`adb install -r` accepts the next build; both it and `build/` are ignored.
+dev shell. `debug.keystore` is tracked in the repository, so every build —
+local or in the sandbox — carries the same signature and `adb install -r`
+updates the sideloaded app instead of failing with
+`INSTALL_FAILED_UPDATE_INCOMPATIBLE`. It is a throwaway debug key: never ship
+this app with it. `build/` stays ignored. Before the key was tracked, each
+`nix build` generated its own and every install needed an uninstall, which also
+deleted the app's stored configuration.
 
 `nix flake check` builds the same APK in the sandbox (`proxy-apk`), and
 `nix build .#proxy-apk` gives the artifact without a phone.

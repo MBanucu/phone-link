@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The APK is signed with one key tracked in `android/debug.keystore` instead of
+  one generated inside each build. Every `nix build` used a fresh key, so
+  `adb install -r` failed with `INSTALL_FAILED_UPDATE_INCOMPATIBLE` and the only
+  way in was an uninstall, which threw away the app's configuration. Two
+  successive builds now carry the same certificate and install over each other.
 - A rotated wireless-debugging port no longer breaks a command. Every adb call
   now goes through `phone_link/adb.py`, which leaves an attached target alone
   (a USB serial costs nothing) and, when a network serial is gone or a command
