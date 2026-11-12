@@ -35,7 +35,10 @@
 #  12. start and stop it from the Quick Settings tile, which needs the phone
 #      unlocked: the shade ignores clicks on a locked screen, so that step is
 #      skipped there,
-#  13. uninstall (KEEP_APP=1 keeps it installed).
+#  13. require every instant the phone wrote down to have a place in the
+#      recording: the flashes it paints at the start and the end of the run are
+#      fitted to the mp4, and a fit worse than 10 ms fails the run,
+#  14. uninstall (KEEP_APP=1 keeps it installed).
 #
 #   tests/live/proxy-app.sh
 #
@@ -45,8 +48,9 @@
 #
 # Every run keeps its evidence in result-live/<UTC start>/ (or
 # PHONE_LIVE_ARTIFACTS): the phone's screen as an mp4 (frames.sh pulls stills
-# out of it), the screen as XML for every dump uiautomator serves, and the
-# timing of each
+# out of it), the screen as XML for every capture, every action and every
+# capture stamped with the phone's clock (actions.csv, input.csv, ui-index.csv)
+# and clock.txt, which maps that clock into the recording, and the timing of each
 # step appended to result-live/timings.csv, which is never rewritten — the
 # history is what makes "is this cheap enough to run before a commit"
 # answerable. PHONE_LIVE_CAPTURE=0 skips the recording and the snapshots.
@@ -68,6 +72,12 @@ PASSWORD=phonelink-test-password
 CAPTURE_APK=${PROXY_CAPTURE_APK:-$ROOT/android/build/capture.apk}
 CAPTURE_PKG=${PROXY_CAPTURE_PKG:-org.phonelink.capture}
 CAPTURE_DIR=/sdcard/Android/data/$CAPTURE_PKG/files
+# The flashes that tie the phone's clock to the recording, and the tool that
+# fits them: eight edges held 200 ms each, at the start of the run and again
+# just before the recorder stops.
+FLASH_EDGES=${PHONE_LIVE_FLASH_EDGES:-8}
+FLASH_PERIOD=${PHONE_LIVE_FLASH_PERIOD:-200}
+CLOCK=${PHONE_LIVE_CLOCK_SH:-$ROOT/tests/live/clock.sh}
 capture_dumps=0
 capture_old_services=""
 capture_old_enabled=""
@@ -143,6 +153,10 @@ run_id=$(date -u +%Y%m%dT%H%M%SZ)
 ARTIFACTS=${PHONE_LIVE_ARTIFACTS:-$ROOT/result-live/$run_id}
 TIMINGS=${PHONE_LIVE_TIMINGS:-$ROOT/result-live/timings.csv}
 mkdir -p "$ARTIFACTS" "$(dirname "$TIMINGS")"
+# The actions that had to go through `input`, each with the interval its
+# instant is inside; the ones the phone took itself are in the actions.csv the
+# capture service writes, which is pulled with the rest of its files.
+printf 'start_ns,end_ns,kind,what\n' >"$ARTIFACTS/input.csv"
 
 # Set when this run woke the phone, so it can be put back to sleep.
 unlocked=0
@@ -155,6 +169,10 @@ capturing=0
 screenrecord_pid=""
 snapshot_pid=""
 run_start=$(now_ms)
+# How well the phone's clock and the recording agree, from the flashes.
+clock_summary=""
+clock_fit=""
+clock_failed=""
 
 # uiautomator serves one dump at a time; a dump that arrives while another is
 # running can fail outright rather than queue, and a failed one costs a step a
@@ -250,6 +268,98 @@ capture_watch() { # capture_watch true|false
     -n "$CAPTURE_PKG/.DumpReceiver" >/dev/null 2>&1
 }
 
+# Paint the screen the flash colour, at instants the phone writes down. Where
+# those flashes land in screen.mp4 is what says where the phone's clock sits in
+# the recording; the broadcast returns at once and the flashes play out.
+flash_markers() {
+  shell am broadcast -a "$CAPTURE_PKG.FLASH" --ei edges "$FLASH_EDGES" \
+    --ei period "$FLASH_PERIOD" -n "$CAPTURE_PKG/.DumpReceiver" >/dev/null 2>&1
+}
+
+# --- what the run does on the phone --------------------------------------
+# Every touch is taken by the phone rather than sent to it: the service
+# dispatches the gesture and writes down the instant it did, on the clock the
+# captures use, so an action and the screen it changed sit on one timeline and
+# both can be found in the recording. `input tap` is a fresh JVM per call, so
+# its instant is only known to within the length of that call.
+tap() { # tap X Y
+  if [ "$capture_dumps" = 1 ] &&
+    shell am broadcast -a "$CAPTURE_PKG.TAP" --ei x "$1" --ei y "$2" \
+      -n "$CAPTURE_PKG/.DumpReceiver" >/dev/null 2>&1; then
+    return 0
+  fi
+  input_action tap "$1" "$2"
+}
+
+swipe() { # swipe X1 Y1 X2 Y2 MS
+  if [ "$capture_dumps" = 1 ] &&
+    shell am broadcast -a "$CAPTURE_PKG.SWIPE" --ei x1 "$1" --ei y1 "$2" \
+      --ei x2 "$3" --ei y2 "$4" --ei ms "$5" \
+      -n "$CAPTURE_PKG/.DumpReceiver" >/dev/null 2>&1; then
+    return 0
+  fi
+  input_action swipe "$1" "$2" "$3" "$4" "$5"
+}
+
+back() { # back -> the phone's own Back
+  if [ "$capture_dumps" = 1 ] &&
+    shell am broadcast -a "$CAPTURE_PKG.BACK" \
+      -n "$CAPTURE_PKG/.DumpReceiver" >/dev/null 2>&1; then
+    return 0
+  fi
+  input_action keyevent 4
+}
+
+home() {
+  if [ "$capture_dumps" = 1 ] &&
+    shell am broadcast -a "$CAPTURE_PKG.HOME" \
+      -n "$CAPTURE_PKG/.DumpReceiver" >/dev/null 2>&1; then
+    return 0
+  fi
+  input_action keyevent KEYCODE_HOME
+}
+
+# What is left to `input` — typing and the odd key — cannot say when it landed:
+# it is one JVM that starts a third of a second before it injects anything. The
+# phone's clock is read either side of it in the same shell command instead, so
+# the record carries the interval the instant is inside.
+input_action() { # input_action ARGS...
+  local readings
+  readings=$(shell "a=\$(cut -d' ' -f1 /proc/uptime)
+input $*
+b=\$(cut -d' ' -f1 /proc/uptime)
+echo \"\$a \$b\"" | tr -d '\r' | awk 'NF == 2 { print $1, $2; exit }')
+  case $readings in
+    *' '*) ;;
+    *) return 0 ;;
+  esac
+  printf '%s,%s,input,%s\n' \
+    "$(awk -v t="${readings% *}" 'BEGIN { printf "%.0f", t * 1e9 }')" \
+    "$(awk -v t="${readings#* }" 'BEGIN { printf "%.0f", t * 1e9 }')" \
+    "$*" >>"$ARTIFACTS/input.csv"
+}
+
+# Where the phone's clock sits in the recording: clock.sh fits the flashes and
+# leaves the mapping in $ARTIFACTS/clock.txt, so any device_ns in the run's own
+# files can be turned into a second of screen.mp4 afterwards.
+calibrate_clock() {
+  [ -f "$ARTIFACTS/screen.mp4" ] && [ -f "$ARTIFACTS/clock.csv" ] || return 0
+  local summary
+  if summary=$(bash "$CLOCK" "$ARTIFACTS" 2>/dev/null); then
+    clock_summary=${summary#clock: }
+    # What the fit is worth, in milliseconds; the worst single flash is
+    # allowed to be half a frame off, that being how often the screen changes.
+    clock_fit=$(printf '%s' "$summary" |
+      sed -n 's/.*+\/- \([0-9.]*\) ms.*/\1/p')
+    printf 'clock: %s\n' "$clock_summary"
+    printf '       so a device_ns in ui-index.csv, actions.csv or input.csv is\n'
+    printf '       mapped by clock.txt; the flashes are in clock.csv\n'
+  else
+    clock_failed=1
+    printf 'clock: the flashes could not be fitted to the recording\n'
+  fi
+}
+
 start_capture() {
   [ "${PHONE_LIVE_CAPTURE:-1}" = 0 ] && return 0
   # screenrecord refuses to start with the screen off or a keyguard up, which
@@ -262,6 +372,16 @@ start_capture() {
     # The service records a screen per change by itself; there is nothing to
     # poll, and its files are pulled when the run ends.
     capture_watch true
+    # screenrecord encodes a screen that changes, not a screen that is there:
+    # on a still phone the recording has no first frame to hang the clock from,
+    # and a flash before that frame would be a flash nothing recorded. The
+    # shade opens and closes first — a change, and the only thing on screen at
+    # this point in the run — and then the phone paints its clock into it.
+    shell cmd statusbar expand-notifications >/dev/null 2>&1
+    sleep 1
+    shell cmd statusbar collapse >/dev/null 2>&1
+    sleep 1
+    flash_markers
   else
     : >"$ARTIFACTS/.capturing"
     ui_snapshots &
@@ -274,6 +394,14 @@ start_capture() {
 stop_capture() {
   [ "$capturing" = 1 ] || return 0
   capturing=0
+  if [ -n "$screenrecord_pid" ] && [ "$capture_dumps" = 1 ]; then
+    # The last burst ends the run: the recorder only encodes what changes, so
+    # its last frame is the screen after the flash that stops just before the
+    # kill — which is the end the calibration counts back from.
+    flash_markers
+    sleep "$(awk -v e="$FLASH_EDGES" -v p="$FLASH_PERIOD" \
+      'BEGIN { printf "%.1f", e * p / 1000 + 0.6 }')"
+  fi
   if [ "$capture_dumps" = 1 ]; then
     capture_watch false
     phone pull "$CAPTURE_DIR/." "$ARTIFACTS/" >/dev/null 2>&1
@@ -296,6 +424,7 @@ stop_capture() {
     shell rm -f /sdcard/proxy-app.mp4 >/dev/null 2>&1
     screenrecord_pid=""
   fi
+  calibrate_clock
 }
 
 cleanup() {
@@ -327,6 +456,16 @@ cleanup() {
     phone uninstall "$PKG" >/dev/null 2>&1
   fi
   flush_step
+  # Whether every instant the phone wrote down has a place in the recording.
+  if [ -n "$clock_summary" ]; then
+    if awk -v fit="${clock_fit:-99}" 'BEGIN { exit !(fit <= 10) }'; then
+      ok "the recording and the phone share a clock ($clock_summary)"
+    else
+      bad "the recording and the phone share a clock ($clock_summary)"
+    fi
+  elif [ -n "$clock_failed" ]; then
+    bad 'the recording and the phone share a clock'
+  fi
   local total
   total=$(awk -v start="$run_start" -v end="$(now_ms)" \
     'BEGIN { printf "%.1f", (end - start) / 1000 }')
@@ -394,7 +533,7 @@ panel_checked() { # panel_checked ID -> yes|no
       esac
       return 0
     fi
-    shell input swipe 1300 2200 1300 1200 200
+    swipe 1300 2200 1300 1200 200
     sleep 1
   done
   return 1
@@ -457,7 +596,7 @@ ui_dump() {
           recovered=1
           ;;
         1)
-          shell input keyevent 4 >/dev/null 2>&1
+          back >/dev/null 2>&1
           recovered=2
           ;;
       esac
@@ -481,7 +620,7 @@ ui_bounds() { # ui_bounds ID -> "x y" of the node's centre
 panel_top() {
   # Both ends stay inside the page area: a drag that leaves it belongs to
   # whatever is underneath instead of the page.
-  for _ in 1 2 3 4; do shell input swipe 1300 1200 1300 2200 150; done
+  for _ in 1 2 3 4; do swipe 1300 1200 1300 2200 150; done
   sleep 1
 }
 
@@ -512,7 +651,7 @@ panel_where() {
 # of the next step, so answer it and carry on.
 dismiss_battery() {
   if ui_dump | grep -q 'Let the proxy restart by itself'; then
-    ui_tap_id button2 2>/dev/null || shell input keyevent 4 >/dev/null 2>&1
+    ui_tap_id button2 2>/dev/null || back >/dev/null 2>&1
     sleep 1
   fi
 }
@@ -540,7 +679,7 @@ $(ui_dump | tr '>' '\n' | grep "text=\"$1\"" | head -1 |
   awk '{ if (NF == 4) print int(($1 + $3) / 2), int(($2 + $4) / 2) }')
 EOF
     if [ -n "$x" ] && [ "$x" = "$px" ] && [ "$y" = "$py" ]; then
-      shell input tap "$x" "$y"
+      tap "$x" "$y"
       sleep 1
       return 0
     fi
@@ -577,7 +716,7 @@ $(card_line "$1" card_toggle |
   awk '{ if (NF == 4) print int(($1 + $3) / 2), int(($2 + $4) / 2) }')
 EOF
   [ -n "$x" ] || return 1
-  shell input tap "$x" "$y"
+  tap "$x" "$y"
   sleep 2
   dismiss_battery
 }
@@ -609,7 +748,7 @@ panel_home() {
     fi
     if printf '%s' "$xml" | grep -q "id/header_title"; then
       # The panel is up, on a proxy's page: Back is the way out to the list.
-      shell input keyevent 4 >/dev/null 2>&1
+      back >/dev/null 2>&1
     else
       # The panel is not up at all — pressing Back here would land on the
       # launcher, so bring the panel up instead.
@@ -634,12 +773,12 @@ $(ui_dump | tr '>' '\n' | grep "id/card_name\"" | grep "text=\"$1\"" | head -1 |
   awk '{ if (NF == 4) print int(($1 + $3) / 2), int(($2 + $4) / 2) }')
 EOF
     if [ -n "$x" ]; then
-      shell input tap "$x" "$y"
+      tap "$x" "$y"
       sleep 1
       ui_dump | grep -q "id/back\""
       return $?
     fi
-    shell input swipe 1300 2200 1300 1200 200
+    swipe 1300 2200 1300 1200 200
     sleep 1
   done
   return 1
@@ -654,7 +793,7 @@ close_keyboard() {
     if ! shell dumpsys input_method 2>/dev/null | grep -q 'mInputShown=true'; then
       return 0
     fi
-    shell input keyevent 4 >/dev/null 2>&1
+    back >/dev/null 2>&1
     sleep 1
   done
   return 0
@@ -672,7 +811,7 @@ ui_tap_id() { # ui_tap_id ID -> taps that node where it is, without scrolling
 $(ui_bounds "$1")
 EOF
     if [ -n "$x" ]; then
-      shell input tap "$x" "$y"
+      tap "$x" "$y"
       sleep 1
       return 0
     fi
@@ -690,7 +829,7 @@ ui_text_seek() { # ui_text_seek ID, scrolling down until the line is on screen
       printf '%s\n' "$value"
       return 0
     fi
-    shell input swipe 1300 2200 1300 1200 200
+    swipe 1300 2200 1300 1200 200
     sleep 1
   done
   return 1
@@ -707,11 +846,11 @@ panel_tap() { # panel_tap ID, scrolling down until the control is on screen
 $(ui_bounds "$id")
 EOF
     if [ -n "$x" ]; then
-      shell input tap "$x" "$y"
+      tap "$x" "$y"
       sleep 1
       return 0
     fi
-    shell input swipe 1300 2200 1300 1200 200
+    swipe 1300 2200 1300 1200 200
     sleep 1
   done
   return 1
@@ -913,7 +1052,7 @@ exempt=no
 if battery_exempt; then exempt=yes; fi
 shell cmd deviceidle whitelist -"$PKG" >/dev/null 2>&1
 # renderBattery() runs on resume, so leave the panel and come back.
-shell input keyevent KEYCODE_HOME >/dev/null 2>&1
+home >/dev/null 2>&1
 sleep 1
 shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
 sleep 1
@@ -929,11 +1068,11 @@ if ui_dump | grep -q 'Let the proxy restart by itself'; then
 else
   bad 'the mark opens the battery request'
 fi
-shell input keyevent 4 >/dev/null 2>&1
+back >/dev/null 2>&1
 sleep 1
 if [ "$exempt" = yes ]; then
   shell cmd deviceidle whitelist +"$PKG" >/dev/null 2>&1
-  shell input keyevent KEYCODE_HOME >/dev/null 2>&1
+  home >/dev/null 2>&1
   sleep 1
   shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
   sleep 1
@@ -1123,8 +1262,8 @@ else
 fi
 panel_tab listener
 panel_tap port
-shell input keyevent KEYCODE_MOVE_END 67 67 67 67 67 67
-shell input text 18099
+input_action keyevent KEYCODE_MOVE_END 67 67 67 67 67 67
+input_action text 18099
 close_keyboard
 sleep 1
 panel_tab listener
@@ -1237,9 +1376,9 @@ if menu_pick Rename; then
   # The dialog opens on its name field with the keyboard up, so the field does
   # not have to be found among the page's own edit fields behind it.
   if ui_dump | grep -q 'class="android.widget.EditText"'; then
-    shell input keyevent KEYCODE_MOVE_END
-    shell input keyevent 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67
-    shell input text harness-renamed
+    input_action keyevent KEYCODE_MOVE_END
+    input_action keyevent 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67
+    input_action text harness-renamed
     sleep 1
     close_keyboard
     sleep 1
@@ -1311,7 +1450,7 @@ if panel_tab listener && ui_tap_id info_port; then
     bad 'the i next to a field explains that field'
     panel_where
   fi
-  shell input keyevent 4 >/dev/null 2>&1
+  back >/dev/null 2>&1
   sleep 1
 else
   bad 'the field carries an i'
@@ -1323,7 +1462,7 @@ if panel_tab log && ui_tap_id info_log; then
   else
     bad 'the log page carries one too'
   fi
-  shell input keyevent 4 >/dev/null 2>&1
+  back >/dev/null 2>&1
   sleep 1
 else
   bad 'the log page carries an i'
@@ -1335,7 +1474,7 @@ if menu_pick 'About this app'; then
   else
     bad 'About this app is in the menu and shows the contract'
   fi
-  shell input keyevent 4 >/dev/null 2>&1
+  back >/dev/null 2>&1
   sleep 1
 else
   bad 'the menu has About this app'
@@ -1347,7 +1486,7 @@ step 'new proxy'
 panel_home
 if panel_tap new_profile; then
   sleep 1
-  shell input text harness-new
+  input_action text harness-new
   sleep 1
   close_keyboard
   sleep 1
@@ -1404,14 +1543,14 @@ for _ in 1 2 3 4 5 6 7 8; do
     scrolled=yes
     break
   fi
-  shell input swipe 1300 2200 1300 1200 200
+  swipe 1300 2200 1300 1200 200
   sleep 1
 done
 if [ "$scrolled" = yes ]; then
   ok 'New proxy is still reachable under ten cards'
   if ui_tap_id new_profile; then
     sleep 1
-    shell input text harness-eleven
+    input_action text harness-eleven
     sleep 1
     close_keyboard
     sleep 1
@@ -1442,7 +1581,7 @@ for i in 1 2 3 4 5 6 7 8 9 10 eleven; do
     >/dev/null 2>&1
   sleep 1
 done
-shell input keyevent KEYCODE_HOME >/dev/null 2>&1
+home >/dev/null 2>&1
 sleep 1
 shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
 sleep 1

@@ -44,6 +44,11 @@
             <intent-filter>
                 <action android:name="org.phonelink.capture.DUMP" />
                 <action android:name="org.phonelink.capture.WATCH" />
+                <action android:name="org.phonelink.capture.TAP" />
+                <action android:name="org.phonelink.capture.SWIPE" />
+                <action android:name="org.phonelink.capture.BACK" />
+                <action android:name="org.phonelink.capture.HOME" />
+                <action android:name="org.phonelink.capture.FLASH" />
             </intent-filter>
         </receiver>
     </application>

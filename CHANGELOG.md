@@ -73,6 +73,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Every instant the phone writes down now has a place in the recording. The
+  capture service stamps what it records with the phone's own monotonic clock,
+  takes the harness's taps and swipes through accessibility instead of sending
+  them with `input` (a fresh JVM per call, so nobody could say when one landed),
+  and paints the screen magenta at instants it writes down at the start and the
+  end of a run; `tests/live/clock.sh` finds those flashes in `screen.mp4` and
+  fits a line through them. A run of 380 s fits 16 edges to ±4.5 ms across the
+  308 s between the two bursts, drift included (`clock.txt` holds the mapping),
+  which turns "the phone did this at
+  812345678901234" into "that is 211.962 s into the recording" — checked by
+  pulling the frames back out for a capture of the `About this app` dialog and
+  one of a proxy created at the end of a run, each showing what its XML says.
+  The phone's screen changes 60 times a second, so one flash can only be placed
+  to half a frame; the run fails if the fit is worse than 10 ms.
 - `New proxy` is pinned under the list instead of sitting at the end of it: with
   ten proxies saved the button was ten cards away, which the live harness's new
   ten-proxy check made plain. Only the cards scroll now.

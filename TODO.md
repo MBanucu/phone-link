@@ -25,28 +25,40 @@ list is empty.
       by itself: the start of the step, the moment of the check, and the end of
       the step, plus one before every action the harness took and one after
       every change the accessibility capture recorded, into the run's folder
-      next to the XML. That needs the ~10 ms clock mapping below, so it is the
-      second half of the same work; the frames then arrive named after what they
-      show (`frame-<check>-<offset>.png`) instead of being searched for by hand.
+      next to the XML. The clock mapping it needs is here: every instant the
+      phone writes down is in `clock.txt`'s timeline, so the work is the
+      harness pulling the frames it wants and naming them after what they show
+      (`frame-<check>-<offset>.png`) instead of a person searching for them.
 
-## Timestamps that survive the recording, to about 10 ms
+## A recording that can be played before the run is over
 
-- [ ] Put every action and every event on the phone on one clock that is tied
-      to the recording's timeline closely enough to name the frame: the target
-      is ±10 ms between "when this happened on the phone" and "where that is in
-      `screen.mp4`". Today the host times the steps, the capture service times
-      its snapshots with `System.currentTimeMillis()`, and the moment the
-      recording started was never written down, so a failure names a step and
-      not a frame. The shape: use `SystemClock.elapsedRealtimeNanos()` on the
-      phone for everything on the phone (captures, the accessibility events they
-      come from, and each action, stamped on the device rather than on the host
-      so a tap reports when it landed and not when it was sent); bracket
-      `screenrecord`'s start with a reading of that clock; and calibrate the
-      offset between the device clock and the video's own timestamps by flashing
-      a marker of known colour at a known device time at the start of the run
-      and again at the end, then reading its `pts_time` back with `ffprobe` —
-      the second marker also measures drift over the run, which is the only part
-      that could exceed 10 ms. Frames are plentiful enough for that: measured on
-      this phone, `screen.mp4` runs at the display's 60 Hz (one frame per
-      16.7 ms, encoded only when the screen changes), so a known offset locates
-      an event within half a frame, about 8 ms.
+- [ ] Record into something streamable. `screenrecord` writes a plain MP4 with
+      its index (`moov`) at the end, so `screen.mp4` cannot be played, seeked or
+      previewed — in a browser, a player, a mail attachment — until the run has
+      finished and the file was closed; a run that is cut short leaves a file
+      with no index at all. The pixels are already H.264, so this needs no
+      re-encoding: a remux at the end (`ffmpeg -c copy -movflags +faststart`)
+      gives a file that plays and seeks from the first byte, and
+      `-movflags frag_keyframe+empty_moov` gives a fragmented MP4 that can be
+      read while it is still being written. The cost is a second pass over
+      5–80 MB at the end of a run (seconds, no decode) and peak disk for both
+      copies; the phone's own recorder has no flag for either, so the remux has
+      to happen on the host, or the harness has to read the file out to the host
+      while the run goes on.
+
+## A UI test that waits on the phone instead of on the clock
+
+- [ ] Drive the steps by events, not by `sleep`. Today every step is a fixed
+      sequence — tap, `sleep 1`, dump, tap, `sleep 2` — so a step costs whatever
+      the longest animation in it costs, and a slow phone needs bigger sleeps
+      than a fast one while a fast one still pays for them. The pieces are
+      already here: the capture service sees every accessibility event and
+      writes the screen as XML for each change, stamped with the phone's clock.
+      What is missing is a way for the host to *wait* on the stream — a
+      broadcast that says "return when a capture whose XML contains this text
+      arrives, or after N ms", answered by the service — and a rewrite of the
+      waits as conditions: wait for the dialog's button, not for a second; wait
+      for the card to say Running, not for two seconds and hope. That also makes
+      the harness's own timeline the phone's timeline, which is the same work as
+      the failure frames above: every wait gets an event time, so a failure can
+      say not just which step but which screen never arrived.

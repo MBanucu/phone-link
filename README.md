@@ -276,6 +276,24 @@ of the recording into a still. One row per step is appended to
 file is never rewritten, so a run's cost can be compared across runs.
 `PHONE_LIVE_CAPTURE=0` runs without the recording and the snapshots.
 
+What the phone did is stamped with the phone's own clock, so an action and the
+screen it changed sit on one timeline: `actions.csv` holds every tap and swipe
+with the instant the phone took it, `input.csv` the typing, which has to go
+through `input` and carries the interval its instant is inside, and
+`ui-index.csv` a time for every capture. That timeline is tied to the
+recording by the flashes — the service paints the screen magenta at instants it
+writes down, at the start and the end of a run, and `tests/live/clock.sh` finds
+them in `screen.mp4` and fits a line through the pairs into `clock.txt`:
+
+    video_seconds = offset_s + drift * (device_ns - ref_ns) / 1e9
+
+The screen only changes 60 times a second, so one flash can be placed to half a
+frame, about 8 ms; 16 of them fit to 4.5 ms in the run that added this, across
+the 308 s between the two bursts, drift included — 43 ppm over that long would
+be 13 ms at the end of a run, which is why the slope is part of the answer.
+The run fails if the fit is worse than 10 ms. The recording's start is not
+written anywhere, which is why it is measured rather than assumed.
+
 ```sh
 tests/live/proxy-app.sh
 ```

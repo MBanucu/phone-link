@@ -117,6 +117,32 @@ deleted the app's stored configuration.
   this run cost" a question with an answer. `PHONE_LIVE_CAPTURE=0` turns the
   recording and the snapshots off for a quick run.
 
+  Everything the phone writes down is on one clock
+  (`SystemClock.elapsedRealtimeNanos()`, which counts through deep sleep):
+  `ui-index.csv` gives each capture the instant it was read, `actions.csv`
+  every tap, swipe, Back and Home the service took, with the instant it
+  dispatched it, and `input.csv` the typing, which has to go through `input`
+  and so carries the two readings that bracket it — the interval the instant is
+  inside. Taps go through the service because `input tap` is a fresh JVM per
+  call: it costs a third of a second and nobody can say when it landed.
+
+  That clock is tied to `screen.mp4` by flashing: the service paints the whole
+  screen the one magenta nothing else here is, at instants it records
+  (`clock.csv`), once when the recorder is up and once before it is stopped.
+  `tests/live/clock.sh` finds those flashes in the video (decoding at 1×1, a
+  few seconds of it) and fits `video_seconds = offset_s + drift * (device_ns -
+  ref_ns) / 1e9` into `clock.txt`. Measured on a 380 s run: 16 edges fitted to
+  ±4.5 ms across the 308 s between the two bursts. The drift is part of that:
+  43 ppm over 308 s is 13 ms, so a mapping without it would be wrong by more
+  than the target by the end of a run. One flash on its own can sit a few
+  frames away from the line, because a screen changes 60 times a second and the
+  encoder skips frames when it is busy with an animation — which is why the fit,
+  not the worst edge, is what a run reports. The first burst is looked for from the
+  second placed from it, because the recording begins whenever `screenrecord`
+  got going and its last frame can be seconds after the last flash (it only
+  encodes a screen that changes): neither end of the file is a time the phone
+  knows. A run fails when the fit is worse than 10 ms.
+
   The XML comes from `capture/` — a second, test-only APK with an
   `AccessibilityService` that writes the screen on demand and once per changed
   screen. `adb shell uiautomator dump` costs about 2.5 s here (a cold JVM, then

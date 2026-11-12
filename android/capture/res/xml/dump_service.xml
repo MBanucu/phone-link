@@ -5,12 +5,16 @@
   updated. notificationTimeout is the system's own throttle, in milliseconds —
   the service debounces again on top of it, because one tap is several events.
   flagReportViewIds is what puts `resource-id="pkg:id/name"` in the XML, which
-  is what the harness looks controls up by.
+  is what the harness looks controls up by. canPerformGestures is how the
+  harness's taps and swipes are made: the service dispatches them itself, so
+  the instant one lands is a time the phone wrote down rather than one the
+  host guessed.
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeAllMask"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows"
+    android:canPerformGestures="true"
     android:canRetrieveWindowContent="true"
     android:description="@string/service_description"
     android:notificationTimeout="60" />
