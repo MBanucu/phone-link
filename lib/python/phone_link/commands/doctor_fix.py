@@ -26,8 +26,8 @@ network it restores is itself down.
 
 FIX_ORDER = (
     "apk_cache ip_forward ap_profile phone_unlocked phone_default proxy_app "
-    "proxy_request phone_tun tunnel_route rndis0 network_transport ap_address "
-    "phone_address https"
+    "proxy_request app_boot phone_tun tunnel_route rndis0 network_transport "
+    "ap_address phone_address https"
 ).split()
 
 FIX_SCRIPTS = {
@@ -40,6 +40,7 @@ FIX_SCRIPTS = {
     "phone_default": "phone-fix-mobile-data",
     "proxy_app": "phone-proxy-install",
     "proxy_request": "phone-proxy-setup",
+    "app_boot": "phone-proxy-boot",
     "phone_tun": "phone-fix-tunnel",
     "tunnel_route": "phone-fix-tunnel",
     "rndis0": "phone-usb-tether-default",
@@ -57,6 +58,10 @@ MANUAL_HINTS = {
     "ap_pass": "add PHONE_AP_PASS to the secrets file",
     "proxy_version": "refresh the ambulance box, then run phone-proxy-install --fdroid",
     "proxy_compat": "the installed app does not fit this phone; pick a compatible APK",
+    "app_installed": (
+        "install this repository's app: phone-proxy-install <apk> "
+        "(nix build .#checks.x86_64-linux.proxy-apk -o result-apk)"
+    ),
     "flake_update": "update the source and rebuild: nix flake update phone-link",
     "https": "retry after the proxy/tether fixes; net-check shows which fetch fails",
 }

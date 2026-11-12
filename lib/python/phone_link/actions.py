@@ -328,6 +328,13 @@ ACTIONS: tuple[Action, ...] = (
         confirm="Clear the proxy app's data? Port and credentials are lost.",
     ),
     Action(
+        "phone-proxy-boot",
+        "proxy",
+        "Make the app restart at boot",
+        "Allowlist it, grant background location and turn auto_start on.",
+        supports_check=True,
+    ),
+    Action(
         "phone-proxy-battery-whitelist",
         "proxy",
         "Exempt the proxy from Doze",

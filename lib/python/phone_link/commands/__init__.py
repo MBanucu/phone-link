@@ -22,6 +22,7 @@ COMMANDS = {
     "phone-wifi-forget": phone.phone_wifi_forget,
     "phone-usb-tether-default": phone.phone_usb_tether_default,
     "phone-proxy-battery-whitelist": phone.phone_proxy_battery_whitelist,
+    "phone-proxy-boot": phone.phone_proxy_boot,
     "phone-proxy-data-clear": phone.phone_proxy_data_clear,
     "phone-proxy-uninstall": phone.phone_proxy_uninstall,
     "phone-proxy-install": phone.phone_proxy_install,

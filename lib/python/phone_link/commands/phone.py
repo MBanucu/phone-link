@@ -357,6 +357,81 @@ def phone_proxy_battery_whitelist(args: list[str]) -> int:
     return 0
 
 
+USAGE_BOOT = """usage: phone-proxy-boot [--check]
+
+Makes this repository's app come back by itself after a reboot: adds it to the
+device-idle allowlist, grants the location permissions a boot start needs, and
+turns auto_start on (which also starts the proxy). --check only reports.
+"""
+
+
+def phone_proxy_boot(args: list[str]) -> int:
+    """Make the phone-link app survive a reboot."""
+    _only_help([value for value in args if value != "--check"], USAGE_BOOT)
+    check_only = "--check" in args
+    serial = _serial()
+    package = settings.PHONE_APP_PKG
+    service = f"{package}/.ProxyService"
+    log(f"phone: {serial}")
+
+    installed = _shell(serial, "pm", "path", package)
+    if not any(line.startswith("package:") for line in installed.splitlines()):
+        die(f"{package} is not installed; run phone-proxy-install first")
+
+    def whitelisted() -> bool:
+        return f",{package}," in _shell(serial, "dumpsys", "deviceidle", "whitelist")
+
+    def granted(permission: str) -> bool:
+        dump = _shell(serial, "dumpsys", "package", package)
+        match = re.search(rf"{permission}: granted=(true|false)", dump)
+        return bool(match) and match.group(1) == "true"
+
+    def auto_start() -> str:
+        dump = _shell(serial, "dumpsys", "activity", "service", service)
+        match = re.search(r"auto-start\s+(true|false)", dump)
+        return match.group(1) if match else ""
+
+    problems: list[str] = []
+    if not whitelisted():
+        problems.append("not on the battery allowlist")
+    if not granted("ACCESS_BACKGROUND_LOCATION"):
+        problems.append("background location is not granted")
+    if auto_start() == "false":
+        problems.append("auto_start is off")
+
+    if not problems:
+        log(f"{package}: already comes back after a reboot")
+        return 0
+    if check_only:
+        for problem in problems:
+            log(f"{package}: {problem}")
+        return 1
+
+    if not whitelisted():
+        status(
+            ["adb", "-s", serial, "shell", "cmd", "deviceidle", "whitelist",
+             f"+{package}"]
+        )
+    for permission in ("ACCESS_FINE_LOCATION", "ACCESS_BACKGROUND_LOCATION"):
+        if not granted(permission):
+            status(
+                ["adb", "-s", serial, "shell", "pm", "grant", package,
+                 f"android.permission.{permission}"]
+            )
+    if auto_start() != "true":
+        status(
+            ["adb", "-s", serial, "shell", "am", "start-foreground-service",
+             "-n", service, "-a", f"{package}.action.START",
+             "--ez", "auto_start", "true"]
+        )
+        time.sleep(3)
+
+    if not (whitelisted() and granted("ACCESS_BACKGROUND_LOCATION")):
+        die("the phone did not keep the allowlist or the permission grant")
+    log(f"{package}: will come back after a reboot")
+    return 0
+
+
 def _confirm_stdin(prompt: str) -> bool:
     """Ask on stdin when it is a terminal; anything else refuses."""
     if not sys.stdin.isatty():

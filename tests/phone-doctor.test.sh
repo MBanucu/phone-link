@@ -46,6 +46,8 @@ case "${args[0]:-}" in
       "ip route show default") cat "$LOG/default_route" ;;
       "pm path "*) cat "$LOG/pm" ;;
       "dumpsys package "*) cat "$LOG/dumpsys" ;;
+      "dumpsys deviceidle whitelist") cat "$LOG/whitelist" ;;
+      "dumpsys activity service "*) cat "$LOG/service_dump" ;;
       "getprop ro.build.version.sdk") cat "$LOG/sdk" ;;
     esac
     ;;
@@ -135,7 +137,9 @@ fresh_state() {
   printf '200' >"$LOG/proxy_code"
   printf '200' >"$LOG/internet_code"
   printf 'nameserver 1.1.1.1\nnameserver 9.9.9.9\n' >"$LOG/resolv.conf"
-  printf '    versionCode=24 minSdk=26 targetSdk=34\n    versionName=1.7.4\n' >"$LOG/dumpsys"
+  printf '    versionCode=24 minSdk=26 targetSdk=34\n    versionName=1.7.4\n    ACCESS_BACKGROUND_LOCATION: granted=true\n' >"$LOG/dumpsys"
+  printf '      auto-start  true\n' >"$LOG/service_dump"
+  printf 'user,org.phonelink.proxy,10332\n' >"$LOG/whitelist"
   printf '35\n' >"$LOG/sdk"
   printf '{"packageName":"com.tokyoxpa3.androidproxy","suggestedVersionCode":24,"packages":[{"versionName":"1.7.4","versionCode":24}]}' >"$LOG/fdroid_json"
   mkdir -p "$PHONE_APK_CACHE"
@@ -232,7 +236,24 @@ run --analyze || true
 grep -q '^fail ap_address ' "$LOG/out" && ok "--analyze names ap_address" \
   || bad "--analyze names ap_address" "$(cat "$LOG/out")"
 
-# 11. An empty ambulance box is a required failure.
+# 11. The app off the Doze allowlist cannot come back at boot.
+fresh_state
+: >"$LOG/whitelist"
+if run; then bad "app off the allowlist exits 1"; else ok "app off the allowlist exits 1"; fi
+grep -q 'FAIL  restarts at boot.*battery allowlist' "$LOG/out" && ok "fails app_boot" \
+  || bad "fails app_boot" "$(cat "$LOG/out")"
+run --analyze || true
+grep -q '^fail app_boot ' "$LOG/out" && ok "--analyze names app_boot" \
+  || bad "--analyze names app_boot" "$(cat "$LOG/out")"
+
+# 12. With the allowlist but no auto_start, it is the switch that is named.
+fresh_state
+printf '      auto-start  false\n' >"$LOG/service_dump"
+if run; then bad "auto_start off exits 1"; else ok "auto_start off exits 1"; fi
+grep -q 'FAIL  restarts at boot.*auto_start is off' "$LOG/out" && ok "names the switch" \
+  || bad "names the switch" "$(cat "$LOG/out")"
+
+# 13. An empty ambulance box is a required failure.
 fresh_state
 rm -f "$PHONE_APK_CACHE"/*.apk
 if run; then bad "empty ambulance exits 1"; else ok "empty ambulance exits 1"; fi
