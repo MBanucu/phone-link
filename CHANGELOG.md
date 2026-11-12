@@ -25,6 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The app explains itself. An `Info` button next to the panel's state line
+  opens what this app is for, when the port opens, what each control does and
+  the whole adb contract with every extra; the service prints that same text
+  followed by its current state for `adb shell dumpsys activity service
+  org.phonelink.proxy/.ProxyService`, so an agent reads the contract and the
+  facts together on stdout. `--ez help true` on the activity opens the dialog
+  for a phone in one's hand (a stopped service has no record to dump).
+- The battery line is a warning exactly while it warns: red and bold while
+  auto-start is on and the exemption is missing, an ordinary small line when
+  the checkbox is off. Measured from a screenshot of that row: 31 374 red
+  pixels with the box ticked, 0 after unticking.
 - The app turns Android's wireless debugging back on by itself when the phone
   joins the configured SSID, because this phone clears the setting on some
   reboots and nothing advertises the adb port while it is off. The panel has a

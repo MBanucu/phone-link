@@ -171,7 +171,9 @@ background start, which it denies unless an exemption applies. The exemption to
 use is the battery-optimization allowlist, and the panel asks for it itself:
 the line under the auto-start checkbox says whether it is granted, tapping it
 opens the system request, and pressing Start with auto-start on asks when it is
-missing. The adb path has the same switch, and the exemption can be granted
+missing. That line is drawn red and bold while auto-start is on and the
+exemption is missing, and as an ordinary small line once the checkbox is off —
+only a promise the app cannot keep is worth a colour. The adb path has the same switch, and the exemption can be granted
 without touching the phone:
 
 ```sh
@@ -223,6 +225,20 @@ setup, which only takes effect on Start: the same row exposes the `anonymous`
 extra as "Listen without authentication", and fields that differ from what the
 service uses carry `Not applied yet — press Start` above the buttons. Start is
 the filled button because it is the one that does something.
+
+The panel also explains itself: `Info` next to the state line opens a dialog
+with what the app is, when the port opens, what every control does and the
+whole adb contract. The same text is the service's own `dumpsys` dump,
+followed by what it is doing right now, so an agent reads the contract and the
+facts on stdout without a screen:
+
+```sh
+adb shell dumpsys activity service org.phonelink.proxy/.ProxyService
+```
+
+A stopped service has no record to dump, so there the panel is the way in, or
+`adb shell am start -n org.phonelink.proxy/.MainActivity --ez help true` opens
+the same dialog on the phone.
 
 Measured on the phone (Android 15): with the switch on, `settings put global
 adb_wifi_enabled 0` plus the phone re-joining `PhoneLink` ends with
@@ -290,7 +306,6 @@ wildcard listener on a Wi-Fi LAN is an open relay.
 - The boot restart depends on the battery-optimization allowlist (see
   `Run`): with it the start is allowed, without it Android 15 denies the start
   and the listener stays off until the next explicit start or the tile.
-- No settings activity; everything is driven by adb intents.
 - The `phone-proxy-*` scripts still talk to the old app's screen and its
   `Start 5G Proxy` / `Stop Proxy Service` buttons. Repointing them at this
   service is the next change, and it deletes the unlock + uiautomator path.

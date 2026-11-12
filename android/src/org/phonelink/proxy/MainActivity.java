@@ -6,6 +6,7 @@ import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.database.ContentObserver;
+import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -46,6 +47,8 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     private CheckBox autoStart;
     private CheckBox adbWireless;
     private TextView battery;
+    /** The colour the battery line has when it is not a warning. */
+    private int batteryColor;
     private TextView adbState;
     private TextView pending;
     private TextView status;
@@ -102,6 +105,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         autoStart = findViewById(R.id.auto_start);
         adbWireless = findViewById(R.id.adb_wifi);
         battery = findViewById(R.id.battery);
+        batteryColor = battery.getCurrentTextColor();
         adbState = findViewById(R.id.adb_state);
         pending = findViewById(R.id.pending);
         status = findViewById(R.id.status);
@@ -130,6 +134,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
                 renderProfileSummary();
             }
         });
+        findViewById(R.id.info).setOnClickListener(view -> showHelp());
         findViewById(R.id.reset).setOnClickListener(view -> resetToActive());
         loadButton.setOnClickListener(view -> loadSelectedProfile());
         findViewById(R.id.save_profile).setOnClickListener(view -> askProfileName());
@@ -144,6 +149,9 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         anyNetwork.setChecked(stored.anyNetwork);
         autoStart.setChecked(ConfigStore.autoStart(this));
         watchForEdits();
+        // The battery line is only a warning while auto-start promises a
+        // restart the app cannot deliver.
+        autoStart.setOnCheckedChangeListener((button, checked) -> renderBattery());
         adbWireless.setChecked(ConfigStore.adbWireless(this));
         // Unlike the fields above this is one preference, not part of a start:
         // it takes effect on the next SSID match either way, so saving it now
@@ -163,6 +171,28 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         render(ProxyRuntime.state());
         renderPending();
         refreshProfiles();
+        if (getIntent().getBooleanExtra(Help.EXTRA_HELP, false)) {
+            showHelp();
+        }
+    }
+
+    /** The panel is already up and adb asked for the help again. */
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (intent.getBooleanExtra(Help.EXTRA_HELP, false)) {
+            showHelp();
+        }
+    }
+
+    /** What the app is, in the words the service's dumpsys help uses. */
+    private void showHelp() {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.info_title)
+                .setMessage(Help.text())
+                .setPositiveButton(android.R.string.ok, null)
+                .show();
     }
 
     @Override
@@ -432,6 +462,12 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     private void renderBattery() {
         boolean exempt = batteryExempt();
         battery.setText(getString(exempt ? R.string.battery_exempt : R.string.battery_optimized));
+        // Only a promise the app cannot keep is worth a colour: with auto-start
+        // off, the line is a fact about the phone rather than a warning about
+        // what this app will not do after a reboot.
+        boolean warning = !exempt && autoStart.isChecked();
+        battery.setTextColor(warning ? getColor(R.color.warning) : batteryColor);
+        battery.setTypeface(null, warning ? Typeface.BOLD : Typeface.NORMAL);
         battery.setClickable(!exempt);
         battery.setOnClickListener(exempt ? null : view -> askForExemption());
     }

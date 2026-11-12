@@ -13,7 +13,9 @@ import android.os.IBinder;
 import android.os.PowerManager;
 import android.util.Log;
 
+import java.io.FileDescriptor;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -140,6 +142,28 @@ public final class ProxyService extends Service
     @Override
     public IBinder onBind(Intent intent) {
         return null;
+    }
+
+    /**
+     * The app's own {@code --help}: this is what
+     * {@code adb shell dumpsys activity service org.phonelink.proxy/.ProxyService}
+     * prints. The same words as the panel's Info dialog, followed by what the
+     * service is doing right now, so an agent reads the contract and the facts
+     * together.
+     */
+    @Override
+    protected void dump(FileDescriptor fd, PrintWriter writer, String[] args) {
+        writer.println(Help.text());
+        writer.println();
+        writer.println("Right now");
+        writer.println("  state       " + state.describe());
+        if (config != null) {
+            writer.println("  using       " + config.summary());
+        }
+        writer.println("  auto-start  " + ConfigStore.autoStart(this));
+        writer.println("  adb_wifi    " + ConfigStore.adbWireless(this)
+                + " (Android's switch is " + (AdbWireless.on(this) ? "on" : "off") + ")");
+        writer.flush();
     }
 
     /** Called from connection threads. */

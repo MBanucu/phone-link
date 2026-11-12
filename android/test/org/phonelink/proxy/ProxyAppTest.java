@@ -245,6 +245,20 @@ public final class ProxyAppTest {
                     "anonymous summary");
         });
 
+        test("the help text an agent reads names the whole adb contract", () -> {
+            String text = Help.text();
+            for (String extra : List.of("--ei port", "--es user", "--es password",
+                    "--es ssid", "--ez anonymous", "--ez any_network",
+                    "--ez auto_start", "--ez adb_wifi")) {
+                assertTrue(text.contains(extra), "help does not mention " + extra);
+            }
+            assertTrue(text.contains("org.phonelink.proxy.action.START"), "no start action");
+            assertTrue(text.contains("org.phonelink.proxy.action.STOP"), "no stop action");
+            // The panel and the service print this same text, so the command
+            // that reaches it from adb has to be in it.
+            assertTrue(text.contains(Help.ADB_DUMP), "help does not say how to print it");
+        });
+
         // --- state text ----------------------------------------------------
 
         test("the listening text counts clients", () -> {

@@ -26,6 +26,8 @@
     <string name="action_save_as">Save as…</string>
     <string name="action_delete">Delete</string>
     <string name="action_reset">Reset</string>
+    <string name="action_info">Info</string>
+    <string name="info_title">What this app is</string>
     <string name="active_running">In use: %1$s</string>
     <string name="active_stopped">Last started: %1$s</string>
     <string name="profile_save_title">Save configuration as</string>

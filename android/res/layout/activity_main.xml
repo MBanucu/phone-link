@@ -10,14 +10,30 @@
         android:orientation="vertical"
         android:padding="24dp">
 
-        <!-- What the service is doing right now. -->
-        <TextView
-            android:id="@+id/status"
+        <!-- What the service is doing right now, next to the app's own
+             explanation of what it is for. -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:paddingBottom="4dp"
-            android:text="@string/status_unknown"
-            android:textAppearance="?android:attr/textAppearanceMedium" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/status"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:paddingBottom="4dp"
+                android:text="@string/status_unknown"
+                android:textAppearance="?android:attr/textAppearanceMedium" />
+
+            <Button
+                android:id="@+id/info"
+                style="?android:attr/buttonStyleSmall"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/action_info" />
+        </LinearLayout>
 
         <!-- What that service is using, next to the button that puts it in the
              form. Reading it never touches the fields. -->

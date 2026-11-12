@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The one warning in the panel: a promise about the next reboot that the
+         phone will not keep. A fixed red rather than a theme colour, because
+         the DeviceDefault themes do not all define android:colorError. -->
+    <color name="warning">#ffb3261e</color>
+</resources>
