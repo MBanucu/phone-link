@@ -21,6 +21,7 @@ final class ConfigStore {
     static final String EXTRA_ANONYMOUS = "anonymous";
     static final String EXTRA_SSID = "ssid";
     static final String EXTRA_ANY_NETWORK = "any_network";
+    static final String EXTRA_AUTO_START = "auto_start";
 
     private static final String PREFS = "config";
     private static final String KEY_PORT = "port";
@@ -29,6 +30,7 @@ final class ConfigStore {
     private static final String KEY_ANONYMOUS = "anonymous";
     private static final String KEY_SSID = "ssid";
     private static final String KEY_ANY_NETWORK = "any_network";
+    private static final String KEY_AUTO_START = "auto_start";
 
     private ConfigStore() {
     }
@@ -39,6 +41,20 @@ final class ConfigStore {
 
     static boolean isConfigured(Context context) {
         return prefs(context).contains(KEY_PORT);
+    }
+
+    /**
+     * Whether the service should come back by itself after a reboot, so the
+     * SSID gate opens the port when the phone reaches the AP without anybody
+     * touching the tile. Not part of {@link ProxyConfig}: it says what should
+     * happen to the service, not what the listener is.
+     */
+    static boolean autoStart(Context context) {
+        return prefs(context).getBoolean(KEY_AUTO_START, false);
+    }
+
+    static void setAutoStart(Context context, boolean enabled) {
+        prefs(context).edit().putBoolean(KEY_AUTO_START, enabled).apply();
     }
 
     /** Stored values, unvalidated: the panel uses them to fill its fields. */
@@ -77,6 +93,10 @@ final class ConfigStore {
         String ssid = stored.ssid;
         boolean anyNetwork = stored.anyNetwork;
         boolean anonymous = stored.anonymous;
+
+        if (intent != null && intent.hasExtra(EXTRA_AUTO_START)) {
+            setAutoStart(context, intent.getBooleanExtra(EXTRA_AUTO_START, autoStart(context)));
+        }
 
         if (intent != null) {
             if (intent.hasExtra(EXTRA_PORT)) {

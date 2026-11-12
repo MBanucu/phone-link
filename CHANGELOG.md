@@ -23,13 +23,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through the same `ConfigStore` as the adb extras and reads live state from a
   shared `ProxyRuntime`, so both control paths configure one listener; the
   notification now opens the panel.
+- The proxy can start without anybody touching it: the panel's "Start
+  automatically and keep running" checkbox (an `auto_start` adb extra) makes
+  the boot receiver bring the service back after a reboot, `START_STICKY`
+  keeps it up, and the existing SSID gate opens the port only on the configured
+  network — so the tile is for the cold case, not the daily one. The service
+  now declares the `location` foreground type alone, because Android 15 refuses
+  a `specialUse` service from `BOOT_COMPLETED`; a start from the shade without
+  background location now reports why instead of crashing.
 - The same start and stop are on a Quick Settings tile whose subtitle says
   `listening`, `paused` or `off`. A tile click may start a foreground service
   from the background, but Android only accepts the `location` type there when
   the app may read location in the background, so the service asks for that
-  permission and falls back to `specialUse` instead of crashing the shade when
-  it is denied — in which case the SSID is redacted and the listener stays
-  shut.
+  permission and reports a notification instead of crashing the shade when it
+  is denied.
 - `tests/proxy-app.test.sh` runs 25 hermetic cases for the app (handshake,
   credential failures, CONNECT and reply codes, relay, half-close, client
   counting, configuration rules, status text, runtime listener) on a plain JDK,
@@ -61,6 +68,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The panel's title bar covered the top of the form: Android 15 lays every
+  window out edge to edge for apps that target it, so the device default action
+  bar was drawn over the status line and the `Port` label. The app has its own
+  theme that opts out of that enforcement, which puts the content back below the
+  bar.
+- A stop delivered with `am start-foreground-service` (the documented stop, and
+  what the live harness cleans up with) never reached the foreground, so the
+  system reported a foreground service that did not start in time. The service
+  now promotes itself before acting on either action.
 - `phone-unlock` woke the panel with a single `KEYCODE_WAKEUP` and then typed
   the PIN on faith, so a press that landed while the display was still powering
   on left the phone locked and every caller saw a stale screen. It now reads

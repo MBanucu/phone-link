@@ -78,14 +78,20 @@ dev shell. `debug.keystore` is created on the first build and kept, so
   type, an upstream failure reply, client counting, a non-SOCKS greeting; the
   configuration rules (port range, credentials, anonymous, SSID, byte limits);
   the status text the panel, the tile and the notification share; the runtime
-  listener; and the `running` flag the tile turns into its subtitle. This is why the code has a `Logger` seam, an `Upstream` interface
-  and a config/state split instead of `Log.i`, `Egress` and string building
-  inside the service — and why the `script` check carries a JDK.
+  listener; and the `running` flag the tile turns into its subtitle. This is
+  why the code has a `Logger` seam, an `Upstream` interface and a config/state
+  split instead of `Log.i`, `Egress` and string building inside the service —
+  and why the `script` check carries a JDK.
 - `tests/live/proxy-app.sh` — needs a phone with a Wi-Fi client link and the
-  built APK: install, open the panel and require it to stay up, start, `200`
-  through the tunnel, a wrong password refused, an unrelated SSID keeping the
-  port closed with the service up, `any_network` bypassing the predicate, stop
-  and uninstall. Not part of `nix flake check`.
+  built APK. It unlocks the phone through `bin/phone-unlock` when `sudo -n`
+  allows it (the shade ignores tile clicks and uiautomator cannot dump a
+  sleeping panel), then: install, open the panel and require it to stay up,
+  `auto_start` reaching the service and showing in the panel, `200` through the
+  tunnel, a wrong password refused, an unrelated SSID keeping the port closed
+  with the service up, `any_network` bypassing the predicate, stop, start and
+  stop again from the Quick Settings tile, and uninstall. A phone that stays
+  locked skips the steps that need the screen instead of failing. Not part of
+  `nix flake check`.
 
 ## Run
 
@@ -130,8 +136,11 @@ A tile click is user interaction, so the tile may start a foreground service
 from the background, but Android still refuses the `location` service type for
 such a start unless the app may read location *in the background*. Grant
 "Allow all the time" in the app's location settings (`adb install -g` does it
-for a test build). Without it the service starts with `types=specialUse`, the
-SSID reads `<unknown ssid>`, and the tile honestly says `paused`.
+for a test build); without it the service cannot start from the shade at all
+and says so in a notification, because a foreground service without a type is
+not allowed for this target and a service that cannot read the SSID has nothing
+to offer anyway. From the panel the same start works either way, since the app
+is visible.
 
 ```sh
 adb shell cmd statusbar add-tile org.phonelink.proxy/.ProxyTile
@@ -141,8 +150,23 @@ adb shell cmd statusbar click-tile org.phonelink.proxy/.ProxyTile
 
 `click-tile` is a no-op while the shade is closed, so expand it first; to check
 the result, `dumpsys activity services org.phonelink.proxy | grep isForeground`
-should show `types=0x40000008` (location and specialUse) and `curl` through the
-port should answer `200`.
+should show `types=0x00000008` (location) and `curl` through the port should
+answer `200`.
+
+The panel's other checkbox, "Start automatically and keep running (also after a
+reboot)", stores `auto_start`. With it on, the app wants the service up all the
+time: `START_STICKY` keeps it alive, the boot receiver starts it after a
+reboot, and the SSID gate opens and closes the port as the phone comes and goes
+from the AP, so the tile is not needed in the common case. The boot start is
+best effort: Android 15 refuses some foreground service types from
+`BOOT_COMPLETED`, which is why the service declares `location` alone — a
+`specialUse` type, which would describe a proxy better, cannot be started there
+at all. The adb path has the same switch:
+
+```sh
+adb shell am start-foreground-service -n org.phonelink.proxy/.ProxyService \
+    -a org.phonelink.proxy.action.START --ez auto_start true
+```
 
 Check it:
 
@@ -168,6 +192,7 @@ sticky restart or the boot receiver reuses them:
 | `anonymous` (`--ez`) | `false` | listen without authentication |
 | `ssid` (`--es`) | `PhoneLink` | SSID the listener may run on |
 | `any_network` (`--ez`) | `false` | ignore the predicate and always listen (tests) |
+| `auto_start` (`--ez`) | `false` | come back after a reboot and stay up (the SSID still gates the port) |
 
 Every extra is persisted, so a later start without one reuses the stored value;
 pass it explicitly to change a setting.
@@ -182,9 +207,12 @@ wildcard listener on a Wi-Fi LAN is an open relay.
 
 - Tethering is excluded on purpose, so a phone in hotspot or USB-tether mode has
   no listener from this app. Use the vendored proxy for that mode.
-- Restarting after a reboot with a `location` foreground service is unverified.
-  Android may refuse to start that type from `BOOT_COMPLETED`; the receiver then
-  logs and leaves the listener off until the next explicit start.
+- The boot restart is written but not proven on a device: the wireless adb
+  port changes with a reboot, so the harness cannot reattach to check it.
+  Android 15 refuses some foreground service types from `BOOT_COMPLETED`, which
+  is why the service declares `location` alone; if the start is refused anyway
+  the receiver falls back to a plain start and then logs, and the listener stays
+  off until the next explicit start or the tile.
 - No settings activity; everything is driven by adb intents.
 - The `phone-proxy-*` scripts still talk to the old app's screen and its
   `Start 5G Proxy` / `Stop Proxy Service` buttons. Repointing them at this

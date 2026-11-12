@@ -24,6 +24,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     private EditText password;
     private EditText ssid;
     private CheckBox anyNetwork;
+    private CheckBox autoStart;
     private TextView status;
 
     @Override
@@ -36,6 +37,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         password = findViewById(R.id.password);
         ssid = findViewById(R.id.ssid);
         anyNetwork = findViewById(R.id.any_network);
+        autoStart = findViewById(R.id.auto_start);
         status = findViewById(R.id.status);
 
         ProxyConfig stored = ConfigStore.load(this);
@@ -44,6 +46,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         password.setText(stored.password);
         ssid.setText(stored.ssid);
         anyNetwork.setChecked(stored.anyNetwork);
+        autoStart.setChecked(ConfigStore.autoStart(this));
 
         Button start = findViewById(R.id.start);
         start.setOnClickListener(view -> startListening());
@@ -91,6 +94,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
             return;
         }
         ConfigStore.save(this, config);
+        ConfigStore.setAutoStart(this, autoStart.isChecked());
         startForegroundService(
                 new Intent(this, ProxyService.class).setAction(ProxyService.ACTION_START));
     }

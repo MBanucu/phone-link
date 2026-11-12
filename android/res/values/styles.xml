@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Android 15 draws every window edge to edge for apps that target it, and
+      with the device default theme the action bar then sits on top of the
+      content: the status line and the port label ended up under the title.
+      Opting out restores the pre-15 layout, where the decor puts the content
+      below the action bar and inside the system bars.
+    -->
+    <style name="AppTheme" parent="@android:style/Theme.DeviceDefault.DayNight">
+        <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
+    </style>
+</resources>

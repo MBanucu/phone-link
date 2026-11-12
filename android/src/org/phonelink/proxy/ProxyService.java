@@ -73,13 +73,22 @@ public final class ProxyService extends Service
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? ACTION_START : intent.getAction();
-        if (ACTION_STOP.equals(action)) {
+        boolean stopping = ACTION_STOP.equals(action);
+
+        // Must happen within five seconds of startForegroundService(), which is
+        // how the scripts deliver a stop as well: a stop that skipped this was
+        // reported as a foreground service that never reached the foreground.
+        boolean foreground = beginForeground(stopping ? "stopping" : "starting");
+        if (stopping) {
             stopSelf();
             return START_NOT_STICKY;
         }
-
-        // Must happen within five seconds of startForegroundService().
-        beginForeground();
+        if (!foreground) {
+            // Starting from the shade or at boot needs location "all the time";
+            // from the panel it works without it.
+            fail(getString(R.string.error_background_start));
+            return START_NOT_STICKY;
+        }
 
         try {
             config = ConfigStore.resolve(this, intent);
@@ -92,25 +101,26 @@ public final class ProxyService extends Service
     }
 
     /**
-     * The location type keeps the SSID readable while the app is not in front,
-     * which is the whole point when the tile starts us from the shade. Android
-     * refuses that type for a background start unless the app may hold location
-     * in the background, so drop it and say so rather than crash: without it the
-     * uplink cannot tell which Wi-Fi this is and the listener simply stays shut.
+     * Promote the service to the foreground with the location type, which is
+     * what keeps the SSID readable while the app is not in front — the point
+     * when the tile or the boot receiver starts us.
+     *
+     * <p>Android refuses that type for a start from the background without
+     * background location, and there is no honest fallback: a service with no
+     * type is prohibited for this target, and without the SSID the uplink could
+     * not tell which Wi-Fi this is anyway. So report instead of guessing.
+     *
+     * @return whether the service is now in the foreground; a start that cannot
+     *     get there has to give up, or the system kills it without ceremony
      */
-    private void beginForeground() {
-        Notification notification = buildNotification("starting");
-        boolean specialUse = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE;
-        int type = ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
-        if (specialUse) {
-            type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
-        }
+    private boolean beginForeground(String text) {
         try {
-            startForeground(NOTIFICATION_ID, notification, type);
-        } catch (SecurityException e) {
-            Log.w(TAG, "no location in the background: the listener will stay shut", e);
-            startForeground(NOTIFICATION_ID, notification,
-                    specialUse ? ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE : 0);
+            startForeground(NOTIFICATION_ID, buildNotification(text),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
+            return true;
+        } catch (SecurityException | IllegalStateException e) {
+            Log.w(TAG, "the system refused the foreground service", e);
+            return false;
         }
     }
 

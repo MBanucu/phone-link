@@ -6,11 +6,13 @@
     <string name="action_start">Start</string>
     <string name="action_stop">Stop</string>
     <string name="status_unknown">not running</string>
+    <string name="error_background_start">the phone refused a background start: set Location to "Allow all the time" for this app, or open the app and press Start</string>
     <string name="label_port">Port</string>
     <string name="label_user">User</string>
     <string name="label_password">Password</string>
     <string name="label_ssid">SSID the listener may run on</string>
     <string name="label_any_network">Ignore the SSID and always listen</string>
+    <string name="label_auto_start">Start automatically and keep running (also after a reboot)</string>
     <string name="tile_label">Proxy</string>
     <string name="tile_listening">listening</string>
     <string name="tile_paused">paused</string>
