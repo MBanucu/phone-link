@@ -34,6 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `lib/phone-ui.sh`, the uiautomator helpers, superseded by `phone_link.ui`.
   `lib/phone-net.sh` stays for the live harness in `tests/live`.
 
+### Fixed
+
+- `nix fmt` works again: nixpkgs renamed `nixfmt-rfc-style` to `nixfmt` and the
+  formatter script still pointed at the old binary, so it failed without
+  formatting anything. The `format` check now also covers `android/shell.nix`.
+
 
 ## [0.3.8] - 2026-11-11
 

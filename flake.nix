@@ -336,7 +336,8 @@
           '';
 
           format = pkgs.runCommand "phone-link-format-check" { nativeBuildInputs = [ pkgs.nixfmt ]; } ''
-            nixfmt --check ${./flake.nix} ${./modules/phone-link.nix}
+            nixfmt --check ${./flake.nix} ${./modules/phone-link.nix} \
+              ${./android/shell.nix}
             touch $out
           '';
 
@@ -456,7 +457,7 @@
         default = pkgs.mkShell {
           packages = runtimeDeps pkgs ++ [
             pkgs.shellcheck
-            pkgs.nixfmt-rfc-style
+            pkgs.nixfmt
             (pkgs.python3.withPackages (ps: [ ps.pygobject3 ]))
             pkgs.gtk4
             pkgs.libadwaita
@@ -482,7 +483,7 @@
             echo "nixfmt: no .nix files given" >&2
             exit 0
           fi
-          exec ${pkgs.nixfmt-rfc-style}/bin/nixfmt-rfc-style "''${files[@]}"
+          exec ${pkgs.nixfmt}/bin/nixfmt "''${files[@]}"
         ''
       );
     };
