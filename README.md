@@ -11,6 +11,7 @@ cable.
 - `nixosModules.default` — the tunnel, the declarative access-point profile and
   its firewall holes
 - `devShells.default`, `formatter`, `checks`
+- `CHANGELOG.md` — released changes, Keep a Changelog format
 - `docs/phone-network.md` — measured behaviour, evidence and the traps
 
 ## Install the module
