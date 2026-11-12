@@ -15,11 +15,17 @@ import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.View;
+import android.view.WindowManager;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import java.util.List;
 
 /**
  * The panel: the same settings and the same two actions as the adb contract.
@@ -43,6 +49,13 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     private TextView adbState;
     private TextView pending;
     private TextView status;
+    private TextView active;
+    private Spinner picker;
+    private TextView profileSummary;
+    private Button loadButton;
+    private Button deleteButton;
+    private ArrayAdapter<String> profileNames;
+    private String selectedProfile;
 
     /**
      * The two preferences behind the checkboxes can also be changed over adb
@@ -56,6 +69,13 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
                     renderAdbState();
                 } else if (ConfigStore.KEY_AUTO_START.equals(key)) {
                     autoStart.setChecked(ConfigStore.autoStart(this));
+                } else if (ConfigStore.KEY_SELECTED_PROFILE.equals(key)) {
+                    return;
+                } else {
+                    // A configuration the service just stored: show it as in use
+                    // without touching the form, which may be mid-edit.
+                    renderActive();
+                    renderPending();
                 }
             });
 
@@ -85,6 +105,35 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         adbState = findViewById(R.id.adb_state);
         pending = findViewById(R.id.pending);
         status = findViewById(R.id.status);
+        active = findViewById(R.id.active);
+        picker = findViewById(R.id.profiles);
+        profileSummary = findViewById(R.id.profile_summary);
+        loadButton = findViewById(R.id.load_profile);
+        deleteButton = findViewById(R.id.delete_profile);
+
+        profileNames = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item);
+        profileNames.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        picker.setAdapter(profileNames);
+        picker.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(
+                    AdapterView<?> parent, View view, int position, long id) {
+                Object item = parent.getItemAtPosition(position);
+                selectedProfile = item == null ? null : item.toString();
+                ConfigStore.setSelectedProfile(MainActivity.this, selectedProfile);
+                renderProfileSummary();
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+                selectedProfile = null;
+                renderProfileSummary();
+            }
+        });
+        findViewById(R.id.reset).setOnClickListener(view -> resetToActive());
+        loadButton.setOnClickListener(view -> loadSelectedProfile());
+        findViewById(R.id.save_profile).setOnClickListener(view -> askProfileName());
+        deleteButton.setOnClickListener(view -> confirmDeleteProfile());
 
         ProxyConfig stored = ConfigStore.load(this);
         port.setText(Integer.toString(stored.port));
@@ -113,6 +162,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
 
         render(ProxyRuntime.state());
         renderPending();
+        refreshProfiles();
     }
 
     @Override
@@ -152,6 +202,9 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
 
     private void render(ProxyState state) {
         status.setText(state.describe());
+        // "In use" is not only about the port: a run stops being the one that
+        // matters the moment the service goes away.
+        renderActive();
     }
 
     /**
@@ -161,6 +214,151 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     private boolean batteryExempt() {
         PowerManager power = getSystemService(PowerManager.class);
         return power != null && power.isIgnoringBatteryOptimizations(getPackageName());
+    }
+
+    /** The configuration the service is or was running with, as one line. */
+    private void renderActive() {
+        boolean running = ProxyRuntime.state().running;
+        active.setText(getString(
+                running ? R.string.active_running : R.string.active_stopped,
+                ConfigStore.load(this).summary()));
+    }
+
+    /** Put the configuration in use back into the form, dropping any edits. */
+    private void resetToActive() {
+        loadIntoFields(ConfigStore.load(this));
+        renderPending();
+    }
+
+    private void loadIntoFields(ProxyConfig config) {
+        port.setText(Integer.toString(config.port));
+        user.setText(config.user);
+        password.setText(config.password);
+        ssid.setText(config.ssid);
+        anonymous.setChecked(config.anonymous);
+        anyNetwork.setChecked(config.anyNetwork);
+    }
+
+    /** A saved configuration into the form; nothing is started or stored. */
+    private void loadSelectedProfile() {
+        ProxyConfig saved = selectedProfile == null
+                ? null
+                : ConfigStore.profile(this, selectedProfile);
+        if (saved == null) {
+            return;
+        }
+        loadIntoFields(saved);
+        renderPending();
+    }
+
+    /** Rebuild the picker from the store and keep the remembered selection. */
+    private void refreshProfiles() {
+        List<String> names = ConfigStore.profileNames(this);
+        profileNames.clear();
+        profileNames.addAll(names);
+        profileNames.notifyDataSetChanged();
+
+        boolean empty = names.isEmpty();
+        // An empty Spinner is a bare dropdown arrow; the line below it already
+        // says there is nothing saved.
+        picker.setVisibility(empty ? View.GONE : View.VISIBLE);
+        picker.setEnabled(!empty);
+        loadButton.setEnabled(!empty);
+        deleteButton.setEnabled(!empty);
+
+        String remembered = ConfigStore.selectedProfile(this);
+        int index = remembered == null ? -1 : names.indexOf(remembered);
+        if (index < 0 && !empty) {
+            index = Math.max(picker.getSelectedItemPosition(), 0);
+        }
+        if (index >= 0 && index < names.size()) {
+            selectedProfile = names.get(index);
+            picker.setSelection(index);
+        } else {
+            selectedProfile = null;
+        }
+        renderProfileSummary();
+    }
+
+    private void renderProfileSummary() {
+        ProxyConfig saved = selectedProfile == null
+                ? null
+                : ConfigStore.profile(this, selectedProfile);
+        profileSummary.setText(saved == null
+                ? getString(R.string.profiles_none)
+                : getString(R.string.profile_holds, saved.summary()));
+    }
+
+    private void askProfileName() {
+        EditText name = new EditText(this);
+        name.setHint(R.string.profile_name_hint);
+        name.setText(selectedProfile == null ? "" : selectedProfile);
+        name.setSelection(name.getText().length());
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.profile_save_title)
+                .setView(name)
+                .setPositiveButton(android.R.string.ok,
+                        (shown, which) -> saveAs(name.getText().toString().trim()))
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.show();
+        // A name is the only thing this dialog is for, so give it the keyboard
+        // instead of making the user tap the field first.
+        name.requestFocus();
+        dialog.getWindow().setSoftInputMode(
+                WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+    }
+
+    private void saveAs(String name) {
+        if (name.isEmpty()) {
+            Toast.makeText(this, R.string.profile_name_required, Toast.LENGTH_LONG).show();
+            return;
+        }
+        ProxyConfig config;
+        try {
+            config = readFields();
+        } catch (IllegalArgumentException e) {
+            Toast.makeText(this, e.getMessage(), Toast.LENGTH_LONG).show();
+            return;
+        }
+        // Saving over the selected configuration is the expected "save again",
+        // anything else that already exists is a decision.
+        if (ConfigStore.profile(this, name) != null && !name.equals(selectedProfile)) {
+            new AlertDialog.Builder(this)
+                    .setTitle(getString(R.string.profile_overwrite_title, name))
+                    .setMessage(R.string.profile_overwrite_message)
+                    .setPositiveButton(android.R.string.ok,
+                            (dialog, which) -> storeProfile(name, config))
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+            return;
+        }
+        storeProfile(name, config);
+    }
+
+    private void storeProfile(String name, ProxyConfig config) {
+        ConfigStore.saveProfile(this, name, config);
+        ConfigStore.setSelectedProfile(this, name);
+        refreshProfiles();
+        Toast.makeText(this, getString(R.string.profile_saved, name), Toast.LENGTH_SHORT).show();
+    }
+
+    private void confirmDeleteProfile() {
+        if (selectedProfile == null) {
+            return;
+        }
+        String name = selectedProfile;
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.profile_delete_title, name))
+                .setMessage(R.string.profile_delete_message)
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    ConfigStore.deleteProfile(this, name);
+                    ConfigStore.setSelectedProfile(this, null);
+                    selectedProfile = null;
+                    refreshProfiles();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
     }
 
     /**
@@ -260,22 +458,27 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         }
     }
 
+    private ProxyConfig readFields() {
+        return ProxyConfig.of(
+                readPort(),
+                user.getText().toString(),
+                password.getText().toString(),
+                ssid.getText().toString(),
+                anyNetwork.isChecked(),
+                anonymous.isChecked());
+    }
+
     private void startListening() {
         ProxyConfig config;
         try {
-            config = ProxyConfig.of(
-                    readPort(),
-                    user.getText().toString(),
-                    password.getText().toString(),
-                    ssid.getText().toString(),
-                    anyNetwork.isChecked(),
-                    anonymous.isChecked());
+            config = readFields();
         } catch (IllegalArgumentException e) {
             Toast.makeText(this, e.getMessage(), Toast.LENGTH_LONG).show();
             return;
         }
         ConfigStore.save(this, config);
         ConfigStore.setAutoStart(this, autoStart.isChecked());
+        renderActive();
         renderPending();
         if (autoStart.isChecked() && !batteryExempt()) {
             askForExemption();

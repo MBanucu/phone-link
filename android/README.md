@@ -196,6 +196,24 @@ setting, so it needs the one permission adb can hand out:
 adb shell pm grant org.phonelink.proxy android.permission.WRITE_SECURE_SETTINGS
 ```
 
+The panel starts with two lines of fact rather than intent: what the service is
+doing (`listening on 0.0.0.0:1081 · 0 clients`), and what it is doing it with —
+`In use: port 1081 · SSID PhoneLink · user proxy`, or `Last started: …` when it
+is stopped. That line is read from the store and never touches the fields, so
+a configuration changed over adb shows up there while an edit is in progress;
+`Reset` copies it back into the form.
+
+Saved configurations sit under it, like a site manager: `Save as…` asks for a
+name and keeps the form under it (a name that already exists is only
+overwritten after asking, unless it is the selected one, which is the ordinary
+"save again"), the picker lists what is saved and the line below it says what
+the selected one holds (`Holds: port 1081 · SSID PhoneLink · user proxy`, never
+the password), `Load` puts it into the form without starting anything or
+storing it, and `Delete` removes one after a confirmation. The selection is
+remembered across restarts. Configurations cover the listener only; the two
+switches below the form (auto-start, wireless debugging) say what the service
+does, not what a configuration is.
+
 Both preference checkboxes follow the store, so `--ez auto_start …` or
 `--ez adb_wifi …` while the panel is open shows up there without reopening it.
 Under the wireless-debugging checkbox a line says what Android is doing right

@@ -94,6 +94,22 @@ final class ProxyConfig {
         return new ProxyConfig(port, givenUser, givenPassword, givenSsid, anyNetwork, anonymous);
     }
 
+    /**
+     * One line for the panel: what this configuration actually says, without
+     * the password. Used both for the configuration in use and for a saved one
+     * that is only being looked at, which is why it says "user" rather than
+     * repeating the form's field labels.
+     */
+    String summary() {
+        String network = anyNetwork
+                ? "any network"
+                : "SSID " + (ssid.isEmpty() ? "—" : ssid);
+        String auth = anonymous
+                ? "no authentication"
+                : "user " + (user.isEmpty() ? "—" : user);
+        return "port " + port + " · " + network + " · " + auth;
+    }
+
     private static String nullToEmpty(String value) {
         return value == null ? "" : value;
     }

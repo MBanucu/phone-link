@@ -235,6 +235,16 @@ public final class ProxyAppTest {
             assertEqual("PhoneLink", config.ssid, "SSID");
         });
 
+        test("the summary says what a configuration holds, without the password", () -> {
+            ProxyConfig config =
+                    ProxyConfig.of(1081, "proxy", "s3cret", "PhoneLink", false, false);
+            assertEqual("port 1081 · SSID PhoneLink · user proxy", config.summary(),
+                    "summary");
+            ProxyConfig open = ProxyConfig.of(1081, "", "", "", true, true);
+            assertEqual("port 1081 · any network · no authentication", open.summary(),
+                    "anonymous summary");
+        });
+
         // --- state text ----------------------------------------------------
 
         test("the listening text counts clients", () -> {

@@ -36,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   APK. Measured: with the switch on, switching the setting off and having the
   phone re-join `PhoneLink` ends with the app logging `wireless debugging
   enabled (it was off)`, a fresh mDNS record and a working `adb connect`.
+- The panel gained a site-manager-like list of saved configurations: `Save
+  as…` keeps the form under a name, the picker shows what each one holds
+  without the password, `Load` puts one into the form without starting or
+  storing anything, and `Delete` removes it after confirmation. The line above
+  the form always shows what the service is running with (`In use: …`, or
+  `Last started: …`) without touching the edited fields, and `Reset` copies
+  that back into the form.
 - The panel says what Android's wireless debugging is doing at that moment
   (and when the app lacks the permission to change it), marks edited fields as
   `Not applied yet — press Start` until they are, and exposes the `anonymous`

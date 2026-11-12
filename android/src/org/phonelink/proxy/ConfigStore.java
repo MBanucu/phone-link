@@ -4,6 +4,12 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
 /**
  * Where {@link ProxyConfig} lives: private preferences for the activity, plus
  * the adb extras that override them for one start.
@@ -35,6 +41,10 @@ final class ConfigStore {
     // while it is open, through a shared-preferences listener.
     static final String KEY_AUTO_START = "auto_start";
     static final String KEY_ADB_WIFI = "adb_wifi";
+    static final String KEY_SELECTED_PROFILE = "selected_profile";
+
+    private static final String KEY_PROFILES = "profiles";
+    private static final String PROFILE_PREFIX = "profile.";
 
     private ConfigStore() {
     }
@@ -102,6 +112,84 @@ final class ConfigStore {
                 .putString(KEY_SSID, config.ssid)
                 .putBoolean(KEY_ANY_NETWORK, config.anyNetwork)
                 .apply();
+    }
+
+    // -- saved configurations -------------------------------------------
+
+    /**
+     * Named configurations the panel can load into the form.
+     *
+     * <p>Kept in the same private preferences as the configuration in use, one
+     * set of keys per name, so the store stays a list of names plus plain
+     * fields rather than a serialised blob that would need its own escaping.
+     * The password is stored like the active one: private preferences of an
+     * app that is not backed up.
+     */
+    static List<String> profileNames(Context context) {
+        Set<String> names = prefs(context).getStringSet(KEY_PROFILES, null);
+        List<String> sorted = names == null ? new ArrayList<>() : new ArrayList<>(names);
+        Collections.sort(sorted, String.CASE_INSENSITIVE_ORDER);
+        return sorted;
+    }
+
+    /** The saved configuration called `name`, or null when there is none. */
+    static ProxyConfig profile(Context context, String name) {
+        if (name == null || !profileNames(context).contains(name)) {
+            return null;
+        }
+        SharedPreferences prefs = prefs(context);
+        return ProxyConfig.raw(
+                prefs.getInt(profileKey(name, KEY_PORT), ProxyConfig.DEFAULT_PORT),
+                prefs.getString(profileKey(name, KEY_USER), ""),
+                prefs.getString(profileKey(name, KEY_PASSWORD), ""),
+                prefs.getString(profileKey(name, KEY_SSID), ProxyConfig.DEFAULT_SSID),
+                prefs.getBoolean(profileKey(name, KEY_ANY_NETWORK), false),
+                prefs.getBoolean(profileKey(name, KEY_ANONYMOUS), false));
+    }
+
+    static void saveProfile(Context context, String name, ProxyConfig config) {
+        Set<String> names = new HashSet<>(profileNames(context));
+        names.add(name);
+        prefs(context)
+                .edit()
+                .putStringSet(KEY_PROFILES, names)
+                .putInt(profileKey(name, KEY_PORT), config.port)
+                .putString(profileKey(name, KEY_USER), config.user)
+                .putString(profileKey(name, KEY_PASSWORD), config.password)
+                .putBoolean(profileKey(name, KEY_ANONYMOUS), config.anonymous)
+                .putString(profileKey(name, KEY_SSID), config.ssid)
+                .putBoolean(profileKey(name, KEY_ANY_NETWORK), config.anyNetwork)
+                .apply();
+    }
+
+    static void deleteProfile(Context context, String name) {
+        Set<String> names = new HashSet<>(profileNames(context));
+        if (!names.remove(name)) {
+            return;
+        }
+        prefs(context)
+                .edit()
+                .putStringSet(KEY_PROFILES, names)
+                .remove(profileKey(name, KEY_PORT))
+                .remove(profileKey(name, KEY_USER))
+                .remove(profileKey(name, KEY_PASSWORD))
+                .remove(profileKey(name, KEY_ANONYMOUS))
+                .remove(profileKey(name, KEY_SSID))
+                .remove(profileKey(name, KEY_ANY_NETWORK))
+                .apply();
+    }
+
+    /** Which saved configuration the picker had selected, across restarts. */
+    static String selectedProfile(Context context) {
+        return prefs(context).getString(KEY_SELECTED_PROFILE, null);
+    }
+
+    static void setSelectedProfile(Context context, String name) {
+        prefs(context).edit().putString(KEY_SELECTED_PROFILE, name).apply();
+    }
+
+    private static String profileKey(String name, String field) {
+        return PROFILE_PREFIX + name + "." + field;
     }
 
     /**
