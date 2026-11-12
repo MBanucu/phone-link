@@ -25,26 +25,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The title bar is gone, because the only thing in it was the app's own name.
-  The header row now holds the name, the `Info` button, a `⚠` that appears
-  exactly while a reboot restart cannot work (it opens the battery request
-  from any page) and a menu with `Save`, `Save as…`, `Delete configuration` and
-  jumps to `Saved` and `Log`. A line under the state names the configuration
-  the form is working on, and `Listener` and `Service` each carry a plain
-  `Save` that writes the form back to it — saving no longer needs the `Saved`
-  page. Measured on the phone: with the exemption removed the header shows
-  `⚠` and tapping it opens the battery dialog; `Save` on the `Listener` page
-  wrote `port 1082` into the selected configuration.
-- The panel fits one screen. The state lines and `Start`/`Stop` are fixed at the
-top and bottom and the middle is a menu of three pages — `Listener`, `Saved`,
-`Service` — so nothing has to be scrolled to reach a button; the pages are
-remembered across a rotation. Everything the old form held is on one page at a
-time, and the pages scroll only if a smaller screen needs it.
+- The panel is now a list of proxies and one page per proxy, instead of four
+  pages of one form. Home shows every saved proxy as a card with its name, its
+  own state — `Running` (green), `Waiting`, `Stopped` — and what it holds, with
+  the one the service is using marked `in use`. Tapping a card opens that proxy:
+  its listener and service settings, `Save` and `Revert`, and its own log with
+  this run's byte counters. The state is one small line above `Start`/`Stop`
+  rather than a block at the top, which is what the list and the form needed.
+  With nothing saved the page says so and `New proxy` is the way in; the button
+  copies the configuration in use, takes the next free port and opens the
+  result, so the opened proxy is the wizard. `Start` on an open proxy stores the
+  form into it first, so the proxy that runs is the one that was saved and the
+  list marks the right card. The card shape is where several proxies will
+  report into once the service can run more than one; measured on the phone:
+  starting a proxy turns its card green and says `in use · port 18080`, and
+  `dumpsys` reports `profile "harness-save"`.
+- The log is per proxy. Every entry is tagged with the proxy it belongs to —
+  the service tags what happens while it runs one, the panel tags what it writes
+  about a named one — so an open proxy shows its own starts, failures and
+  uplink changes; the menu's `All events` still shows everything.
 - A saved configuration is the whole panel, not half of it: the two service
   switches (auto-start, wireless debugging) are stored and restored with the
-  listener's fields, the `Holds:` line names them, and loading one leaves the
-  switches as a draft until Start, like the fields (measured: loading a saved
-  configuration with both off flips both boxes, shows `Not applied yet`, and
+  listener's fields, and the card names them (measured: loading a saved
+  configuration with both off flips both boxes, shows `Not saved yet`, and
   leaves the running service on its own values).
 - Saving and loading configurations over adb: `SAVE_PROFILE` keeps what the
   service has under `--es profile NAME` without disturbing a running listener,
@@ -56,6 +59,18 @@ time, and the pages scroll only if a smaller screen needs it.
 
 ### Added
 
+- The Log page counts bytes: `↓ 6.5 kB · ↑ 1.9 kB · now 0 B/s down, 0 B/s up`
+  and a sparkline of the last minute, one line per direction. The counters sit
+  where the relay copies (`Socks5Server.pump`), the panel samples them once a
+  second while it is in front, and a start resets them, so the page answers
+  what this run moved.
+- `phone-doctor` grew an `[app]` section: it reports whether this repository's
+  app is installed and whether it will actually come back at the next reboot —
+  `auto_start` on, on the device-idle allowlist, background location granted —
+  naming exactly which of the three is missing. `phone-proxy-boot` is its fix
+  (and the fix `phone-doctor-fix` runs for `app_boot`); measured on the phone:
+  with the allowlist removed the doctor fails with "not on the battery
+  allowlist (run phone-proxy-boot)", `--check` exits 1, and the fix restores it.
 - A `Log` page: the last 200 events, newest first with a time — service state
   changes with their reason, client counts, settings written, profiles saved,
   loaded and deleted, wireless debugging turned back on, and failures. It is

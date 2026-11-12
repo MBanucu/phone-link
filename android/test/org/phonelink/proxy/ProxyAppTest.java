@@ -263,6 +263,33 @@ public final class ProxyAppTest {
             assertTrue(text.contains(Help.ADB_DUMP), "help does not say how to print it");
         });
 
+        test("the traffic counters and the window the sparkline draws", () -> {
+            Traffic.reset();
+            Traffic.add(100, 1000);
+            Traffic.add(50, 500);
+            long[] totals = Traffic.totals();
+            assertEqual(150, (int) totals[0], "uploaded");
+            assertEqual(1500, (int) totals[1], "downloaded");
+            long[] rates = Traffic.sample();
+            assertEqual(150, (int) rates[0], "upload rate");
+            assertEqual(1500, (int) rates[1], "download rate");
+            // A sample closes the interval that just ended, so the next one is
+            // quiet unless more bytes arrived in between.
+            Traffic.add(10, 750);
+            Traffic.sample();
+            long[][] history = Traffic.history();
+            assertEqual(2, history[0].length, "two intervals");
+            assertEqual(750, (int) history[1][1], "newest download interval");
+            assertEqual(10, (int) history[0][1], "newest upload interval");
+            assertEqual(1500, (int) history[1][0], "the interval before it");
+            Traffic.reset();
+            assertEqual(0, Traffic.history()[0].length, "reset empties the window");
+            assertEqual(0, (int) Traffic.totals()[1], "reset zeroes the totals");
+            assertEqual("512 B", Traffic.human(512), "bytes");
+            assertEqual("1.5 kB", Traffic.human(1500), "kilobytes");
+            assertEqual("2.0 MB", Traffic.human(2_000_000), "megabytes");
+        });
+
         test("the event log keeps the newest entries and forgets the rest", () -> {
             EventLog.clear();
             for (int i = 0; i < 205; i++) {
@@ -280,6 +307,28 @@ public final class ProxyAppTest {
             EventLog.clear();
             assertEqual(1, seen.get(), "the page is told once");
             assertEqual(0, EventLog.newestFirst().size(), "clear empties it");
+        });
+
+        test("the log keeps a proxy's events apart from the app's", () -> {
+            EventLog.clear();
+            EventLog.setActiveTag("hotel");
+            EventLog.add("listening on 0.0.0.0:1080 \u00b7 0 clients");
+            EventLog.addTo("home", "saved configuration \"home\"");
+            EventLog.setActiveTag(null);
+            EventLog.add("wireless debugging managed by the app");
+
+            List<String> hotel = EventLog.forProfile("hotel");
+            assertEqual(1, hotel.size(), "the running proxy's own event");
+            assertTrue(hotel.get(0).endsWith("listening on 0.0.0.0:1080 \u00b7 0 clients"),
+                    "with its line");
+            assertEqual(1, EventLog.forProfile("home").size(), "a saved proxy's event");
+            assertEqual(0, EventLog.forProfile("nothing").size(), "no events for a stranger");
+            assertEqual(3, EventLog.newestFirst().size(), "everything at once");
+            // The app's own event is not charged to the proxy that ran before it.
+            assertTrue(EventLog.forProfile("hotel").get(0).contains("listening"),
+                    "the tag is not sticky");
+            EventLog.clear();
+            assertEqual(0, EventLog.forProfile(null).size(), "clear empties every view");
         });
 
         // --- state text ----------------------------------------------------

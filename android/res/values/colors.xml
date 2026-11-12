@@ -4,4 +4,11 @@
          phone will not keep. A fixed red rather than a theme colour, because
          the DeviceDefault themes do not all define android:colorError. -->
     <color name="warning">#ffb3261e</color>
+    <!-- A proxy that is up: the only green in the panel, and the one thing
+         the list should be readable at a glance. -->
+    <color name="running">#ff2e7d32</color>
+    <!-- The two directions on the sparkline. -->
+    <color name="traffic_down">#ff1e88e5</color>
+    <color name="traffic_up">#ff43a047</color>
+    <color name="traffic_base">#ff9e9e9e</color>
 </resources>

@@ -122,6 +122,17 @@ public final class ProxyService extends Service
             fail(e.getMessage());
             return START_NOT_STICKY;
         }
+        // Which saved proxy this is, so the list can mark its card and the log
+        // can keep a proxy's events apart: the one the start named, or the one
+        // whose settings these are.
+        String profile = intent == null
+                ? null
+                : intent.getStringExtra(ConfigStore.EXTRA_PROFILE);
+        profile = profile == null || profile.trim().isEmpty()
+                ? ConfigStore.profileMatching(this, config)
+                : profile.trim();
+        ConfigStore.setInUse(this, profile);
+        EventLog.setActiveTag(profile);
         startWatching();
         return START_STICKY;
     }
@@ -157,6 +168,8 @@ public final class ProxyService extends Service
             uplink = null;
         }
         stopListening();
+        // Nothing that happens after this is about the proxy that just went.
+        EventLog.setActiveTag(null);
         ProxyRuntime.publish(ProxyState.stopped());
         stopForeground(STOP_FOREGROUND_REMOVE);
         notifications.cancel(NOTIFICATION_ID);
@@ -181,6 +194,11 @@ public final class ProxyService extends Service
         writer.println();
         writer.println("Right now");
         writer.println("  state       " + state.describe());
+        String inUse = ConfigStore.inUse(this);
+        writer.println("  profile     " + (inUse == null ? "none" : "\"" + inUse + "\""));
+        long[] traffic = Traffic.totals();
+        writer.println("  traffic     \u2193 " + Traffic.human(traffic[1])
+                + " \u00b7 \u2191 " + Traffic.human(traffic[0]) + " in this run");
         if (config != null) {
             writer.println("  using       " + config.summary());
         }
@@ -268,7 +286,7 @@ public final class ProxyService extends Service
         }
         ConfigStore.saveProfile(this, name, ConfigStore.load(this),
                 ConfigStore.autoStart(this), ConfigStore.adbWireless(this));
-        EventLog.add("saved configuration \"" + name + "\"");
+        EventLog.addTo(name, "saved configuration \"" + name + "\"");
         Log.i(TAG, "saved configuration \"" + name + "\"");
         if (first) {
             stopSelf();
@@ -294,7 +312,11 @@ public final class ProxyService extends Service
             return;
         }
         ConfigStore.deleteProfile(this, name);
-        EventLog.add("deleted \"" + name + "\"");
+        if (name.equals(ConfigStore.inUse(this))) {
+            // The list must not keep pointing at a proxy that no longer exists.
+            ConfigStore.setInUse(this, null);
+        }
+        EventLog.addTo(name, "deleted \"" + name + "\"");
         Log.i(TAG, "deleted configuration \"" + name + "\"");
         if (first) {
             stopSelf();
@@ -309,6 +331,9 @@ public final class ProxyService extends Service
             uplink = null;
         }
         stopListening();
+        // The counters answer "what has this run moved", so a new start begins
+        // at zero.
+        Traffic.reset();
         publish(ProxyState.waiting());
         uplink = new Uplink(this, config.ssid, config.anyNetwork, this::onUplinkChanged);
         uplink.start();

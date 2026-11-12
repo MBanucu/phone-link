@@ -44,6 +44,7 @@ final class ConfigStore {
     static final String KEY_AUTO_START = "auto_start";
     static final String KEY_ADB_WIFI = "adb_wifi";
     static final String KEY_SELECTED_PROFILE = "selected_profile";
+    static final String KEY_IN_USE = "in_use";
 
     // Package-private for the same reason as KEY_AUTO_START: the panel shows a
     // configuration the moment adb saves one.
@@ -212,6 +213,43 @@ final class ConfigStore {
 
     static void setSelectedProfile(Context context, String name) {
         prefs(context).edit().putString(KEY_SELECTED_PROFILE, name).apply();
+    }
+
+    /**
+     * The saved configuration the service is (or was last) running, so the list
+     * can say which card is the live one. Not part of a configuration: it says
+     * what is happening, not what should happen.
+     */
+    static String inUse(Context context) {
+        return prefs(context).getString(KEY_IN_USE, null);
+    }
+
+    static void setInUse(Context context, String name) {
+        prefs(context).edit().putString(KEY_IN_USE, name).apply();
+    }
+
+    /**
+     * The saved configuration these settings came from, or null when a start
+     * over adb used values no name holds. Lets a plain
+     * {@code START --ei port 1081} still show up as "that proxy is running".
+     */
+    static String profileMatching(Context context, ProxyConfig config) {
+        if (config == null) {
+            return null;
+        }
+        for (String name : profileNames(context)) {
+            ProxyConfig saved = profile(context, name);
+            if (saved != null
+                    && saved.port == config.port
+                    && saved.user.equals(config.user)
+                    && saved.password.equals(config.password)
+                    && saved.ssid.equals(config.ssid)
+                    && saved.anyNetwork == config.anyNetwork
+                    && saved.anonymous == config.anonymous) {
+                return name;
+            }
+        }
+        return null;
     }
 
     private static String profileKey(String name, String field) {

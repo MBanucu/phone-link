@@ -198,60 +198,72 @@ setting, so it needs the one permission adb can hand out:
 adb shell pm grant org.phonelink.proxy android.permission.WRITE_SECURE_SETTINGS
 ```
 
-The panel is one screen with four pages behind a menu — `Listener`, `Saved`,
-`Service` and `Log` — while the state lines above and `Start`/`Stop` below
-never move, so nothing has to be scrolled to reach a button: everything that
-was spread over a scrolling form fits one page at a time.
+The panel is two screens: home is the list of saved proxies, and one of them
+opens for its settings and its log. The state is one small line above
+`Start`/`Stop` and a word on each card, not a block at the top, so the list
+and the form get the room; `Back` (or the button in the header) returns to the
+list.
 
 The title bar is gone. Its only content was the app's own name, so the layout
-carries a header row instead: the name, a warning mark that appears exactly
-while a reboot restart cannot work (tapping it opens the battery request, from
-any page), `Info`, and a menu with the profile actions — `Save`, `Save as…`,
-`Delete configuration`, plus jumps to `Saved` and `Log`. Under the state lines
-a line names the configuration the form is working on (`Profile: hotel`), and
-the `Listener` and `Service` pages both carry a plain `Save` that writes the
-form back to that name — `Save as…`, for a new one, stays on the `Saved` page.
+carries a header row instead: the name of the list (or of the open proxy with a
+back arrow), a warning mark that appears exactly while a reboot restart cannot
+work (tapping it opens the battery request, from either screen), `Info`, and a
+menu — `New proxy`, `Save`, `Save as…`, `Delete` for the open one, and
+`All events`. The open proxy carries a plain `Save` next to `Revert`, and
+`Save as…`/`Delete` stay in the menu so the form is not crowded.
 
-`Log` is the last 200 things that happened, newest first with a time: the
-service's state changes (`listening on 0.0.0.0:1081 · 0 clients`, `not
-listening: on "FRITZ", not "PhoneLink"`), settings that were written, the
-profiles saved, loaded and deleted, wireless debugging being turned back on,
-and failures with their reason. It lives in memory and is cleared with a
-tap, because the complete record is still `adb logcat -s phone-link-proxy`.
+The list is the app: one card per saved proxy with its name, its state —
+`Running` in green, `Waiting` while the service is up but the network does not
+match, `Stopped` otherwise — and what it holds (`port 1081 · SSID PhoneLink ·
+user proxy`, then `auto-start on · wireless debugging on`), never the password.
+The card of the one the service is using says `in use · …` and follows the
+service as clients come and go. With nothing saved the page says so, and
+`New proxy` is the way in either way: it copies the configuration in use — same
+credentials and network — takes the next free port, and opens the result, so
+the wizard is the opened proxy itself. A name that already exists is refused
+rather than overwritten; `Save as…` is the way to make a copy on purpose.
 
-The panel starts with two lines of fact rather than intent: what the service is
-doing (`listening on 0.0.0.0:1081 · 0 clients`), and what it is doing it with —
-`In use: port 1081 · SSID PhoneLink · user proxy`, or `Last started: …` when it
-is stopped. That line is read from the store and never touches the fields, so
-a configuration changed over adb shows up there while an edit is in progress;
-`Reset` copies it back into the form.
+That shape is also where several proxies will report into once the service can
+run more than one at a time: a card's state is already that proxy's own state,
+and the list is rebuilt from the store. Today exactly one can be running, and
+the card of the one that is says so.
 
-Saved configurations sit under it, like a site manager: `Save as…` asks for a
-name and keeps the form under it (a name that already exists is only
-overwritten after asking, unless it is the selected one, which is the ordinary
-"save again"), the picker lists what is saved and the line below it says what
-the selected one holds (`Holds: port 1081 · SSID PhoneLink · user proxy ·
-auto-start on · wireless debugging on`, never the password), `Load` puts it
-into the form without starting anything or storing it, and `Delete` removes one
-after a confirmation. The selection is remembered across restarts. A
-configuration is the whole panel, the two service switches included, so a
-loaded one is a draft of exactly what `Start` would apply — pressing it writes
-the switches as well.
+`Start` on an open proxy stores the form into that proxy first and then starts
+it, so the proxy that runs is the one that was saved and the list marks the
+right card; from the list, `Start` starts the proxy that was last in use.
+
+Each proxy keeps its own log: the last 200 things that happened to it, newest
+first with a time — the state changes (`listening on 0.0.0.0:1081 · 0
+clients`, `not listening: on "FRITZ", not "PhoneLink"`), its settings being
+saved, wireless debugging being turned back on, and failures with their
+reason. Events are tagged with the proxy they belong to, by the service while
+it runs that proxy and by the panel when it writes about a named one; `All
+events` in the menu shows everything, whatever it was about. The log lives in
+memory and is cleared with a tap, because the complete record is still
+`adb logcat -s phone-link-proxy`.
+
+Above a proxy's events are the traffic counters for the current run — `↓ 6.5 kB
+· ↑ 1.9 kB · now 0 B/s down, 0 B/s up` — and a sparkline of the last minute in
+one-second steps, one line per direction, hidden while nothing has moved. The
+bytes are counted in the relay where they are copied (`Socks5Server.pump`), the
+panel samples them once a second while a proxy is open, and a start resets both,
+so the page answers "what has this run moved" rather than "what has this phone
+ever moved".
 
 Both preference checkboxes follow the store, so `--ez auto_start …` or
 `--ez adb_wifi …` while the panel is open shows up there without reopening it.
 Ticking wireless debugging stores it at once — it only changes what happens on
-the next SSID match — while auto-start, and everything a saved configuration
-brought, waits for Start and shows `Not applied yet — press Start`.
+the next SSID match — while auto-start waits for `Save`, and a form that
+differs from the saved proxy says `Not saved yet — Save writes this to the
+configuration`. `Revert` drops the edits and shows the store again.
 Under the wireless-debugging checkbox a line says what Android is doing right
 now (`Wireless debugging: on — adb can reach the phone`), and why the app cannot
-help when the permission was never granted. Everything else on the panel is
-setup, which only takes effect on Start: the same row exposes the `anonymous`
-extra as "Listen without authentication", and fields that differ from what the
-service uses carry `Not applied yet — press Start` above the buttons. Start is
-the filled button because it is the one that does something.
+help when the permission was never granted. Everything else on the page is
+setup, which only takes effect on `Save` or `Start`: the same page exposes the
+`anonymous` extra as "Listen without authentication". Start is the filled
+button because it is the one that does something.
 
-The panel also explains itself: `Info` next to the state line opens a dialog
+The panel also explains itself: `Info` in the header opens a dialog
 with what the app is, when the port opens, what every control does and the
 whole adb contract. The same text is the service's own `dumpsys` dump,
 followed by what it is doing right now, so an agent reads the contract and the

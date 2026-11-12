@@ -293,8 +293,8 @@ final class Socks5Server implements Closeable {
     /** Shovel bytes both ways until both directions are done, then close. */
     private static void relay(Socket client, Socket upstream) {
         CountDownLatch done = new CountDownLatch(2);
-        pump(client, upstream, done);
-        pump(upstream, client, done);
+        pump(client, upstream, done, true);
+        pump(upstream, client, done, false);
         try {
             done.await();
         } catch (InterruptedException e) {
@@ -304,7 +304,13 @@ final class Socks5Server implements Closeable {
         Closeables.closeQuietly(upstream);
     }
 
-    private static void pump(Socket from, Socket to, CountDownLatch done) {
+    /**
+     * Copy one direction to its end.
+     *
+     * @param uploaded whether this half moves client bytes upstream, which is
+     *     only needed for the counters the panel graphs
+     */
+    private static void pump(Socket from, Socket to, CountDownLatch done, boolean uploaded) {
         Thread thread = new Thread(() -> {
             byte[] buffer = new byte[32 * 1024];
             try {
@@ -313,6 +319,11 @@ final class Socks5Server implements Closeable {
                 int read;
                 while ((read = in.read(buffer)) != -1) {
                     out.write(buffer, 0, read);
+                    if (uploaded) {
+                        Traffic.add(read, 0);
+                    } else {
+                        Traffic.add(0, read);
+                    }
                 }
                 // Half close: the other direction may still have data to deliver.
                 to.shutdownOutput();
