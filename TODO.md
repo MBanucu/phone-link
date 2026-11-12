@@ -62,3 +62,27 @@ list is empty.
       the harness's own timeline the phone's timeline, which is the same work as
       the failure frames above: every wait gets an event time, so a failure can
       say not just which step but which screen never arrived.
+
+## A capture app that stays on the phone
+
+- [ ] Keep the capture service running on the test phone for days, not just for
+      a run. What exists is a run's capture app: the harness installs
+      `android/capture/`, enables its accessibility service, turns watching on
+      with `start_capture`, turns it off and uninstalls the package in
+      `cleanup`, and deletes its files after pulling them. It is event driven
+      while it lasts — every accessibility event restarts a 100 ms debounce and
+      one XML per changed screen comes out — but nothing is recorded before a
+      run starts or after it ends, which is exactly when the interesting failures
+      happen: the phone restarts, the proxy stops by itself, a notification
+      arrives at 3 a.m., the screen goes to the lock screen on its own. A
+      standing version needs what a test run does not: installed and enabled
+      once (an accessibility service is re-bound at boot, so it survives a
+      restart), watching always or from a tile and `adb`, a record that does not
+      grow without bound (a rolling window of hours and megabytes, pruned
+      oldest-first, with `index.csv` kept whole so the timeline stays
+      searchable), a way to mark an interesting moment (`MARK --es label`, so a
+      report can say "look here" instead of "look around 3 a.m."), and the whole
+      screen rather than only the windows of the app in front. It is also a
+      privacy decision, not just an engineering one: such a service reads
+      everything on the screen, so it belongs on a single test phone, off by
+      default, and it should say so while it is watching.
