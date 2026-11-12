@@ -82,6 +82,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   what the live harness cleans up with) never reached the foreground, so the
   system reported a foreground service that did not start in time. The service
   now promotes itself before acting on either action.
+- `phone-doctor` recovers from a rotated wireless-debugging port instead of
+  calling it "USB only": its adb-over-Wi-Fi check reads the phone's
+  `_adb-tls-connect._tcp` mDNS record (`avahi-browse -rtp`), runs `adb connect`
+  on that address and reports the transport, so the rest of the report can run
+  again after a reboot.
 - A reboot rotates the phone's wireless-debugging port, which left the adb
   connection gone and a full-range port scan as the only way back. The phone
   advertises the port over mDNS, so the README replaces the minute-long scan

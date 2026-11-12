@@ -108,6 +108,33 @@ class Context:
             return ""
         return self.text(["adb", "-s", self.serial, *args], timeout)
 
+    def mdns_adb_address(self, timeout: float | None = 5) -> str | None:
+        """Where a phone advertises wireless debugging, if it does.
+
+        `avahi-browse -rtp _adb-tls-connect._tcp` prints one line per service:
+        `=;iface;IPv4;name;_adb-tls-connect._tcp;local;host;address;port;txt`.
+        That record is the only place the port appears before adb knows it —
+        the port is random per boot, and adb's own mDNS lookup is missing from
+        some builds.
+        """
+        output = self.text(
+            ["avahi-browse", "-rtp", "_adb-tls-connect._tcp"], timeout
+        )
+        for line in output.splitlines():
+            fields = line.split(";")
+            if len(fields) >= 9 and fields[0] == "=" and fields[2] == "IPv4":
+                address, port = fields[7], fields[8]
+                if address and port.isdigit():
+                    return f"{address}:{port}"
+        return None
+
+    def adb_connect(self, address: str) -> str | None:
+        """Connect to `address`, forget the cached device, and return it."""
+        self.text(["adb", "connect", address], timeout=15)
+        self._serial = None
+        self._serial_loaded = False
+        return self.serial
+
     def phone_ips(self) -> list[str]:
         ips: list[str] = []
         for line in self.adb("shell", "ip", "-4", "-o", "addr", "show").splitlines():

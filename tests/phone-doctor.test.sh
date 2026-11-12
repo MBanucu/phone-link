@@ -29,6 +29,14 @@ args=("$@")
 if [ "${args[0]:-}" = "-s" ]; then target=${args[1]}; args=("${args[@]:2}"); fi
 case "${args[0]:-}" in
   devices) cat "$LOG/devices" ;;
+  connect)
+    printf '%s\n' "${args[1]:-}" >>"$LOG/connected"
+    printf 'connected to %s\n' "${args[1]:-}"
+    if [ -f "$LOG/connect_ok" ]; then
+      printf 'List of devices attached\nXPLO2EEA0001541\tdevice\n%s\tdevice\n' \
+        "${args[1]:-}" >"$LOG/devices"
+    fi
+    ;;
   shell)
     args=("${args[@]:1}")
     case "${args[*]}" in
@@ -44,6 +52,12 @@ case "${args[0]:-}" in
 esac
 EOF
 sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/adb"
+
+cat >"$STUBS/avahi-browse" <<'EOF'
+#!/usr/bin/env bash
+cat "$LOG/avahi"
+EOF
+sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/avahi-browse"
 
 cat >"$STUBS/ip" <<'EOF'
 #!/usr/bin/env bash
@@ -126,6 +140,9 @@ fresh_state() {
   printf '{"packageName":"com.tokyoxpa3.androidproxy","suggestedVersionCode":24,"packages":[{"versionName":"1.7.4","versionCode":24}]}' >"$LOG/fdroid_json"
   mkdir -p "$PHONE_APK_CACHE"
   : >"$PHONE_APK_CACHE/com.tokyoxpa3.androidproxy-test.apk"
+  : >"$LOG/avahi"
+  : >"$LOG/connected"
+  : >"$LOG/connect_ok"
   printf 'abc\n' >"$LOG/local_head"
   printf 'abc\n' >"$LOG/remote_head"
   printf '200\n' >"$LOG/head_time"
@@ -279,7 +296,30 @@ if run --analyze; then ok "--analyze with only warnings exits 0"; else bad "--an
 grep -q '^warn phone_unlocked ' "$LOG/out" && ok "--analyze reports warnings" \
   || bad "--analyze reports warnings" "$(cat "$LOG/out")"
 
-# 16. --help exits 0.
+# 16. A phone whose wireless port rotated is reconnected from its mDNS record.
+fresh_state
+printf 'List of devices attached\nXPLO2EEA0001541\tdevice\n' >"$LOG/devices"
+printf '=;wlp110s0;IPv4;adb-XPLO2EEA0001541-D1gkYk;_adb-tls-connect._tcp;local;Android.local;192.168.77.232;44895;"v=ADB_SECURE_SERVICE_VERSION"\n' >"$LOG/avahi"
+: >"$LOG/connect_ok"
+if run; then ok "a rotated adb port still exits 0"; else
+  bad "a rotated adb port still exits 0" "$(cat "$LOG/out")"
+fi
+grep -q 'network transport.*192.168.77.232:44895' "$LOG/out" \
+  && ok "reports the port from mDNS" || bad "reports the port from mDNS" "$(cat "$LOG/out")"
+grep -q '192.168.77.232:44895' "$LOG/connected" && ok "connects with adb" \
+  || bad "connects with adb" "$(cat "$LOG/connected")"
+
+# 17. An advertised port that adb refuses is a warning with the address.
+fresh_state
+printf 'List of devices attached\nXPLO2EEA0001541\tdevice\n' >"$LOG/devices"
+printf '=;wlp110s0;IPv4;adb-XPLO2EEA0001541-D1gkYk;_adb-tls-connect._tcp;local;Android.local;192.168.77.232;44895;\n' >"$LOG/avahi"
+if run; then ok "a refused connect still exits 0"; else
+  bad "a refused connect still exits 0" "$(cat "$LOG/out")"
+fi
+grep -q 'is advertised but adb connect failed' "$LOG/out" \
+  && ok "names the advertised address" || bad "names the advertised address" "$(cat "$LOG/out")"
+
+# 18. --help exits 0.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
