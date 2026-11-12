@@ -15,6 +15,7 @@ import android.os.PowerManager;
 import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.view.Menu;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.AdapterView;
@@ -22,6 +23,7 @@ import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.PopupMenu;
 import android.widget.RadioGroup;
 import android.widget.Spinner;
 import android.widget.TextView;
@@ -65,6 +67,12 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     private View listenerPage;
     private View savedPage;
     private View servicePage;
+    private View logPage;
+    private TextView logText;
+    private TextView profileLabel;
+    private View warning;
+    private Button saveListener;
+    private Button saveService;
     private ArrayAdapter<String> profileNames;
     private String selectedProfile;
     /** Set while a configuration is put into the form, so nothing is stored. */
@@ -131,7 +139,20 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         listenerPage = findViewById(R.id.page_listener);
         savedPage = findViewById(R.id.page_saved);
         servicePage = findViewById(R.id.page_service);
+        logPage = findViewById(R.id.page_log);
+        logText = findViewById(R.id.log_text);
+        profileLabel = findViewById(R.id.profile_label);
+        warning = findViewById(R.id.warning);
         tabs.setOnCheckedChangeListener((group, checked) -> showPage(checked));
+        // The mark in the header is the same warning as the line on the Service
+        // page, visible from every page and one tap from the fix.
+        warning.setOnClickListener(view -> askForExemption());
+        findViewById(R.id.menu).setOnClickListener(this::showMenu);
+        saveListener = findViewById(R.id.save_listener);
+        saveListener.setOnClickListener(view -> saveToSelected());
+        saveService = findViewById(R.id.save_service);
+        saveService.setOnClickListener(view -> saveToSelected());
+        findViewById(R.id.log_clear).setOnClickListener(view -> EventLog.clear());
 
         profileNames = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item);
         profileNames.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
@@ -183,6 +204,9 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
                 return;
             }
             ConfigStore.setAdbWireless(this, checked);
+            EventLog.add(checked
+                    ? "wireless debugging managed by the app"
+                    : "wireless debugging left alone");
             renderPending();
             if (checked && !AdbWireless.granted(this)) {
                 Toast.makeText(this, R.string.adb_wifi_ungranted, Toast.LENGTH_LONG).show();
@@ -218,10 +242,59 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     private void showPage(int checked) {
         boolean saved = checked == R.id.tab_saved;
         boolean service = checked == R.id.tab_service;
-        listenerPage.setVisibility(saved || service ? View.GONE : View.VISIBLE);
+        boolean log = checked == R.id.tab_log;
+        listenerPage.setVisibility(saved || service || log ? View.GONE : View.VISIBLE);
         savedPage.setVisibility(saved ? View.VISIBLE : View.GONE);
         servicePage.setVisibility(service ? View.VISIBLE : View.GONE);
+        logPage.setVisibility(log ? View.VISIBLE : View.GONE);
+        if (log) {
+            renderLog();
+        }
     }
+
+    /** The menu in the header: the profile actions that used to need a page. */
+    private void showMenu(View anchor) {
+        PopupMenu menu = new PopupMenu(this, anchor);
+        Menu items = menu.getMenu();
+        items.add(0, 1, 0, R.string.action_save).setEnabled(selectedProfile != null);
+        items.add(0, 2, 1, R.string.action_save_as);
+        items.add(0, 3, 2, R.string.menu_delete).setEnabled(selectedProfile != null);
+        items.add(0, 4, 3, R.string.tab_saved);
+        items.add(0, 5, 4, R.string.tab_log);
+        menu.setOnMenuItemClickListener(item -> {
+            switch (item.getItemId()) {
+                case 1:
+                    saveToSelected();
+                    return true;
+                case 2:
+                    askProfileName();
+                    return true;
+                case 3:
+                    confirmDeleteProfile();
+                    return true;
+                case 4:
+                    tabs.check(R.id.tab_saved);
+                    return true;
+                case 5:
+                    tabs.check(R.id.tab_log);
+                    return true;
+                default:
+                    return false;
+            }
+        });
+        menu.show();
+    }
+
+    /** Newest first; EventLog is small and lives only in memory. */
+    private void renderLog() {
+        List<String> entries = EventLog.newestFirst();
+        logText.setText(entries.isEmpty()
+                ? getString(R.string.log_empty)
+                : String.join("\n", entries));
+    }
+
+    /** The panel's Log page follows what the service and the panel write. */
+    private final Runnable logListener = () -> runOnUiThread(this::renderLog);
 
     /** The panel is already up and adb asked for the help again. */
     @Override
@@ -246,6 +319,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     protected void onStart() {
         super.onStart();
         ProxyRuntime.addListener(this);
+        EventLog.addListener(logListener);
         ConfigStore.shared(this).registerOnSharedPreferenceChangeListener(preferences);
         getContentResolver().registerContentObserver(
                 Settings.Global.getUriFor(AdbWireless.SETTING), false, adbSetting);
@@ -266,6 +340,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     @Override
     protected void onStop() {
         ProxyRuntime.removeListener(this);
+        EventLog.removeListener(logListener);
         ConfigStore.shared(this).unregisterOnSharedPreferenceChangeListener(preferences);
         getContentResolver().unregisterContentObserver(adbSetting);
         super.onStop();
@@ -335,6 +410,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         }
         loadIntoFields(saved, ConfigStore.profileAutoStart(this, selectedProfile),
                 ConfigStore.profileAdbWireless(this, selectedProfile));
+        EventLog.add("loaded \"" + selectedProfile + "\" into the form");
         renderPending();
     }
 
@@ -375,6 +451,13 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
                 ? getString(R.string.profiles_none)
                 : getString(R.string.profile_holds, saved.summary()
                         + serviceSummary(selectedProfile)));
+        // The name the form is working on, visible from every page, and the
+        // two Save buttons that write to it.
+        profileLabel.setText(selectedProfile == null
+                ? getString(R.string.profile_none)
+                : getString(R.string.profile_current, selectedProfile));
+        saveListener.setEnabled(selectedProfile != null);
+        saveService.setEnabled(selectedProfile != null);
     }
 
     private void askProfileName() {
@@ -431,9 +514,26 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
                 + (ConfigStore.profileAdbWireless(this, name) ? "on" : "off");
     }
 
+    /** The header's and the pages' plain Save: write the form to its name. */
+    private void saveToSelected() {
+        if (selectedProfile == null) {
+            Toast.makeText(this, R.string.profile_none_selected, Toast.LENGTH_LONG).show();
+            return;
+        }
+        ProxyConfig config;
+        try {
+            config = readFields();
+        } catch (IllegalArgumentException e) {
+            Toast.makeText(this, e.getMessage(), Toast.LENGTH_LONG).show();
+            return;
+        }
+        storeProfile(selectedProfile, config);
+    }
+
     private void storeProfile(String name, ProxyConfig config) {
         ConfigStore.saveProfile(this, name, config, autoStart.isChecked(),
                 adbWireless.isChecked());
+        EventLog.add("saved configuration \"" + name + "\"");
         ConfigStore.setSelectedProfile(this, name);
         refreshProfiles();
         Toast.makeText(this, getString(R.string.profile_saved, name), Toast.LENGTH_SHORT).show();
@@ -449,6 +549,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
                 .setMessage(R.string.profile_delete_message)
                 .setPositiveButton(android.R.string.ok, (dialog, which) -> {
                     ConfigStore.deleteProfile(this, name);
+                    EventLog.add("deleted \"" + name + "\"");
                     ConfigStore.setSelectedProfile(this, null);
                     selectedProfile = null;
                     refreshProfiles();
@@ -535,9 +636,10 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         // Only a promise the app cannot keep is worth a colour: with auto-start
         // off, the line is a fact about the phone rather than a warning about
         // what this app will not do after a reboot.
-        boolean warning = !exempt && autoStart.isChecked();
-        battery.setTextColor(warning ? getColor(R.color.warning) : batteryColor);
-        battery.setTypeface(null, warning ? Typeface.BOLD : Typeface.NORMAL);
+        boolean warningNow = !exempt && autoStart.isChecked();
+        battery.setTextColor(warningNow ? getColor(R.color.warning) : batteryColor);
+        battery.setTypeface(null, warningNow ? Typeface.BOLD : Typeface.NORMAL);
+        this.warning.setVisibility(warningNow ? View.VISIBLE : View.GONE);
         battery.setClickable(!exempt);
         battery.setOnClickListener(exempt ? null : view -> askForExemption());
     }
@@ -585,6 +687,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         ConfigStore.save(this, config);
         ConfigStore.setAutoStart(this, autoStart.isChecked());
         ConfigStore.setAdbWireless(this, adbWireless.isChecked());
+        EventLog.add("Start pressed: " + config.summary());
         renderActive();
         renderPending();
         if (autoStart.isChecked() && !batteryExempt()) {

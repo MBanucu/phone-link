@@ -26,6 +26,7 @@ done
 sources=(
   "$ROOT/android/src/org/phonelink/proxy/Upstream.java"
   "$ROOT/android/src/org/phonelink/proxy/Closeables.java"
+  "$ROOT/android/src/org/phonelink/proxy/EventLog.java"
   "$ROOT/android/src/org/phonelink/proxy/Help.java"
   "$ROOT/android/src/org/phonelink/proxy/ProxyConfig.java"
   "$ROOT/android/src/org/phonelink/proxy/ProxyState.java"

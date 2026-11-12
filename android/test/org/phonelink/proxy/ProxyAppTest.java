@@ -256,9 +256,30 @@ public final class ProxyAppTest {
             assertTrue(text.contains("org.phonelink.proxy.action.STOP"), "no stop action");
             assertTrue(text.contains("org.phonelink.proxy.action.SAVE_PROFILE"),
                     "no save-profile action");
+            assertTrue(text.contains("org.phonelink.proxy.action.DELETE_PROFILE"),
+                    "no delete-profile action");
             // The panel and the service print this same text, so the command
             // that reaches it from adb has to be in it.
             assertTrue(text.contains(Help.ADB_DUMP), "help does not say how to print it");
+        });
+
+        test("the event log keeps the newest entries and forgets the rest", () -> {
+            EventLog.clear();
+            for (int i = 0; i < 205; i++) {
+                EventLog.add("event " + i);
+            }
+            List<String> entries = EventLog.newestFirst();
+            assertEqual(200, entries.size(), "ring size");
+            assertTrue(entries.get(0).endsWith("event 204"), "newest first");
+            assertTrue(entries.get(199).endsWith("event 5"), "oldest kept");
+            AtomicInteger seen = new AtomicInteger();
+            Runnable listener = seen::incrementAndGet;
+            EventLog.addListener(listener);
+            EventLog.add("one more");
+            EventLog.removeListener(listener);
+            EventLog.clear();
+            assertEqual(1, seen.get(), "the page is told once");
+            assertEqual(0, EventLog.newestFirst().size(), "clear empties it");
         });
 
         // --- state text ----------------------------------------------------

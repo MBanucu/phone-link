@@ -17,8 +17,9 @@
 #   9. require any_network=true to bypass the predicate,
 #  10. save the running configuration with SAVE_PROFILE, require dumpsys and
 #      the panel's Saved page to list it, start it again by name after moving
-#      the listener somewhere else, and require an unknown name to start
-#      nothing,
+#      the listener somewhere else (the service switches come back with it),
+#      require an unknown name to start nothing, and remove it again with
+#      DELETE_PROFILE,
 #  11. stop it,
 #  12. start and stop it from the Quick Settings tile, which needs the phone
 #      unlocked: the shade ignores clicks on a locked screen, so that step is
@@ -448,6 +449,15 @@ if save_profile harness-one; then
   # Leave the harness on the configuration the remaining steps expect.
   start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
   sleep 2
+  shell am start-foreground-service -n "$SERVICE" \
+    -a org.phonelink.proxy.action.DELETE_PROFILE --es profile harness-one \
+    >/dev/null 2>&1
+  sleep 2
+  if shell dumpsys activity service "$SERVICE" | grep -q '"harness-one"'; then
+    bad 'DELETE_PROFILE removes a saved configuration'
+  else
+    ok 'DELETE_PROFILE removes a saved configuration'
+  fi
 fi
 
 step 'stop'

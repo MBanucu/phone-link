@@ -198,10 +198,26 @@ setting, so it needs the one permission adb can hand out:
 adb shell pm grant org.phonelink.proxy android.permission.WRITE_SECURE_SETTINGS
 ```
 
-The panel is one screen with three pages behind a menu — `Listener`, `Saved`
-and `Service` — while the state lines above and `Start`/`Stop` below never
-move, so nothing has to be scrolled to reach a button: everything that was
-spread over a scrolling form fits one page at a time.
+The panel is one screen with four pages behind a menu — `Listener`, `Saved`,
+`Service` and `Log` — while the state lines above and `Start`/`Stop` below
+never move, so nothing has to be scrolled to reach a button: everything that
+was spread over a scrolling form fits one page at a time.
+
+The title bar is gone. Its only content was the app's own name, so the layout
+carries a header row instead: the name, a warning mark that appears exactly
+while a reboot restart cannot work (tapping it opens the battery request, from
+any page), `Info`, and a menu with the profile actions — `Save`, `Save as…`,
+`Delete configuration`, plus jumps to `Saved` and `Log`. Under the state lines
+a line names the configuration the form is working on (`Profile: hotel`), and
+the `Listener` and `Service` pages both carry a plain `Save` that writes the
+form back to that name — `Save as…`, for a new one, stays on the `Saved` page.
+
+`Log` is the last 200 things that happened, newest first with a time: the
+service's state changes (`listening on 0.0.0.0:1081 · 0 clients`, `not
+listening: on "FRITZ", not "PhoneLink"`), settings that were written, the
+profiles saved, loaded and deleted, wireless debugging being turned back on,
+and failures with their reason. It lives in memory and is cleared with a
+tap, because the complete record is still `adb logcat -s phone-link-proxy`.
 
 The panel starts with two lines of fact rather than intent: what the service is
 doing (`listening on 0.0.0.0:1081 · 0 clients`), and what it is doing it with —
@@ -317,6 +333,12 @@ and `START --es profile hotel` starts that configuration again later, on any
 port or SSID the same command adds on top. An unknown name starts nothing and
 logs `no saved configuration called "hotel"`; a name that already exists is
 replaced, which is the "save again" the panel asks about and adb does not.
+Removing one is the same shape, and also does not disturb a running listener:
+
+```sh
+adb shell am start-foreground-service -n org.phonelink.proxy/.ProxyService \
+    -a org.phonelink.proxy.action.DELETE_PROFILE --es profile hotel
+```
 
 Passing the credential on the `am` command line puts it in the shell process's
 argv for the moment the command runs — the same exposure as any `adb shell`

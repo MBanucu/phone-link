@@ -9,5 +9,9 @@
     -->
     <style name="AppTheme" parent="@android:style/Theme.DeviceDefault.DayNight">
         <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
+        <!-- No title bar: it only ever held the app's own name, and the header
+             in the layout puts the Info button, the warning mark and the menu
+             in that space. -->
+        <item name="android:windowNoTitle">true</item>
     </style>
 </resources>

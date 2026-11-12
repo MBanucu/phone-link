@@ -25,6 +25,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The title bar is gone, because the only thing in it was the app's own name.
+  The header row now holds the name, the `Info` button, a `⚠` that appears
+  exactly while a reboot restart cannot work (it opens the battery request
+  from any page) and a menu with `Save`, `Save as…`, `Delete configuration` and
+  jumps to `Saved` and `Log`. A line under the state names the configuration
+  the form is working on, and `Listener` and `Service` each carry a plain
+  `Save` that writes the form back to it — saving no longer needs the `Saved`
+  page. Measured on the phone: with the exemption removed the header shows
+  `⚠` and tapping it opens the battery dialog; `Save` on the `Listener` page
+  wrote `port 1082` into the selected configuration.
 - The panel fits one screen. The state lines and `Start`/`Stop` are fixed at the
 top and bottom and the middle is a menu of three pages — `Listener`, `Saved`,
 `Service` — so nothing has to be scrolled to reach a button; the pages are
@@ -46,6 +56,14 @@ time, and the pages scroll only if a smaller screen needs it.
 
 ### Added
 
+- A `Log` page: the last 200 events, newest first with a time — service state
+  changes with their reason, client counts, settings written, profiles saved,
+  loaded and deleted, wireless debugging turned back on, and failures. It is
+  in memory only and cleared with a tap; `adb logcat -s phone-link-proxy` stays
+  the complete record. A bandwidth graph is not part of it: that needs byte
+  counters in the relay and a drawn view, which is a change of its own.
+- `DELETE_PROFILE` over adb removes a saved configuration by name, like the
+  panel's `Delete`, and leaves a running listener alone.
 - The app explains itself. An `Info` button next to the panel's state line
   opens what this app is for, when the port opens, what each control does and
   the whole adb contract with every extra; the service prints that same text

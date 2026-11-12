@@ -42,6 +42,8 @@ public final class ProxyService extends Service
     static final String ACTION_STOP = "org.phonelink.proxy.action.STOP";
     /** Keep the configuration the service has under a name, and stop. */
     static final String ACTION_SAVE_PROFILE = "org.phonelink.proxy.action.SAVE_PROFILE";
+    /** Remove a saved configuration by name. */
+    static final String ACTION_DELETE_PROFILE = "org.phonelink.proxy.action.DELETE_PROFILE";
 
     private static final int NOTIFICATION_ID = 1;
     private static final int ERROR_NOTIFICATION_ID = 2;
@@ -82,22 +84,29 @@ public final class ProxyService extends Service
         String action = intent == null ? ACTION_START : intent.getAction();
         boolean stopping = ACTION_STOP.equals(action);
         boolean saving = ACTION_SAVE_PROFILE.equals(action);
+        boolean deleting = ACTION_DELETE_PROFILE.equals(action);
         // A service that was already doing something is not restarted by a
-        // save, and a start that only came for the save has to go away again.
+        // save or a delete, and a start that only came for one has to go away
+        // again.
         boolean first = !startedBefore;
         startedBefore = true;
 
         // Must happen within five seconds of startForegroundService(), which is
         // how the scripts deliver a stop as well: a stop that skipped this was
         // reported as a foreground service that never reached the foreground.
-        boolean foreground = beginForeground(
-                stopping ? "stopping" : saving ? "saving" : "starting");
+        boolean foreground = beginForeground(stopping
+                ? "stopping"
+                : saving ? "saving" : deleting ? "deleting" : "starting");
         if (stopping) {
             stopSelf();
             return START_NOT_STICKY;
         }
         if (saving) {
             saveCurrent(intent, first);
+            return START_NOT_STICKY;
+        }
+        if (deleting) {
+            deleteSaved(intent, first);
             return START_NOT_STICKY;
         }
         if (!foreground) {
@@ -223,7 +232,11 @@ public final class ProxyService extends Service
             // a reboot can switch it off; this is the one moment that matters
             // for the host, because the SSID just matched.
             if (ConfigStore.adbWireless(this)) {
+                boolean wasOff = !AdbWireless.on(this);
                 AdbWireless.enable(this);
+                if (wasOff && AdbWireless.on(this)) {
+                    EventLog.add("wireless debugging turned back on");
+                }
             } else {
                 Log.i(TAG, "wireless debugging left alone: the panel switch is off");
             }
@@ -255,12 +268,37 @@ public final class ProxyService extends Service
         }
         ConfigStore.saveProfile(this, name, ConfigStore.load(this),
                 ConfigStore.autoStart(this), ConfigStore.adbWireless(this));
+        EventLog.add("saved configuration \"" + name + "\"");
         Log.i(TAG, "saved configuration \"" + name + "\"");
         if (first) {
             stopSelf();
         } else {
             // Saving a name is not a restart: a running proxy keeps running and
             // just gets its notification text back.
+            publish(state);
+        }
+    }
+
+    /** {@code DELETE_PROFILE}: the panel's Delete, without the screen. */
+    private void deleteSaved(Intent intent, boolean first) {
+        String name = intent == null
+                ? ""
+                : intent.getStringExtra(ConfigStore.EXTRA_PROFILE);
+        name = name == null ? "" : name.trim();
+        if (name.isEmpty()) {
+            fail(getString(R.string.error_profile_name));
+            return;
+        }
+        if (ConfigStore.profile(this, name) == null) {
+            fail(getString(R.string.error_profile_missing, name));
+            return;
+        }
+        ConfigStore.deleteProfile(this, name);
+        EventLog.add("deleted \"" + name + "\"");
+        Log.i(TAG, "deleted configuration \"" + name + "\"");
+        if (first) {
+            stopSelf();
+        } else {
             publish(state);
         }
     }
@@ -317,8 +355,11 @@ public final class ProxyService extends Service
         }
     }
 
-    /** Share a state with the panel and the shade. */
+    /** Share a state with the panel, the shade and the panel's Log page. */
     private void publish(ProxyState next) {
+        if (!next.describe().equals(state.describe())) {
+            EventLog.add(next.describe());
+        }
         state = next;
         ProxyRuntime.publish(next);
         notifications.notify(NOTIFICATION_ID, buildNotification(next.describe()));
@@ -326,6 +367,7 @@ public final class ProxyService extends Service
 
     private void fail(String message) {
         Log.e(TAG, message);
+        EventLog.add("failed: " + message);
         Notification notification = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(R.drawable.ic_stat_proxy)
                 .setContentTitle(getString(R.string.app_name))
