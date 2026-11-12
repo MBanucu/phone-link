@@ -9,19 +9,23 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Hermetic tests for the SOCKS5 handshake, authentication and relay.
+ * Hermetic tests for the app's Android-free logic: the SOCKS5 handshake,
+ * authentication and relay, the configuration rules and the state text the
+ * panel and the notification show.
  *
  * <p>Plain JDK: no phone, no Android SDK, no test framework. The server binds an
  * ephemeral port on loopback and the upstream is a recording fake pointed at a
  * local echo socket, so the suite runs in a sandbox.
  *
- * <p>{@code bash tests/proxy-socks5.test.sh} compiles and runs it.
+ * <p>{@code bash tests/proxy-app.test.sh} compiles and runs it.
  */
-public final class Socks5ServerTest {
+public final class ProxyAppTest {
 
     private static final String USER = "proxy";
     private static final String PASSWORD = "s3cret";
@@ -177,6 +181,95 @@ public final class Socks5ServerTest {
             }
         });
 
+        // --- configuration -------------------------------------------------
+
+        test("defaults are port 1080, no credentials and PhoneLink", () -> {
+            ProxyConfig config = ProxyConfig.defaults();
+            assertEqual(1080, config.port, "default port");
+            assertEqual("PhoneLink", config.ssid, "default SSID");
+            assertEqual("", config.user, "default user");
+            assertTrue(!config.anyNetwork, "any_network is off by default");
+            assertTrue(!config.anonymous, "authentication is on by default");
+        });
+
+        test("a port outside 1024..65535 is rejected", () -> {
+            expectRejected("port 80", () ->
+                    ProxyConfig.of(80, "proxy", "s3cret", "PhoneLink", false, false));
+            expectRejected("port 70000", () ->
+                    ProxyConfig.of(70000, "proxy", "s3cret", "PhoneLink", false, false));
+        });
+
+        test("credentials are required unless anonymous", () -> {
+            expectRejected("empty user and password", () ->
+                    ProxyConfig.of(1080, "", "", "PhoneLink", false, false));
+            expectRejected("a password without a user", () ->
+                    ProxyConfig.of(1080, "", "s3cret", "PhoneLink", false, false));
+        });
+
+        test("anonymous clears stale credentials", () -> {
+            ProxyConfig config = ProxyConfig.of(1080, "proxy", "s3cret", "PhoneLink", false, true);
+            assertTrue(config.anonymous, "anonymous is kept");
+            assertEqual("", config.user, "user cleared");
+            assertEqual("", config.password, "password cleared");
+        });
+
+        test("a credential longer than 255 bytes is rejected", () -> {
+            char[] tooLong = new char[256];
+            Arrays.fill(tooLong, 'x');
+            expectRejected("a 256-byte password", () ->
+                    ProxyConfig.of(1080, "proxy", new String(tooLong), "PhoneLink", false, false));
+        });
+
+        test("an empty SSID is rejected unless any_network is set", () -> {
+            expectRejected("an empty SSID", () ->
+                    ProxyConfig.of(1080, "proxy", "s3cret", "", false, false));
+            ProxyConfig config = ProxyConfig.of(1080, "proxy", "s3cret", "", true, false);
+            assertTrue(config.anyNetwork, "any_network is kept");
+        });
+
+        test("valid settings pass through unchanged", () -> {
+            ProxyConfig config = ProxyConfig.of(1081, "proxy", "s3cret", "PhoneLink", false, false);
+            assertEqual(1081, config.port, "port");
+            assertEqual("proxy", config.user, "user");
+            assertEqual("s3cret", config.password, "password");
+            assertEqual("PhoneLink", config.ssid, "SSID");
+        });
+
+        // --- state text ----------------------------------------------------
+
+        test("the listening text counts clients", () -> {
+            assertEqual("listening on 0.0.0.0:1080 \u00b7 0 clients",
+                    ProxyState.listening(1080, 0).describe(), "no clients");
+            assertEqual("listening on 0.0.0.0:1080 \u00b7 1 client",
+                    ProxyState.listening(1080, 1).describe(), "one client");
+            assertEqual("listening on 0.0.0.0:1080 \u00b7 3 clients",
+                    ProxyState.listening(1080, 3).describe(), "three clients");
+        });
+
+        test("the paused and stopped text explain themselves", () -> {
+            assertEqual("not listening: on \"FRITZ\", not \"PhoneLink\"",
+                    ProxyState.paused("on \"FRITZ\", not \"PhoneLink\"").describe(), "paused");
+            assertEqual("not listening: stopped", ProxyState.stopped().describe(), "stopped");
+            assertEqual("not listening: waiting for an allowed network",
+                    ProxyState.waiting().describe(), "waiting");
+        });
+
+        // --- runtime -------------------------------------------------------
+
+        test("the runtime forwards state to listeners until they leave", () -> {
+            ProxyRuntime.publish(ProxyState.stopped());
+            List<ProxyState> seen = new ArrayList<>();
+            ProxyRuntime.Listener listener = seen::add;
+            ProxyRuntime.addListener(listener);
+            ProxyRuntime.publish(ProxyState.listening(1080, 0));
+            assertEqual(1, seen.size(), "updates seen");
+            assertTrue(seen.get(0).listening, "the state is forwarded");
+            ProxyRuntime.removeListener(listener);
+            ProxyRuntime.publish(ProxyState.stopped());
+            assertEqual(1, seen.size(), "updates after removal");
+            assertTrue(!ProxyRuntime.state().listening, "the runtime keeps the latest state");
+        });
+
         System.out.printf("%n%d passed, %d failed%n", passed, failed);
         if (failed > 0) {
             System.exit(1);
@@ -216,6 +309,15 @@ public final class Socks5ServerTest {
         if (!expected.equals(actual)) {
             throw new AssertionError(what + ": expected \"" + expected + "\" but was \"" + actual + "\"");
         }
+    }
+
+    private static void expectRejected(String what, Runnable action) {
+        try {
+            action.run();
+        } catch (IllegalArgumentException expected) {
+            return;
+        }
+        throw new AssertionError(what + " was accepted");
     }
 
     // --- protocol client ---------------------------------------------------

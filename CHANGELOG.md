@@ -18,9 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   uplink: it opens only while the phone is a client of the configured SSID, and
   otherwise stays closed with the reason in the notification. The
   `phone-proxy-*` scripts still drive the vendored app.
-- `tests/proxy-socks5.test.sh` runs 14 hermetic protocol cases for the app
-  (handshake, credential failures, CONNECT and reply codes, relay, half-close,
-  client counting) on a plain JDK, inside the `script` check;
+- The app has a panel: a launcher activity with the live state, the port, user,
+  password, SSID and `any_network` fields, and Start/Stop buttons. It writes
+  through the same `ConfigStore` as the adb extras and reads live state from a
+  shared `ProxyRuntime`, so both control paths configure one listener; the
+  notification now opens the panel.
+- `tests/proxy-app.test.sh` runs 24 hermetic cases for the app (handshake,
+  credential failures, CONNECT and reply codes, relay, half-close, client
+  counting, configuration rules, status text, runtime listener) on a plain JDK,
+  inside the `script` check;
   `tests/live/proxy-app.sh` exercises the installed app on the phone from
   install to uninstall. `checks.proxy-apk` and `packages.proxy-apk` build the
   APK in the sandbox, so a compile break fails `nix flake check`.
@@ -34,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The app's SOCKS5 code no longer touches Android APIs: the upstream connection
   and the logger are seams (`Upstream`, `Socks5Server.Logger`), so the protocol
   compiles and runs on a plain JDK and is covered by
-  `tests/proxy-socks5.test.sh`.
+  `tests/proxy-app.test.sh`.
 - The 34 scripts in `bin/` are thin shims over one Python function per script in
   `lib/python/phone_link/commands`, built on shared `settings`, `shell`, `phone`
   and `ui` modules. Script names, flags and output are unchanged, so the Nix

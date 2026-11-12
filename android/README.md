@@ -70,19 +70,22 @@ dev shell. `debug.keystore` is created on the first build and kept, so
 
 ## Tests
 
-- `tests/proxy-socks5.test.sh` — hermetic, plain JDK. It compiles `Upstream`,
-  `Closeables` and `Socks5Server` **without** `android.jar` and runs 14 protocol
-  cases against a local echo upstream: method negotiation, both credential
-  failures, unauthenticated mode, CONNECT for IPv4 and for a domain name,
-  relaying 32 KiB, half-close, a refused command, an unknown address type, an
-  upstream failure reply, client counting and a non-SOCKS greeting. This is why
-  the code has a `Logger` seam and an `Upstream` interface instead of `Log.i`
-  and `Egress` calls, and why the `script` check carries a JDK.
+- `tests/proxy-app.test.sh` — hermetic, plain JDK. It compiles `Upstream`,
+  `Closeables`, `ProxyConfig`, `ProxyState`, `ProxyRuntime` and `Socks5Server`
+  **without** `android.jar` and runs 24 cases: method negotiation, both
+  credential failures, unauthenticated mode, CONNECT for IPv4 and for a domain
+  name, relaying 32 KiB, half-close, a refused command, an unknown address
+  type, an upstream failure reply, client counting, a non-SOCKS greeting; the
+  configuration rules (port range, credentials, anonymous, SSID, byte limits);
+  the status text the panel and the notification share; and the runtime
+  listener. This is why the code has a `Logger` seam, an `Upstream` interface
+  and a config/state split instead of `Log.i`, `Egress` and string building
+  inside the service — and why the `script` check carries a JDK.
 - `tests/live/proxy-app.sh` — needs a phone with a Wi-Fi client link and the
-  built APK: install, start, `200` through the tunnel, a wrong password
-  refused, an unrelated SSID keeping the port closed with the service up,
-  `any_network` bypassing the predicate, stop and uninstall. Not part of
-  `nix flake check`.
+  built APK: install, open the panel and require it to stay up, start, `200`
+  through the tunnel, a wrong password refused, an unrelated SSID keeping the
+  port closed with the service up, `any_network` bypassing the predicate, stop
+  and uninstall. Not part of `nix flake check`.
 
 ## Run
 
@@ -102,6 +105,20 @@ adb shell am start-foreground-service -n org.phonelink.proxy/.ProxyService \
 `-g` grants `POST_NOTIFICATIONS` at install; the foreground notification is
 what keeps the service out of the background-start rules, and it carries a Stop
 action.
+
+The same start and stop are on the phone: the app is a launcher entry ("Phone
+link proxy") and the notification opens it.
+
+```sh
+adb shell am start -n org.phonelink.proxy/.MainActivity
+```
+
+The panel shows the live state (`listening on 0.0.0.0:1080 · 0 clients`, or why
+it is closed), pre-fills the stored port, user, password and SSID, and writes
+through the same `ConfigStore` as the adb extras, so both paths configure one
+listener. `anonymous` stays adb-only, because the panel always asks for a
+password; the panel's Start also re-reads the fields, so changing them and
+pressing Start restarts the listener with the new settings.
 
 Check it:
 

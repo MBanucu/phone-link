@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Live end-to-end test of the proxy app on the phone:
 #
-#   1. install the APK built by android/build.sh,
+#   1. install the APK built by android/build.sh and open its panel,
 #   2. start it on a spare port with throwaway credentials,
 #   3. require a request through the tunnel to answer 200,
 #   4. require a wrong password to be refused,
@@ -71,6 +71,14 @@ start_app() {
 
 foreground() { shell dumpsys activity services "$PKG" | grep -q 'isForeground=true'; }
 
+# The panel has to inflate and stay up; a crash shows in the crash buffer.
+panel_opens() {
+  shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1 || return 1
+  sleep 1
+  shell dumpsys activity activities | grep -q "$PKG/.MainActivity" || return 1
+  ! phone logcat -d -b crash 2>/dev/null | grep -q "$PKG"
+}
+
 wait_foreground() {
   for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
     foreground && return 0
@@ -116,6 +124,10 @@ else
   printf '\n%d passed, %d failed\n' "$pass" "$fail"
   exit 1
 fi
+
+
+step 'panel'
+if panel_opens; then ok 'the panel opens'; else bad 'the panel opens'; fi
 
 step 'allowed network'
 start_app --es ssid "$SSID" --ez any_network false

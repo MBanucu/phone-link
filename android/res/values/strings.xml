@@ -3,5 +3,12 @@
     <string name="app_name">Phone link proxy</string>
     <string name="channel_name">SOCKS5 proxy</string>
     <string name="notification_title">SOCKS5 proxy</string>
+    <string name="action_start">Start</string>
     <string name="action_stop">Stop</string>
+    <string name="status_unknown">not running</string>
+    <string name="label_port">Port</string>
+    <string name="label_user">User</string>
+    <string name="label_password">Password</string>
+    <string name="label_ssid">SSID the listener may run on</string>
+    <string name="label_any_network">Ignore the SSID and always listen</string>
 </resources>

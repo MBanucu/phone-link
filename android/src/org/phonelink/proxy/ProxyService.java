@@ -5,9 +5,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
-import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.graphics.drawable.Icon;
 import android.os.Build;
 import android.os.IBinder;
@@ -15,21 +13,21 @@ import android.os.PowerManager;
 import android.util.Log;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Keeps a SOCKS5 listener alive while the uplink makes sense, and reports it in
  * the notification shade.
  *
- * <p>Control surface, exported for adb only: the service is guarded by
- * {@code android.permission.DUMP}, which the shell user holds and ordinary apps
- * do not, so {@code am start-foreground-service} can drive it and nothing else
- * can. That is what makes starting the proxy independent of the lock screen.
+ * <p>Two ways in, one implementation: adb drives it with
+ * {@code am start-foreground-service} through a {@code DUMP}-guarded service,
+ * and {@link MainActivity} calls the same actions from the panel. Both write
+ * through {@link ConfigStore}, so neither can configure the listener
+ * differently from the other.
  *
  * <p>The listener is only open while {@link Uplink} says the phone is on the
- * configured Wi-Fi or tethering; otherwise the service stays up, reports why,
- * and binds nothing.
+ * configured Wi-Fi; otherwise the service stays up, reports why, and binds
+ * nothing.
  */
 public final class ProxyService extends Service
         implements Socks5Server.Listener, Uplink.Listener {
@@ -39,23 +37,6 @@ public final class ProxyService extends Service
     static final String ACTION_START = "org.phonelink.proxy.action.START";
     static final String ACTION_STOP = "org.phonelink.proxy.action.STOP";
 
-    static final String EXTRA_PORT = "port";
-    static final String EXTRA_USER = "user";
-    static final String EXTRA_PASSWORD = "password";
-    static final String EXTRA_ANONYMOUS = "anonymous";
-    static final String EXTRA_SSID = "ssid";
-    static final String EXTRA_ANY_NETWORK = "any_network";
-
-    private static final String PREFS = "config";
-    private static final String KEY_PORT = "port";
-    private static final String KEY_USER = "user";
-    private static final String KEY_PASSWORD = "password";
-    private static final String KEY_ANONYMOUS = "anonymous";
-    private static final String KEY_SSID = "ssid";
-    private static final String KEY_ANY_NETWORK = "any_network";
-
-    private static final int DEFAULT_PORT = 1080;
-    private static final String DEFAULT_SSID = "PhoneLink";
     private static final int NOTIFICATION_ID = 1;
     private static final int ERROR_NOTIFICATION_ID = 2;
     private static final String CHANNEL = "proxy";
@@ -68,12 +49,8 @@ public final class ProxyService extends Service
     private Egress egress;
     private Socks5Server server;
     private Uplink uplink;
-    private Config config;
-    private String detail = "starting";
-
-    static boolean isConfigured(Context context) {
-        return context.getSharedPreferences(PREFS, MODE_PRIVATE).contains(KEY_PORT);
-    }
+    private ProxyConfig config;
+    private ProxyState state = ProxyState.stopped();
 
     @Override
     public void onCreate() {
@@ -104,7 +81,7 @@ public final class ProxyService extends Service
         startForeground(NOTIFICATION_ID, buildNotification("starting"));
 
         try {
-            config = readConfig(intent);
+            config = ConfigStore.resolve(this, intent);
         } catch (IllegalArgumentException e) {
             fail(e.getMessage());
             return START_NOT_STICKY;
@@ -120,6 +97,7 @@ public final class ProxyService extends Service
             uplink = null;
         }
         stopListening();
+        ProxyRuntime.publish(ProxyState.stopped());
         stopForeground(STOP_FOREGROUND_REMOVE);
         notifications.cancel(NOTIFICATION_ID);
         super.onDestroy();
@@ -133,7 +111,6 @@ public final class ProxyService extends Service
     /** Called from connection threads. */
     @Override
     public void onClientsChanged(int connected) {
-        String text;
         synchronized (lock) {
             if (connected > 0) {
                 if (!wakeLock.isHeld()) {
@@ -145,11 +122,9 @@ public final class ProxyService extends Service
             } else if (wakeLock.isHeld()) {
                 wakeLock.release();
             }
-            detail = describe(connected);
-            text = detail;
         }
         if (server != null) {
-            notifications.notify(NOTIFICATION_ID, buildNotification(text));
+            publish(ProxyState.listening(server.port(), connected));
         }
     }
 
@@ -163,16 +138,11 @@ public final class ProxyService extends Service
                 // startListening() failed and already stopped the service.
                 return;
             }
-            synchronized (lock) {
-                detail = describe(clients.get());
-            }
+            publish(ProxyState.listening(server.port(), clients.get()));
         } else {
             stopListening();
-            synchronized (lock) {
-                detail = "not listening: " + why;
-            }
+            publish(ProxyState.paused(why));
         }
-        notifications.notify(NOTIFICATION_ID, buildNotification(detail));
     }
 
     private void startWatching() {
@@ -181,9 +151,7 @@ public final class ProxyService extends Service
             uplink = null;
         }
         stopListening();
-        synchronized (lock) {
-            detail = "waiting for an allowed network";
-        }
+        publish(ProxyState.waiting());
         uplink = new Uplink(this, config.ssid, config.anyNetwork, this::onUplinkChanged);
         uplink.start();
     }
@@ -229,6 +197,13 @@ public final class ProxyService extends Service
         }
     }
 
+    /** Share a state with the panel and the shade. */
+    private void publish(ProxyState next) {
+        state = next;
+        ProxyRuntime.publish(next);
+        notifications.notify(NOTIFICATION_ID, buildNotification(next.describe()));
+    }
+
     private void fail(String message) {
         Log.e(TAG, message);
         Notification notification = new Notification.Builder(this, CHANNEL)
@@ -241,13 +216,9 @@ public final class ProxyService extends Service
         stopSelf();
     }
 
-    private String describe(int connected) {
-        int port = server == null ? 0 : server.port();
-        String where = port == 0 ? "not listening" : "listening on 0.0.0.0:" + port;
-        return where + " · " + connected + (connected == 1 ? " client" : " clients");
-    }
-
     private Notification buildNotification(String text) {
+        PendingIntent open = PendingIntent.getActivity(
+                this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
         Intent stop = new Intent(this, ProxyService.class).setAction(ACTION_STOP);
         PendingIntent stopIntent =
                 PendingIntent.getService(this, 0, stop, PendingIntent.FLAG_IMMUTABLE);
@@ -257,6 +228,7 @@ public final class ProxyService extends Service
                 .setContentText(text)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
+                .setContentIntent(open)
                 .addAction(new Notification.Action.Builder(
                         Icon.createWithResource(this, R.drawable.ic_stat_proxy),
                         getString(R.string.action_stop), stopIntent).build());
@@ -264,84 +236,5 @@ public final class ProxyService extends Service
             builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE);
         }
         return builder.build();
-    }
-
-    private Config readConfig(Intent intent) {
-        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-
-        int port = intent != null && intent.hasExtra(EXTRA_PORT)
-                ? intent.getIntExtra(EXTRA_PORT, DEFAULT_PORT)
-                : prefs.getInt(KEY_PORT, DEFAULT_PORT);
-        boolean anonymous = intent != null && intent.hasExtra(EXTRA_ANONYMOUS)
-                ? intent.getBooleanExtra(EXTRA_ANONYMOUS, false)
-                : prefs.getBoolean(KEY_ANONYMOUS, false);
-        String user = intent != null && intent.hasExtra(EXTRA_USER)
-                ? value(intent.getStringExtra(EXTRA_USER))
-                : prefs.getString(KEY_USER, "");
-        String password = intent != null && intent.hasExtra(EXTRA_PASSWORD)
-                ? value(intent.getStringExtra(EXTRA_PASSWORD))
-                : prefs.getString(KEY_PASSWORD, "");
-        String ssid = intent != null && intent.hasExtra(EXTRA_SSID)
-                ? value(intent.getStringExtra(EXTRA_SSID))
-                : prefs.getString(KEY_SSID, DEFAULT_SSID);
-        boolean anyNetwork = intent != null && intent.hasExtra(EXTRA_ANY_NETWORK)
-                ? intent.getBooleanExtra(EXTRA_ANY_NETWORK, false)
-                : prefs.getBoolean(KEY_ANY_NETWORK, false);
-
-        if (port < 1024 || port > 65535) {
-            throw new IllegalArgumentException("port must be 1024..65535, got " + port);
-        }
-        if (anonymous) {
-            // The listener treats empty credentials as "no authentication", so
-            // an explicit anonymous start must not leave stale ones behind.
-            user = "";
-            password = "";
-        } else {
-            if (user.isEmpty() || password.isEmpty()) {
-                throw new IllegalArgumentException(
-                        "no credentials: pass user and password, or anonymous=true");
-            }
-            if (bytes(user) > 255 || bytes(password) > 255) {
-                throw new IllegalArgumentException("user and password must be at most 255 bytes");
-            }
-        }
-        if (!anyNetwork && ssid.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "no SSID to match: pass ssid, or any_network=true");
-        }
-
-        prefs.edit()
-                .putInt(KEY_PORT, port)
-                .putString(KEY_USER, user)
-                .putString(KEY_PASSWORD, password)
-                .putBoolean(KEY_ANONYMOUS, anonymous)
-                .putString(KEY_SSID, ssid)
-                .putBoolean(KEY_ANY_NETWORK, anyNetwork)
-                .apply();
-        return new Config(port, user, password, ssid, anyNetwork);
-    }
-
-    private static String value(String given) {
-        return given == null ? "" : given;
-    }
-
-    private static int bytes(String value) {
-        return value.getBytes(StandardCharsets.UTF_8).length;
-    }
-
-    private static final class Config {
-        final int port;
-        final String user;
-        final String password;
-        final String ssid;
-        final boolean anyNetwork;
-
-        Config(int port, String user, String password, String ssid, boolean anyNetwork) {
-            this.port = port;
-            this.user = user;
-            this.password = password;
-            this.ssid = ssid;
-            this.anyNetwork = anyNetwork;
-        }
     }
 }

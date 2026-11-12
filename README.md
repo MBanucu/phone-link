@@ -14,8 +14,9 @@ cable.
   Gradle
 - `devShells.default`, `devShells.android` (the APK toolchain), `formatter`,
   `checks`
-- `android/` — the SOCKS5 proxy APK of our own, built without Gradle:
-  `nix develop .#android && ./android/build.sh`, see `android/README.md`
+- `android/` — the SOCKS5 proxy APK of our own, with a panel for on-device
+  start/stop, built without Gradle: `nix develop .#android && ./android/build.sh`,
+  see `android/README.md`
 - `CHANGELOG.md` — released changes, Keep a Changelog format
 - `docs/phone-network.md` — measured behaviour, evidence and the traps
 
@@ -210,7 +211,7 @@ the same table, and `phone-link status` prints the doctor's JSON.
 | `shellcheck` | every script and `lib/phone-net.sh` is clean at shellcheck warning level |
 | `format` | `flake.nix`, `modules/phone-link.nix` and `android/default.nix` are nixfmt-clean |
 | `module` | the module generates the expected sing-box config and units (5 s probe, 20 s first run, AP DHCP/DNS holes, pinned resolver, never started at boot) and defines nothing when disabled |
-| `script` | hermetic tests with stub `adb`/`curl`/`avahi-browse`: for `phone-proxy-install` the F-Droid version selection, cache keying and reuse, `--check` staying read-only, the exact install argv and `--pull` naming; for `phone-proxy-uninstall` the confirm/`--yes` guard, `--keep-data`, idempotence and the exact uninstall argv; for `phone-proxy-data-clear` the prompt guard, `--check` staying read-only and the `pm clear` argv; for `phone-proxy-setup` the field order, values typed, auto-start toggle and Start tap against a stub settings screen; for `phone-unlock` the keyguard check, PIN entry and wrong-PIN failure; for `phone-proxy-battery-whitelist` the idempotent add, `--check` and the device-idle argv; for `phone-proxy-start`/`phone-proxy-stop` the Start/Stop tap, the already-running/stopped no-op and the failed-start path; for `phone-wifi-concurrency` the supported, unsupported and inconclusive verdicts and the read-only queries; for `phone-usb-tether-check` the rndis0/usb state, the host route and a source-bound request; for `net-check` the three fetches, their failure modes and the cache-busting URL; for `phone-reboot-unlock` the reboot/wait/unlock sequence, the slow-boot wait, the aborted prompt and the boot timeout; for `phone-usb-tether-default` the current and screen-unlocked functions, the `--check` report and an ineffective setter; for `phone-wifi-enable` the idempotent enable and `--check`; for `phone-wifi-forget` the saved-network table, the prompt/`--yes` guard and idempotence; for `phone-wifi-connect` the password sources, remote quoting of SSID/passphrase and the association wait; for `phone-tether-cycle` the MTP disable, the health check, the lock/unlock restore, an adb abort retry, the already-off case, an unhealthy restore and the prompt guard; for `phone-adb-wifi` the legacy/TLS split, the mDNS port lookup, the `adb_wifi_enabled` write, the already-on case and the missing-port failure; for `phone-doctor` the ready, hotspot, locked, missing-adb, missing-secrets and dead-proxy paths; and `tests/proxy-socks5.test.sh` compiles the app's protocol classes without Android and runs the handshake, authentication, CONNECT/reply codes, relay, half-close and client counting against a local echo upstream |
+| `script` | hermetic tests with stub `adb`/`curl`/`avahi-browse`: for `phone-proxy-install` the F-Droid version selection, cache keying and reuse, `--check` staying read-only, the exact install argv and `--pull` naming; for `phone-proxy-uninstall` the confirm/`--yes` guard, `--keep-data`, idempotence and the exact uninstall argv; for `phone-proxy-data-clear` the prompt guard, `--check` staying read-only and the `pm clear` argv; for `phone-proxy-setup` the field order, values typed, auto-start toggle and Start tap against a stub settings screen; for `phone-unlock` the keyguard check, PIN entry and wrong-PIN failure; for `phone-proxy-battery-whitelist` the idempotent add, `--check` and the device-idle argv; for `phone-proxy-start`/`phone-proxy-stop` the Start/Stop tap, the already-running/stopped no-op and the failed-start path; for `phone-wifi-concurrency` the supported, unsupported and inconclusive verdicts and the read-only queries; for `phone-usb-tether-check` the rndis0/usb state, the host route and a source-bound request; for `net-check` the three fetches, their failure modes and the cache-busting URL; for `phone-reboot-unlock` the reboot/wait/unlock sequence, the slow-boot wait, the aborted prompt and the boot timeout; for `phone-usb-tether-default` the current and screen-unlocked functions, the `--check` report and an ineffective setter; for `phone-wifi-enable` the idempotent enable and `--check`; for `phone-wifi-forget` the saved-network table, the prompt/`--yes` guard and idempotence; for `phone-wifi-connect` the password sources, remote quoting of SSID/passphrase and the association wait; for `phone-tether-cycle` the MTP disable, the health check, the lock/unlock restore, an adb abort retry, the already-off case, an unhealthy restore and the prompt guard; for `phone-adb-wifi` the legacy/TLS split, the mDNS port lookup, the `adb_wifi_enabled` write, the already-on case and the missing-port failure; for `phone-doctor` the ready, hotspot, locked, missing-adb, missing-secrets and dead-proxy paths; and `tests/proxy-app.test.sh` compiles the app's Android-free classes and runs the SOCKS5 handshake, authentication, CONNECT/reply codes, relay, half-close and client counting against a local echo upstream, plus the configuration rules, the status text and the runtime listener |
 
 The `script` check also covers `phone-doctor --analyze` (problem ids, AP down and
 an empty ambulance box, warnings-only, no headers or `ok` lines),
@@ -237,8 +238,9 @@ sudo tests/live/doctor-fix-proxy.sh
 ```
 
 `tests/live/proxy-app.sh` exercises the app in `android/` end to end on a phone
-that has a Wi-Fi client link: it installs the APK, starts it on a spare port with
-throwaway credentials, requires `200` through the tunnel, requires a wrong
+that has a Wi-Fi client link: it installs the APK, opens the panel and requires it
+to stay up, starts the listener on a spare port with throwaway credentials,
+requires `200` through the tunnel, requires a wrong
 password to be refused, requires an unrelated SSID to keep the port closed while
 the service stays up, requires `any_network=true` to bypass the predicate, then
 stops and uninstalls. It leaves the vendored proxy alone (`KEEP_APP=1` keeps the

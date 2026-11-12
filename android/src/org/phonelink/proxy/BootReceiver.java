@@ -18,7 +18,7 @@ public final class BootReceiver extends BroadcastReceiver {
         if (!Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
             return;
         }
-        if (!ProxyService.isConfigured(context)) {
+        if (!ConfigStore.isConfigured(context)) {
             return;
         }
         try {
