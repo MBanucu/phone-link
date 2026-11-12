@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   APK. Measured: with the switch on, switching the setting off and having the
   phone re-join `PhoneLink` ends with the app logging `wireless debugging
   enabled (it was off)`, a fresh mDNS record and a working `adb connect`.
+- The panel says what Android's wireless debugging is doing at that moment
+  (and when the app lacks the permission to change it), marks edited fields as
+  `Not applied yet — press Start` until they are, and exposes the `anonymous`
+  extra as "Listen without authentication". Start is the filled button, so the
+  action that applies the form no longer looks like the one that stops it.
 - `android/`: a SOCKS5 proxy APK of our own, built with `aapt2`/`javac`/`d8`
   instead of Gradle from the new `nix develop .#android` shell. It holds an
   explicit cellular `NetworkRequest` for its egress, listens on the wildcard

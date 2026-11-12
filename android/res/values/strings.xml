@@ -14,7 +14,12 @@
     <string name="label_any_network">Ignore the SSID and always listen</string>
     <string name="label_auto_start">Start automatically and keep running (also after a reboot)</string>
     <string name="label_adb_wifi">Turn wireless debugging back on when the phone joins the SSID</string>
-    <string name="adb_wifi_ungranted">This build cannot change that setting: install it with phone-proxy-install, which grants the one permission Android needs.</string>
+    <string name="adb_wifi_ungranted">Wireless debugging: this build cannot change it — install with phone-proxy-install, which grants the one permission Android needs</string>
+    <string name="adb_wifi_state_on">Wireless debugging: on — adb can reach the phone</string>
+    <string name="adb_wifi_state_off">Wireless debugging: off — the app turns it on when the phone joins the SSID</string>
+    <string name="adb_wifi_state_off_manual">Wireless debugging: off — the switch above is off, so the app leaves it alone</string>
+    <string name="label_anonymous">Listen without authentication</string>
+    <string name="pending_changes">Not applied yet — press Start</string>
     <string name="battery_exempt">Battery: unrestricted — the proxy can come back after a reboot</string>
     <string name="battery_optimized">Battery: optimized — Android will not restart the proxy after a reboot (tap to change)</string>
     <string name="battery_title">Let the proxy restart by itself</string>

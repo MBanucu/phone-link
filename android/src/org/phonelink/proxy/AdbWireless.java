@@ -27,7 +27,7 @@ final class AdbWireless {
     private static final String TAG = "phone-link-proxy";
 
     /** The switch behind Developer options → Wireless debugging. */
-    private static final String SETTING = "adb_wifi_enabled";
+    static final String SETTING = "adb_wifi_enabled";
 
     private AdbWireless() {
     }

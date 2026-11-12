@@ -193,6 +193,13 @@ adb shell pm grant org.phonelink.proxy android.permission.WRITE_SECURE_SETTINGS
 
 Both preference checkboxes follow the store, so `--ez auto_start …` or
 `--ez adb_wifi …` while the panel is open shows up there without reopening it.
+Under the wireless-debugging checkbox a line says what Android is doing right
+now (`Wireless debugging: on — adb can reach the phone`), and why the app cannot
+help when the permission was never granted. Everything else on the panel is
+setup, which only takes effect on Start: the same row exposes the `anonymous`
+extra as "Listen without authentication", and fields that differ from what the
+service uses carry `Not applied yet — press Start` above the buttons. Start is
+the filled button because it is the one that does something.
 
 Measured on the phone (Android 15): with the switch on, `settings put global
 adb_wifi_enabled 0` plus the phone re-joining `PhoneLink` ends with

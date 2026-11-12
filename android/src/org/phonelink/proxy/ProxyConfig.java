@@ -19,7 +19,7 @@ final class ProxyConfig {
     final String password;
     final String ssid;
     final boolean anyNetwork;
-    /** Listen without credentials; adb-only, the panel always asks for a password. */
+    /** Listen without credentials; a checkbox in the panel, `anonymous=true` over adb. */
     final boolean anonymous;
 
     private ProxyConfig(
