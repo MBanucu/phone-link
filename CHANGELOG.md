@@ -15,9 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   address, takes a wake lock only while a client is connected, and is driven by
   `am start-foreground-service` through a `DUMP`-guarded service, so starting
   the proxy no longer needs the phone unlocked. The listener is gated on the
-  uplink: it opens only while the phone is a client of the configured SSID or
-  tethering on `ap0`/`rndis0`, and otherwise stays closed with the reason in
-  the notification. The `phone-proxy-*` scripts still drive the vendored app.
+  uplink: it opens only while the phone is a client of the configured SSID, and
+  otherwise stays closed with the reason in the notification. The
+  `phone-proxy-*` scripts still drive the vendored app.
 - `docs/phone-network.md` records why the proxy works at all: the phone's default
   network on the AP link is the laptop, so the app holds an explicit cellular
   `NetworkRequest` and sends its egress out on that network instead. Trap 5 now

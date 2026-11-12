@@ -28,21 +28,23 @@ network once the SDK is in the store.
 
 ## When it listens
 
-The port is only open while the uplink makes sense, so the phone can sit on a
-hotel or café Wi-Fi without offering a relay to it:
+The port is only open while the phone is a client of the configured SSID, so it
+can sit on a hotel or café Wi-Fi without offering a relay to it:
 
 | phone state | verdict |
 |---|---|
 | client of the configured SSID (`PhoneLink` by default) | listening |
-| tethering: `ap0` (hotspot) or `rndis0` (USB) has an IPv4 address | listening |
 | joined any other Wi-Fi | paused, port closed |
-| no Wi-Fi, no tether | paused, port closed |
+| no Wi-Fi at all | paused, port closed |
+
+Tethering does not count: the hotspot and USB paths are out of scope for this
+app, so the port stays closed there too (the vendored app still covers hotspot
+mode).
 
 The service stays in the foreground while paused and reports why
 (`not listening: on "FRITZ!Box 7530 XJ", not "PhoneLink"`), so it opens by
-itself when the phone rejoins `PhoneLink` or the hotspot comes up. SSID changes
-arrive as connectivity callbacks; tethering has no callback, so it is polled
-every 30 s.
+itself when the phone rejoins `PhoneLink`. SSID changes arrive as connectivity
+callbacks, so nothing is polled.
 
 Reading the SSID is reading location data, and three things are needed for it,
 all in the manifest: `ACCESS_FINE_LOCATION` granted and location switched on;
@@ -105,7 +107,7 @@ sticky restart or the boot receiver reuses them:
 | `password` (`--es`) | — | RFC 1929 password, required |
 | `anonymous` (`--ez`) | `false` | listen without authentication |
 | `ssid` (`--es`) | `PhoneLink` | SSID the listener may run on |
-| `any_network` (`--ez`) | `false` | ignore the predicate and always listen |
+| `any_network` (`--ez`) | `false` | ignore the predicate and always listen (tests) |
 
 Every extra is persisted, so a later start without one reuses the stored value;
 pass it explicitly to change a setting.
@@ -118,9 +120,8 @@ wildcard listener on a Wi-Fi LAN is an open relay.
 
 ## What this scaffold does not do yet
 
-- The tether branches are unexercised: only the SSID path was measured on the
-  phone. Hotspot and USB tether are detected from `ap0`/`rndis0` and have not
-  been seen to allow a listener end to end.
+- Tethering is excluded on purpose, so a phone in hotspot or USB-tether mode has
+  no listener from this app. Use the vendored proxy for that mode.
 - Restarting after a reboot with a `location` foreground service is unverified.
   Android may refuse to start that type from `BOOT_COMPLETED`; the receiver then
   logs and leaves the listener off until the next explicit start.

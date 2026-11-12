@@ -12,19 +12,14 @@ import android.os.Looper;
 import android.util.Log;
 
 import java.io.Closeable;
-import java.net.Inet4Address;
-import java.net.InterfaceAddress;
-import java.net.NetworkInterface;
-import java.net.SocketException;
 
 /**
  * Decides whether the listener may run.
  *
- * <p>Allowed when the phone is a client of the configured SSID, or when it is
- * tethering at all: in hotspot mode the phone has no Wi-Fi client link and the
- * laptop reaches it on {@code ap0}; with USB tethering it reaches it on
- * {@code rndis0}. Everywhere else the port is closed, because a wildcard
- * listener on an arbitrary Wi-Fi LAN is an open relay behind one password.
+ * <p>Allowed only while the phone is a client of the configured SSID. Everywhere
+ * else the port stays closed, because a wildcard listener on an arbitrary Wi-Fi
+ * LAN is an open relay behind one password. Tethering deliberately does not
+ * count: the hotspot and USB paths are not wanted here.
  *
  * <p>SSID reads are redacted to {@code <unknown ssid>} without location
  * permission and location enabled, and a redacted SSID is treated as "not the
@@ -33,12 +28,6 @@ import java.net.SocketException;
 final class Uplink implements Closeable {
 
     private static final String TAG = "phone-link-proxy";
-
-    /** Interfaces that appear while the phone shares its uplink. */
-    private static final String[] TETHER_INTERFACES = {"ap0", "rndis0"};
-
-    /** Tethering has no callback, so poll; SSID changes arrive as callbacks. */
-    private static final long RECHECK_MS = 30_000;
 
     interface Listener {
         void onUplinkChanged(boolean allowed, String detail);
@@ -86,16 +75,6 @@ final class Uplink implements Closeable {
                 }
             };
 
-    private final Runnable recheck = new Runnable() {
-        @Override
-        public void run() {
-            evaluate();
-            if (running) {
-                handler.postDelayed(this, RECHECK_MS);
-            }
-        }
-    };
-
     private boolean running;
     private boolean allowed;
     private String detail = "";
@@ -111,7 +90,6 @@ final class Uplink implements Closeable {
     void start() {
         running = true;
         manager.registerDefaultNetworkCallback(callback, handler);
-        handler.postDelayed(recheck, RECHECK_MS);
         evaluate();
     }
 
@@ -132,12 +110,6 @@ final class Uplink implements Closeable {
         if (anyNetwork) {
             return new Verdict(true, "any network is allowed");
         }
-        for (String name : TETHER_INTERFACES) {
-            if (hasIpv4(name)) {
-                return new Verdict(true, "tethering on " + name);
-            }
-        }
-
         Network active = manager.getActiveNetwork();
         NetworkCapabilities capabilities =
                 active == null ? null : manager.getNetworkCapabilities(active);
@@ -189,29 +161,9 @@ final class Uplink implements Closeable {
         return reported;
     }
 
-    private static boolean hasIpv4(String name) {
-        try {
-            NetworkInterface networkInterface = NetworkInterface.getByName(name);
-            if (networkInterface == null) {
-                return false;
-            }
-            for (InterfaceAddress address : networkInterface.getInterfaceAddresses()) {
-                if (address.getAddress() instanceof Inet4Address) {
-                    return true;
-                }
-            }
-        } catch (SocketException e) {
-            // Treat an unreadable interface list as "not tethering"; the next
-            // poll tries again.
-            return false;
-        }
-        return false;
-    }
-
     @Override
     public void close() {
         running = false;
-        handler.removeCallbacks(recheck);
         try {
             manager.unregisterNetworkCallback(callback);
         } catch (IllegalArgumentException e) {
