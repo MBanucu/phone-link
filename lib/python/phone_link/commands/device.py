@@ -78,14 +78,78 @@ def _pin() -> str:
     return pin
 
 
-def _keyguard_state(serial: str) -> str:
-    for line in capture(
-        ["adb", "-s", serial, "shell", "dumpsys", "window", "policy"]
-    ).replace("\r", "").splitlines():
-        match = re.match(r" *showing=(true|false)$", line)
-        if match:
-            return match.group(1)
-    return ""
+def _lock_screen(serial: str) -> tuple[bool | None, bool]:
+    """(locked, awake) from one `dumpsys window policy`.
+
+    Both answers come from the same block, so a wake-and-check loop costs one
+    round trip per look. `locked` is None when the build does not say, which
+    callers treat as "cannot tell" rather than "unlocked". A build that omits
+    the screen fields counts as awake: the PIN is then still tried, which is
+    better than refusing to unlock over a missing line.
+    """
+    fields: dict[str, str] = {}
+    # The dump can come back empty or cut short (a busy phone closes the pipe),
+    # and a missing `showing` line is worth another read rather than an error.
+    for attempt in range(3):
+        for line in (
+            capture(["adb", "-s", serial, "shell", "dumpsys", "window", "policy"])
+            .replace("\r", "")
+            .splitlines()
+        ):
+            match = re.match(r" *(showing|screenState|interactiveState)=(\S+)$", line)
+            if match:
+                fields[match.group(1)] = match.group(2)
+        if "showing" in fields:
+            break
+        if attempt < 2:
+            time.sleep(0.3)
+    locked = {"true": True, "false": False}.get(fields.get("showing", ""))
+    awake = fields.get("screenState") != "SCREEN_STATE_OFF"
+    return locked, awake
+
+
+def _wake(serial: str, timeout: float = 4.0) -> bool:
+    """Wake the panel and confirm it came up.
+
+    A single KEYCODE_WAKEUP is what made this flaky: the press can land while
+    the display is still powering on, leaving the screen off and the keyguard
+    untouched. Send it again until the screen reports itself on.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        must(["adb", "-s", serial, "shell", "input", "keyevent", "KEYCODE_WAKEUP"])
+        _, awake = _lock_screen(serial)
+        if awake:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.5)
+
+
+def _swipe_up(serial: str) -> None:
+    """Drag the lock screen up, using the panel size the phone reports."""
+    size = _phone_shell(serial, "wm", "size")
+    match = re.search(r"^Physical size: (\d+)x(\d+)", size, re.MULTILINE)
+    if match:
+        width, height = int(match.group(1)), int(match.group(2))
+    else:
+        width, height = 1440, 3200
+    x = width // 2
+    must(
+        [
+            "adb",
+            "-s",
+            serial,
+            "shell",
+            "input",
+            "swipe",
+            str(x),
+            str(height * 78 // 100),
+            str(x),
+            str(height * 22 // 100),
+            "250",
+        ]
+    )
 
 
 def phone_unlock(args: list[str]) -> int:
@@ -97,61 +161,54 @@ def phone_unlock(args: list[str]) -> int:
     if not serial:
         die("no phone attached (see adb devices)")
 
-    state = _keyguard_state(serial)
-    if not state:
-        die("cannot read the keyguard state from the phone")
-    if state == "false":
+    locked, awake = _lock_screen(serial)
+    if locked is None:
+        die(
+            "cannot read the keyguard state over adb (is the device still "
+            "listed by `adb devices`?)"
+        )
+    if not locked and awake:
         log("phone is already unlocked")
         return 0
     if check_only:
-        log("phone is locked")
+        log("phone is locked" if locked else "phone is asleep")
         return 1
 
     pin = _pin()
 
-    # Swipe geometry from the real panel size, so this is not tied to one
-    # phone.
-    size = _phone_shell(serial, "wm", "size")
-    match = re.search(r"^Physical size: (\d+)x(\d+)", size, re.MULTILINE)
-    if match:
-        width, height = int(match.group(1)), int(match.group(2))
-    else:
-        width, height = 1440, 3200
-    x = width // 2
-    from_y = height * 78 // 100
-    to_y = height * 22 // 100
-
     log("phone is locked; waking it and entering the PIN")
-    must(["adb", "-s", serial, "shell", "input", "keyevent", "KEYCODE_WAKEUP"])
-    must(["adb", "-s", serial, "shell", "input", "keyevent", "KEYCODE_HOME"])
-    time.sleep(1)
-    must(
-        [
-            "adb",
-            "-s",
-            serial,
-            "shell",
-            "input",
-            "swipe",
-            str(x),
-            str(from_y),
-            str(x),
-            str(to_y),
-            "250",
-        ]
-    )
-    time.sleep(1)
-    must(["adb", "-s", serial, "shell", "input", "text", pin])
-    must(["adb", "-s", serial, "shell", "input", "keyevent", "KEYCODE_ENTER"])
-
-    for _ in range(5):
-        time.sleep(1)
-        if _keyguard_state(serial) == "false":
+    # Three passes instead of one: a swipe that lands during the keyguard
+    # animation, or a digit the bouncer drops while it is still sliding in,
+    # costs one attempt rather than the whole command.
+    for _ in range(3):
+        if not _wake(serial):
+            die("the screen did not wake up (screenState stayed off)")
+        # Unlocks a swipe-only keyguard outright and brings up the PIN bouncer
+        # on a secure one, so the swipe below is not always needed.
+        run(["adb", "-s", serial, "shell", "wm", "dismiss-keyguard"])
+        locked, awake = _lock_screen(serial)
+        if not locked and awake:
             log("unlocked")
             return 0
+
+        _swipe_up(serial)
+        time.sleep(1)
+        must(["adb", "-s", serial, "shell", "input", "text", pin])
+        must(["adb", "-s", serial, "shell", "input", "keyevent", "KEYCODE_ENTER"])
+
+        for _ in range(5):
+            time.sleep(1)
+            locked, awake = _lock_screen(serial)
+            if not locked and awake:
+                log("unlocked")
+                return 0
+        # Leave the bouncer's error state before typing the PIN again.
+        run(["adb", "-s", serial, "shell", "input", "keyevent", "KEYCODE_BACK"])
+        time.sleep(0.5)
+
     die(
-        "still locked after entering the PIN (wrong PIN, or the lock screen "
-        "needs a manual swipe first)"
+        "still locked after entering the PIN 3 times (wrong PIN, or the lock "
+        "screen keeps coming back)"
     )
     return 1
 

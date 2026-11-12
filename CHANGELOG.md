@@ -54,6 +54,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `phone-unlock` woke the panel with a single `KEYCODE_WAKEUP` and then typed
+  the PIN on faith, so a press that landed while the display was still powering
+  on left the phone locked and every caller saw a stale screen. It now reads
+  the keyguard and screen state from one `dumpsys window policy` (retrying a
+  truncated dump), sends the wake key until the screen reports itself on, uses
+  `wm dismiss-keyguard` for a swipe-only lock, and retries the PIN up to three
+  times — so `--check` can also say `phone is asleep` instead of claiming the
+  phone is unlocked.
 - `nix fmt` works again: nixpkgs renamed `nixfmt-rfc-style` to `nixfmt` and the
   formatter script still pointed at the old binary, so it failed without
   formatting anything. The `format` check now also covers `android/shell.nix`.
