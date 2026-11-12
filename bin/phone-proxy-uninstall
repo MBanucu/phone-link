@@ -1,96 +1,15 @@
 #!/usr/bin/env bash
-# Uninstall the phone's SOCKS proxy app.
-#
-#   phone-proxy-uninstall              ask for confirmation, then uninstall
-#   phone-proxy-uninstall --yes        uninstall without asking
-#   phone-proxy-uninstall --check      show what would be removed, change nothing
-#   phone-proxy-uninstall --keep-data  keep app data and cache (adb uninstall -k)
-#
-# Removing the app stops the SOCKS proxy the laptop's tunnel depends on: the
-# 5 s probe then tears the tunnel down, so traffic falls back to the normal
-# route instead of being blackholed. Addresses and the AP stay untouched.
+# phone-proxy-uninstall lives in ../lib/python/phone_link/commands (one function
+# per script). This wrapper only resolves the package next to the checkout or
+# the store install, then hands over to it.
 set -eu
-. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
 
-usage() {
-  cat >&2 <<'EOF'
-usage: phone-proxy-uninstall [--yes] [--keep-data] [--check]
-
-Uninstalls the phone's SOCKS proxy app over adb. Without --yes it asks first,
-and refuses in a non-interactive shell. --check only reports what would go.
-EOF
-}
-
-assume_yes=0
-keep_data=0
-check_only=0
-while [ $# -gt 0 ]; do
-  case $1 in
-    -y | --yes) assume_yes=1 ;;
-    --keep-data) keep_data=1 ;;
-    --check) check_only=1 ;;
-    -h | --help) usage; exit 0 ;;
-    *)
-      usage
-      die "unknown argument: $1"
-      ;;
-  esac
-  shift
-done
-
-# Two adb transports (USB and Wi-Fi) are normal here, so pin every command.
-serial=$(phone_serial) || die "no phone attached (see adb devices)"
-log "phone: $serial"
-
-paths=$(adb -s "$serial" shell pm path "$PHONE_PROXY_PKG" 2>/dev/null \
-  | tr -d '\r' | sed -n 's/^package://p')
-if [ -z "$paths" ]; then
-  log "$PHONE_PROXY_PKG: not installed, nothing to do"
-  exit 0
-fi
-
-version=$(adb -s "$serial" shell dumpsys package "$PHONE_PROXY_PKG" 2>/dev/null \
-  | tr -d '\r' | sed -n 's/^ *versionName=//p' | head -1)
-log "$PHONE_PROXY_PKG: installed, version ${version:-unknown}"
-printf '%s\n' "$paths" | sed 's/^/  /' >&2
-
-# `adb uninstall -k` is refused on Android 15 (it points at `cmd package`
-# instead), so keeping data goes through the package manager directly.
-if [ "$keep_data" = 1 ]; then
-  uninstall_cmd=(shell cmd package uninstall -k "$PHONE_PROXY_PKG")
-else
-  uninstall_cmd=(uninstall "$PHONE_PROXY_PKG")
-fi
-
-if [ "$check_only" = 1 ]; then
-  log "would run: adb -s $serial ${uninstall_cmd[*]}"
-  exit 0
-fi
-
-if [ "$assume_yes" = 0 ]; then
-  if [ -t 0 ]; then
-    printf 'Uninstall %s from %s? [y/N] ' "$PHONE_PROXY_PKG" "$serial" >&2
-    read -r answer
-    case $answer in
-      y | Y | yes | YES) ;;
-      *)
-        log "aborted"
-        exit 1
-        ;;
-    esac
-  else
-    die "refusing to uninstall without --yes (not a terminal)"
+here=$(dirname -- "$(readlink -f -- "$0")")
+for candidate in "$here/../lib/python" "$here/../share/phone-link/lib/python"; do
+  if [ -d "$candidate/phone_link" ]; then
+    export PYTHONPATH="$candidate${PYTHONPATH:+:$PYTHONPATH}"
+    break
   fi
-fi
-
-adb -s "$serial" "${uninstall_cmd[@]}" || die "adb uninstall failed"
-
-if adb -s "$serial" shell pm path "$PHONE_PROXY_PKG" 2>/dev/null | grep -q .; then
-  die "still installed after uninstall"
-fi
-if [ "$keep_data" = 1 ]; then
-  log "uninstalled $PHONE_PROXY_PKG (data kept)"
-else
-  log "uninstalled $PHONE_PROXY_PKG"
-fi
-log "the proxy is gone: the tunnel stops within 5 s; run phone-net-status"
+done
+export PYTHONDONTWRITEBYTECODE=1
+exec python3 -m phone_link.commands phone-proxy-uninstall "$@"

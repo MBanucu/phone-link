@@ -1,88 +1,15 @@
 #!/usr/bin/env bash
-# Check that this machine can reach the internet with curl, Google Chrome and
-# Nix. Read-only: nothing is installed or changed.
-#
-#   net-check
-#
-# Every tool fetches a unique URL, so Nix's fetchurl cache and browser/HTTP
-# caches cannot make a second run pass without a network.
+# net-check lives in ../lib/python/phone_link/commands (one function per
+# script). This wrapper only resolves the package next to the checkout or the
+# store install, then hands over to it.
 set -eu
-. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
 
-usage() {
-  cat >&2 <<'EOF'
-usage: net-check
-
-Fetches https://example.com with curl, a Chrome/Chromium binary and
-nix (builtins.fetchurl) and reports which of the three reach the internet.
-EOF
-}
-
-while [ $# -gt 0 ]; do
-  case $1 in
-    -h | --help) usage; exit 0 ;;
-    *)
-      usage
-      die "unknown argument: $1"
-      ;;
-  esac
-done
-
-failed=0
-stamp=$(date +%s)
-url="https://example.com/?net-check=$stamp"
-
-if have curl; then
-  code=$(timeout 20 curl -4 -s -m 20 -o /dev/null -w '%{http_code}' "$url" || true)
-  if [ "$code" = 200 ]; then
-    log "curl:    $url = 200"
-  else
-    log "curl:    $url = ${code:-000}"
-    failed=1
-  fi
-else
-  log "curl:    not installed"
-  failed=1
-fi
-
-chrome=""
-for name in google-chrome google-chrome-stable chromium chromium-browser; do
-  if have "$name"; then
-    chrome=$name
+here=$(dirname -- "$(readlink -f -- "$0")")
+for candidate in "$here/../lib/python" "$here/../share/phone-link/lib/python"; do
+  if [ -d "$candidate/phone_link" ]; then
+    export PYTHONPATH="$candidate${PYTHONPATH:+:$PYTHONPATH}"
     break
   fi
 done
-if [ -n "$chrome" ]; then
-  dom=$(timeout 60 "$chrome" --headless --disable-gpu --no-sandbox \
-    --disable-dev-shm-usage --dump-dom "$url" 2>/dev/null || true)
-  if printf '%s' "$dom" | grep -q 'Example Domain'; then
-    log "chrome:  $chrome loaded $url"
-  else
-    log "chrome:  $chrome could not load $url"
-    failed=1
-  fi
-else
-  log "chrome:  no google-chrome, google-chrome-stable, chromium or chromium-browser found"
-  failed=1
-fi
-
-if have nix; then
-  html=$(timeout 90 nix eval --raw --impure \
-    --expr "builtins.readFile (builtins.fetchurl \"$url\")" 2>/dev/null || true)
-  if printf '%s' "$html" | grep -q 'Example Domain'; then
-    log "nix:     builtins.fetchurl loaded $url"
-  else
-    log "nix:     builtins.fetchurl could not load $url"
-    failed=1
-  fi
-else
-  log "nix:     not installed"
-  failed=1
-fi
-
-if [ "$failed" -eq 0 ]; then
-  log "verdict: the internet is reachable with curl, chrome and nix"
-  exit 0
-fi
-log "verdict: at least one way of reaching the internet failed"
-exit 1
+export PYTHONDONTWRITEBYTECODE=1
+exec python3 -m phone_link.commands net-check "$@"

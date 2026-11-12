@@ -1,72 +1,15 @@
 #!/usr/bin/env bash
-# Report whether USB tethering is active and whether the internet answers over
-# that route. Read-only: nothing is enabled or disabled.
-#
-#   phone-usb-tether-check
-#
-# The phone side comes from adb (rndis0 address and usb/tethering state); the
-# host side is found through `ip route get <phone-ip>`, so no interface name or
-# subnet is hard-coded. The request is bound to the tether's host address,
-# which keeps it off the Wi-Fi default route when both are up.
+# phone-usb-tether-check lives in ../lib/python/phone_link/commands (one
+# function per script). This wrapper only resolves the package next to the
+# checkout or the store install, then hands over to it.
 set -eu
-. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
 
-usage() {
-  cat >&2 <<'EOF'
-usage: phone-usb-tether-check
-
-Checks that the phone exposes USB tethering (rndis0), that the host has a
-route to it, and that https://example.com loads over that route.
-EOF
-}
-
-while [ $# -gt 0 ]; do
-  case $1 in
-    -h | --help) usage; exit 0 ;;
-    *)
-      usage
-      die "unknown argument: $1"
-      ;;
-  esac
+here=$(dirname -- "$(readlink -f -- "$0")")
+for candidate in "$here/../lib/python" "$here/../share/phone-link/lib/python"; do
+  if [ -d "$candidate/phone_link" ]; then
+    export PYTHONPATH="$candidate${PYTHONPATH:+:$PYTHONPATH}"
+    break
+  fi
 done
-
-serial=$(phone_serial) || die "no phone attached (see adb devices)"
-
-phone_ip=$(adb -s "$serial" shell ip -4 -o addr show rndis0 2>/dev/null \
-  | tr -d '\r' | awk '$2 == "rndis0" { sub(/\/.*/, "", $4); print $4; exit }')
-usb_config=$(adb -s "$serial" shell getprop sys.usb.config 2>/dev/null | tr -d '\r' | head -1)
-tether_state=$(adb -s "$serial" shell dumpsys tethering 2>/dev/null \
-  | tr -d '\r' | sed -n 's/^ *rndis0 - \([^ ]*\).*/\1/p' | head -1)
-
-if [ -z "$phone_ip" ]; then
-  log "phone:    USB tethering is not active (rndis0 has no IPv4 address)"
-  log "verdict:  USB tethering is off"
-  exit 1
-fi
-if [ "$tether_state" != TetheredState ] && ! printf '%s' "$usb_config" | grep -qi rndis; then
-  log "phone:    rndis0 is $phone_ip but USB tethering is not enabled (usb=$usb_config, tether=${tether_state:-unknown})"
-  log "verdict:  USB tethering is off"
-  exit 1
-fi
-log "phone:    USB tethering active: rndis0 ${phone_ip}/24 (usb=$usb_config, tether=${tether_state:-unknown})"
-
-route=$(ip -o route get "$phone_ip" 2>/dev/null | head -1) || true
-iface=$(printf '%s\n' "$route" | sed -n 's/.* dev \([^ ]*\).*/\1/p')
-host_ip=$(printf '%s\n' "$route" | sed -n 's/.* src \([^ ]*\).*/\1/p')
-if [ -z "$iface" ] || [ -z "$host_ip" ]; then
-  log "host:     no route to $phone_ip"
-  log "verdict:  the phone tethers, but this host has no USB tether route"
-  exit 1
-fi
-log "host:     $iface with $host_ip, route via $phone_ip"
-
-code=$(curl -4 -s -m 20 --interface "$host_ip" -o /dev/null -w '%{http_code}' \
-  https://example.com || true)
-log "internet: https://example.com over $host_ip = ${code:-000}"
-if [ "$code" = 200 ]; then
-  log "verdict:  USB tethering is active and reaches the internet"
-  exit 0
-fi
-
-log "verdict:  USB tethering is up, but no internet over it (HTTP ${code:-000})"
-exit 1
+export PYTHONDONTWRITEBYTECODE=1
+exec python3 -m phone_link.commands phone-usb-tether-check "$@"

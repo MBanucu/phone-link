@@ -1,87 +1,15 @@
 #!/usr/bin/env bash
-# Forget a saved Wi-Fi network on the phone (default PhoneLink).
-#
-#   phone-wifi-forget                 forget PhoneLink (asks first)
-#   phone-wifi-forget --yes           no prompt
-#   phone-wifi-forget OtherNet        forget another SSID
-#   phone-wifi-forget --check         report only: 0 not saved, 1 saved
+# phone-wifi-forget lives in ../lib/python/phone_link/commands (one function per
+# script). This wrapper only resolves the package next to the checkout or the
+# store install, then hands over to it.
 set -eu
-. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
 
-usage() {
-  cat >&2 <<'EOF'
-usage: phone-wifi-forget [SSID] [--check] [--yes]
-
-Removes the saved network, so a later connect starts from clean credentials.
---check only reports whether the SSID is saved. --yes skips the prompt.
-EOF
-}
-
-ssid=$PHONE_AP_SSID
-check_only=0
-yes=0
-while [ $# -gt 0 ]; do
-  case $1 in
-    --check) check_only=1 ;;
-    --yes) yes=1 ;;
-    -h | --help) usage; exit 0 ;;
-    -*) usage; die "unknown argument: $1" ;;
-    *)
-      ssid=$1
-      ;;
-  esac
-  shift
+here=$(dirname -- "$(readlink -f -- "$0")")
+for candidate in "$here/../lib/python" "$here/../share/phone-link/lib/python"; do
+  if [ -d "$candidate/phone_link" ]; then
+    export PYTHONPATH="$candidate${PYTHONPATH:+:$PYTHONPATH}"
+    break
+  fi
 done
-
-serial=$(phone_serial) || die "no phone attached (see adb devices)"
-
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
-
-# The table is "id   SSID   security"; the SSID column can contain spaces, so
-# split on runs of two or more spaces. The list goes through a file because a
-# heredoc script would otherwise replace python's stdin.
-network_id() {
-  adb -s "$serial" shell cmd wifi list-networks 2>/dev/null | tr -d '\r' >"$tmp/networks"
-  python3 - "$ssid" "$tmp/networks" <<'PY'
-import re
-import sys
-
-want = sys.argv[1]
-with open(sys.argv[2]) as handle:
-    for line in handle:
-        parts = re.split(r"\s{2,}", line.strip())
-        if len(parts) >= 3 and parts[1] == want:
-            print(parts[0])
-            break
-PY
-}
-
-id=$(network_id)
-if [ -z "$id" ]; then
-  log "$ssid is not saved"
-  exit 0
-fi
-
-if [ "$check_only" -eq 1 ]; then
-  log "$ssid is saved (network id $id)"
-  exit 1
-fi
-
-if [ "$yes" -eq 0 ]; then
-  printf 'Forget %s on the phone? [y/N] ' "$ssid" >&2
-  answer=""
-  read -r answer </dev/tty || answer=""
-  case $answer in
-    y | Y | yes | YES) ;;
-    *) die "aborted" ;;
-  esac
-fi
-
-log "forgetting $ssid (network id $id)"
-adb -s "$serial" shell cmd wifi forget-network "$id" >/dev/null
-
-if [ -n "$(network_id)" ]; then
-  die "$ssid is still saved"
-fi
-log "$ssid forgotten"
+export PYTHONDONTWRITEBYTECODE=1
+exec python3 -m phone_link.commands phone-wifi-forget "$@"

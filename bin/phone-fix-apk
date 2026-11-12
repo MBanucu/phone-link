@@ -1,72 +1,15 @@
 #!/usr/bin/env bash
-# Stock the ambulance box: keep a proxy APK cached so the app can be
-# reinstalled even when the network the proxy provides is the thing that broke.
-#
-#   phone-fix-apk            download F-Droid's version only if none is cached
-#   phone-fix-apk --refresh  always download the newest version
-#   phone-fix-apk --check    report the cached file, change nothing
-#
-# The cache is PHONE_APK_DIR's sibling default $PHONE_APK_CACHE
-# (/var/cache/phone-link), so it is shared by root runs and survives reboots.
+# phone-fix-apk lives in ../lib/python/phone_link/commands (one function per
+# script). This wrapper only resolves the package next to the checkout or the
+# store install, then hands over to it.
 set -eu
-. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
-
-usage() {
-  cat >&2 <<'EOF'
-usage: phone-fix-apk [--refresh] [--check]
-
-Caches the proxy APK in $PHONE_APK_CACHE (default /var/cache/phone-link) so
-phone-doctor-fix can reinstall the app without a download. --refresh replaces
-the cache with F-Droid's current suggested version; --check only reports.
-EOF
-}
-
-refresh=0
-check_only=0
-while [ $# -gt 0 ]; do
-  case $1 in
-    --refresh) refresh=1 ;;
-    --check) check_only=1 ;;
-    -h | --help) usage; exit 0 ;;
-    *)
-      usage
-      die "unknown argument: $1"
-      ;;
-  esac
-  shift
-done
-
-if [ "$check_only" = 1 ]; then
-  if apk=$(phone_apk_cached); then
-    log "ambulance APK: $apk"
-    exit 0
-  fi
-  log "ambulance APK: none cached in $PHONE_APK_CACHE"
-  exit 1
-fi
-
-if [ "$refresh" = 0 ]; then
-  if apk=$(phone_apk_cached); then
-    log "ambulance APK already stocked: $apk"
-    exit 0
-  fi
-fi
-
-# /var/cache is root-owned; a user run escalates once and redoes the work.
-if ! mkdir -p "$PHONE_APK_CACHE" 2>/dev/null; then
-  if [ "$(id -u)" -ne 0 ]; then
-    exec sudo -- "$0" "$@"
-  fi
-  die "cannot create $PHONE_APK_CACHE"
-fi
 
 here=$(dirname -- "$(readlink -f -- "$0")")
-installer=$(command -v phone-proxy-install 2>/dev/null || true)
-if [ -z "$installer" ]; then installer=$here/phone-proxy-install; fi
-[ -x "$installer" ] || die "phone-proxy-install not found"
-
-log "downloading the proxy APK into $PHONE_APK_CACHE"
-PHONE_APK_DIR=$PHONE_APK_CACHE "$installer" --fdroid --check
-
-apk=$(phone_apk_cached) || die "no APK appeared in $PHONE_APK_CACHE"
-log "ambulance APK ready: $apk"
+for candidate in "$here/../lib/python" "$here/../share/phone-link/lib/python"; do
+  if [ -d "$candidate/phone_link" ]; then
+    export PYTHONPATH="$candidate${PYTHONPATH:+:$PYTHONPATH}"
+    break
+  fi
+done
+export PYTHONDONTWRITEBYTECODE=1
+exec python3 -m phone_link.commands phone-fix-apk "$@"

@@ -1,84 +1,15 @@
 #!/usr/bin/env bash
-# Reboot the phone and unlock it once, which is what USB tethering needs before
-# it can be started without a human at the screen.
-#
-#   sudo phone-reboot-unlock          # ask, then reboot, wait, unlock
-#   sudo phone-reboot-unlock --yes    # no prompt (for scripts)
-#
-# The PIN comes from phone-unlock: PHONE_PIN in the environment or the
-# root-only secrets file, so run this with sudo unless PHONE_PIN is exported.
+# phone-reboot-unlock lives in ../lib/python/phone_link/commands (one function
+# per script). This wrapper only resolves the package next to the checkout or
+# the store install, then hands over to it.
 set -eu
-. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
-. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-ui.sh"
 
-usage() {
-  cat >&2 <<'EOF'
-usage: phone-reboot-unlock [--yes]
-
-Reboots the phone, waits for Android to finish booting and then runs
-phone-unlock once. --yes skips the confirmation prompt.
-EOF
-}
-
-yes=0
-while [ $# -gt 0 ]; do
-  case $1 in
-    --yes) yes=1 ;;
-    -h | --help) usage; exit 0 ;;
-    *)
-      usage
-      die "unknown argument: $1"
-      ;;
-  esac
-  shift
+here=$(dirname -- "$(readlink -f -- "$0")")
+for candidate in "$here/../lib/python" "$here/../share/phone-link/lib/python"; do
+  if [ -d "$candidate/phone_link" ]; then
+    export PYTHONPATH="$candidate${PYTHONPATH:+:$PYTHONPATH}"
+    break
+  fi
 done
-
-serial=$(phone_serial) || die "no phone attached (see adb devices)"
-unlock_bin=$(phone_ui_unlock_bin) || die "phone-unlock not found next to this script or in PATH"
-
-if [ "$yes" -eq 0 ]; then
-  printf 'Reboot %s now? [y/N] ' "$serial" >&2
-  answer=""
-  read -r answer </dev/tty || answer=""
-  case $answer in
-    y | Y | yes | YES) ;;
-    *) die "aborted" ;;
-  esac
-fi
-
-poll=${PHONE_REBOOT_POLL:-2}
-wait_for=${PHONE_REBOOT_TIMEOUT:-240}
-
-# The old session still reports device and boot_completed for a moment after
-# `adb reboot`, so the new boot id is what proves the phone actually restarted.
-boot_id=$(adb -s "$serial" shell cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r')
-[ -n "$boot_id" ] || boot_id=unknown
-
-log "rebooting $serial"
-adb -s "$serial" reboot
-
-log "waiting for the phone to come back"
-waited=0
-until [ "$(adb -s "$serial" get-state 2>/dev/null)" = device ] \
-  && [ "$(adb -s "$serial" shell cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r')" != "$boot_id" ]; do
-  sleep "$poll"
-  waited=$((waited + poll))
-  [ "$waited" -lt "$wait_for" ] || die "the phone did not come back within ${wait_for}s"
-done
-
-log "waiting for Android to finish booting"
-until [ "$(adb -s "$serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; do
-  sleep "$poll"
-  waited=$((waited + poll))
-  [ "$waited" -lt "$wait_for" ] || die "Android did not finish booting within ${wait_for}s"
-done
-
-# phone-unlock can run before the keyguard is drawn, so give it a few tries.
-tries=0
-until "$unlock_bin"; do
-  tries=$((tries + 1))
-  [ "$tries" -lt 3 ] || die "the phone booted but could not be unlocked"
-  sleep "$poll"
-done
-
-log "phone rebooted and unlocked"
+export PYTHONDONTWRITEBYTECODE=1
+exec python3 -m phone_link.commands phone-reboot-unlock "$@"

@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# Probe the phone's SOCKS proxy on the hotspot and AP addresses.
-# Exit status 0 when at least one address serves a request.
-set -u
-. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
+# phone-proxy-check lives in ../lib/python/phone_link/commands (one function per
+# script). This wrapper only resolves the package next to the checkout or the
+# store install, then hands over to it.
+set -eu
 
-rc=1
-for ip in "$PHONE_HOTSPOT_IP" "$PHONE_AP_IP"; do
-  phone_proxy_check "$ip" && rc=0
+here=$(dirname -- "$(readlink -f -- "$0")")
+for candidate in "$here/../lib/python" "$here/../share/phone-link/lib/python"; do
+  if [ -d "$candidate/phone_link" ]; then
+    export PYTHONPATH="$candidate${PYTHONPATH:+:$PYTHONPATH}"
+    break
+  fi
 done
-exit $rc
+export PYTHONDONTWRITEBYTECODE=1
+exec python3 -m phone_link.commands phone-proxy-check "$@"

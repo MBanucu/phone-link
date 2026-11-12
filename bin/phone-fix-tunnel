@@ -1,76 +1,15 @@
 #!/usr/bin/env bash
-# Start or restart phone-tun and wait until its policy route is installed.
-#
-#   phone-fix-tunnel            # start, or restart when the route is missing
-#   phone-fix-tunnel --check    # report only
-#
-# The unit is never wanted at boot; phone-tun-toggle starts it while the proxy
-# answers, so a stopped unit usually means the proxy check failed first.
+# phone-fix-tunnel lives in ../lib/python/phone_link/commands (one function per
+# script). This wrapper only resolves the package next to the checkout or the
+# store install, then hands over to it.
 set -eu
-. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
 
-usage() {
-  cat >&2 <<'EOF'
-usage: phone-fix-tunnel [--check]
-
-Starts phone-tun.service (or restarts it when the 2022 route is missing) and
-waits for the route. --check only reports.
-EOF
-}
-
-check_only=0
-while [ $# -gt 0 ]; do
-  case $1 in
-    --check) check_only=1 ;;
-    -h | --help) usage; exit 0 ;;
-    *)
-      usage
-      die "unknown argument: $1"
-      ;;
-  esac
-  shift
-done
-
-route_present() {
-  ip rule show 2>/dev/null | grep -q 2022
-}
-
-state=$(systemctl is-active phone-tun.service 2>/dev/null || true)
-if [ "$check_only" = 1 ]; then
-  log "phone-tun: ${state:-unknown}, route: $(route_present && printf present || printf missing)"
-  if [ "$state" = active ] && route_present; then exit 0; fi
-  exit 1
-fi
-
-run_root() {
-  if [ "$(id -u)" -eq 0 ]; then
-    "$@"
-  else
-    sudo -- "$@"
+here=$(dirname -- "$(readlink -f -- "$0")")
+for candidate in "$here/../lib/python" "$here/../share/phone-link/lib/python"; do
+  if [ -d "$candidate/phone_link" ]; then
+    export PYTHONPATH="$candidate${PYTHONPATH:+:$PYTHONPATH}"
+    break
   fi
-}
-
-if [ "$state" = active ] && route_present; then
-  log "phone-tun is already active with its route"
-  exit 0
-fi
-
-if [ "$state" = active ]; then
-  log "restarting phone-tun (route missing)"
-  run_root systemctl restart phone-tun.service
-else
-  log "starting phone-tun"
-  run_root systemctl start phone-tun.service
-fi
-
-tries=0
-while [ $tries -lt 10 ]; do
-  if route_present; then
-    log "phone-tun is active with its route"
-    exit 0
-  fi
-  sleep 1
-  tries=$((tries + 1))
 done
-
-die "phone-tun did not install its route"
+export PYTHONDONTWRITEBYTECODE=1
+exec python3 -m phone_link.commands phone-fix-tunnel "$@"

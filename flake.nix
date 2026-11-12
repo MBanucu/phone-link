@@ -98,7 +98,6 @@
               ''
                 mkdir -p "$out/bin"
                 install -Dm644 ${./lib/phone-net.sh} "$out/share/phone-link/lib/phone-net.sh"
-                install -Dm644 ${./lib/phone-ui.sh} "$out/share/phone-link/lib/phone-ui.sh"
                 # phone-doctor is a Python package: one module per symptom group.
                 # It must live under lib/python so the checkout-relative
                 # PYTHONPATH in bin/phone-doctor also works from the store.

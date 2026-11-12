@@ -1,60 +1,15 @@
 #!/usr/bin/env bash
-# Enable the phone's Wi-Fi radio.
-#
-#   phone-wifi-enable            enable it (idempotent)
-#   phone-wifi-enable --check    report only: exit 0 enabled, 1 disabled
+# phone-wifi-enable lives in ../lib/python/phone_link/commands (one function per
+# script). This wrapper only resolves the package next to the checkout or the
+# store install, then hands over to it.
 set -eu
-. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
 
-usage() {
-  cat >&2 <<'EOF'
-usage: phone-wifi-enable [--check]
-
-Turns Wi-Fi on and waits until Android reports it enabled. --check reports
-without changing anything.
-EOF
-}
-
-check_only=0
-while [ $# -gt 0 ]; do
-  case $1 in
-    --check) check_only=1 ;;
-    -h | --help) usage; exit 0 ;;
-    *)
-      usage
-      die "unknown argument: $1"
-      ;;
-  esac
-  shift
-done
-
-serial=$(phone_serial) || die "no phone attached (see adb devices)"
-
-wifi_enabled() {
-  adb -s "$serial" shell cmd wifi status 2>/dev/null \
-    | tr -d '\r' | grep -q '^Wifi is enabled'
-}
-
-if wifi_enabled; then
-  log "Wi-Fi is enabled"
-  exit 0
-fi
-
-if [ "$check_only" -eq 1 ]; then
-  log "Wi-Fi is disabled"
-  exit 1
-fi
-
-adb -s "$serial" shell cmd wifi set-wifi-enabled enabled >/dev/null
-tries=0
-max_tries=${PHONE_WIFI_TRIES:-10}
-while [ $tries -lt "$max_tries" ]; do
-  sleep "${PHONE_WIFI_POLL:-1}"
-  tries=$((tries + 1))
-  if wifi_enabled; then
-    log "Wi-Fi enabled"
-    exit 0
+here=$(dirname -- "$(readlink -f -- "$0")")
+for candidate in "$here/../lib/python" "$here/../share/phone-link/lib/python"; do
+  if [ -d "$candidate/phone_link" ]; then
+    export PYTHONPATH="$candidate${PYTHONPATH:+:$PYTHONPATH}"
+    break
   fi
 done
-
-die "Wi-Fi did not come up"
+export PYTHONDONTWRITEBYTECODE=1
+exec python3 -m phone_link.commands phone-wifi-enable "$@"

@@ -1,54 +1,15 @@
 #!/usr/bin/env bash
-# Turn on IPv4 forwarding, which AP mode and the tunnel need.
-#
-#   phone-fix-forwarding            # set it now (escalates with sudo)
-#   phone-fix-forwarding --check    # report only
-#
-# The change is runtime-only; set `boot.kernel.sysctl."net.ipv4.ip_forward" = 1`
-# (or the equivalent) to keep it across reboots.
+# phone-fix-forwarding lives in ../lib/python/phone_link/commands (one function
+# per script). This wrapper only resolves the package next to the checkout or
+# the store install, then hands over to it.
 set -eu
-. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
 
-usage() {
-  cat >&2 <<'EOF'
-usage: phone-fix-forwarding [--check]
-
-Enables net.ipv4.ip_forward for the running kernel. --check only reports.
-EOF
-}
-
-check_only=0
-while [ $# -gt 0 ]; do
-  case $1 in
-    --check) check_only=1 ;;
-    -h | --help) usage; exit 0 ;;
-    *)
-      usage
-      die "unknown argument: $1"
-      ;;
-  esac
-  shift
+here=$(dirname -- "$(readlink -f -- "$0")")
+for candidate in "$here/../lib/python" "$here/../share/phone-link/lib/python"; do
+  if [ -d "$candidate/phone_link" ]; then
+    export PYTHONPATH="$candidate${PYTHONPATH:+:$PYTHONPATH}"
+    break
+  fi
 done
-
-current=$(sysctl -n net.ipv4.ip_forward 2>/dev/null || true)
-if [ "$check_only" = 1 ]; then
-  log "ip_forward: ${current:-unknown}"
-  if [ "$current" = 1 ]; then exit 0; fi
-  exit 1
-fi
-
-if [ "$current" = 1 ]; then
-  log "IPv4 forwarding is already on"
-  exit 0
-fi
-
-log "enabling IPv4 forwarding"
-if [ "$(id -u)" -eq 0 ]; then
-  sysctl -w net.ipv4.ip_forward=1 >/dev/null
-else
-  sudo -- sysctl -w net.ipv4.ip_forward=1 >/dev/null
-fi
-
-current=$(sysctl -n net.ipv4.ip_forward 2>/dev/null || true)
-[ "$current" = 1 ] || die "IPv4 forwarding is still ${current:-unknown}"
-log "IPv4 forwarding is on (runtime only; set it in the NixOS config to persist)"
+export PYTHONDONTWRITEBYTECODE=1
+exec python3 -m phone_link.commands phone-fix-forwarding "$@"

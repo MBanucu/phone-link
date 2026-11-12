@@ -1,91 +1,15 @@
 #!/usr/bin/env bash
-# Connect the phone's Wi-Fi client to a network (default PhoneLink).
-#
-#   sudo phone-wifi-connect                     connect to PhoneLink
-#   sudo phone-wifi-connect OtherNet            another SSID
-#   phone-wifi-connect --check                  report only
-#   phone-wifi-connect --password ...           override the stored password
-#
-# The password comes from --password, PHONE_AP_PASS, or PHONE_AP_PASS in the
-# root-only secrets file, so run with sudo unless it is exported.
+# phone-wifi-connect lives in ../lib/python/phone_link/commands (one function per
+# script). This wrapper only resolves the package next to the checkout or the
+# store install, then hands over to it.
 set -eu
-. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
 
-usage() {
-  cat >&2 <<'EOF'
-usage: phone-wifi-connect [SSID] [--password PASS] [--check]
-
-Joins the network with WPA2 and waits until Android reports the association.
---check only reports whether the phone is connected to the SSID.
-EOF
-}
-
-ssid=$PHONE_AP_SSID
-password=""
-check_only=0
-while [ $# -gt 0 ]; do
-  case $1 in
-    --check) check_only=1 ;;
-    --password)
-      shift
-      [ $# -gt 0 ] || die "--password needs a value"
-      password=$1
-      ;;
-    -h | --help) usage; exit 0 ;;
-    -*) usage; die "unknown argument: $1" ;;
-    *) ssid=$1 ;;
-  esac
-  shift
-done
-
-serial=$(phone_serial) || die "no phone attached (see adb devices)"
-
-connected_ssid() {
-  adb -s "$serial" shell cmd wifi status 2>/dev/null | tr -d '\r' \
-    | sed -n 's/^Wifi is connected to "\([^"]*\)".*/\1/p' | head -1
-}
-
-if [ "$check_only" -eq 1 ]; then
-  current=$(connected_ssid)
-  if [ "$current" = "$ssid" ]; then
-    log "connected to $ssid"
-    exit 0
-  fi
-  log "not connected to $ssid${current:+ (connected to $current)}"
-  exit 1
-fi
-
-if [ "$(connected_ssid)" = "$ssid" ]; then
-  log "already connected to $ssid"
-  exit 0
-fi
-
-if ! adb -s "$serial" shell cmd wifi status 2>/dev/null | tr -d '\r' \
-  | grep -q '^Wifi is enabled'; then
-  adb -s "$serial" shell cmd wifi set-wifi-enabled enabled >/dev/null
-fi
-
-[ -n "$password" ] || password=$(phone_ap_pass)
-
-# Single-quote for the remote sh, so spaces in the SSID and punctuation in the
-# passphrase survive adb's argument re-splitting.
-quote() {
-  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
-}
-
-log "connecting to $ssid"
-adb -s "$serial" shell \
-  "cmd wifi connect-network $(quote "$ssid") wpa2 $(quote "$password")" >/dev/null 2>&1 || true
-
-tries=0
-max_tries=${PHONE_WIFI_TRIES:-20}
-while [ $tries -lt "$max_tries" ]; do
-  sleep "${PHONE_WIFI_POLL:-1}"
-  tries=$((tries + 1))
-  if [ "$(connected_ssid)" = "$ssid" ]; then
-    log "connected to $ssid"
-    exit 0
+here=$(dirname -- "$(readlink -f -- "$0")")
+for candidate in "$here/../lib/python" "$here/../share/phone-link/lib/python"; do
+  if [ -d "$candidate/phone_link" ]; then
+    export PYTHONPATH="$candidate${PYTHONPATH:+:$PYTHONPATH}"
+    break
   fi
 done
-
-die "could not connect to $ssid (wrong password or network not in range?)"
+export PYTHONDONTWRITEBYTECODE=1
+exec python3 -m phone_link.commands phone-wifi-connect "$@"

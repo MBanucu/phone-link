@@ -1,122 +1,15 @@
 #!/usr/bin/env bash
-# Create or refresh the laptop AP profile from the root-only secrets.
-#
-# The Wi-Fi PSK is PHONE_AP_PASS in $PHONE_SECRETS -- the same secret
-# phone-wifi-connect uses -- so it never enters the Nix store or a shell
-# history. NetworkManager keeps the resulting profile root-only.
-#
-# With phoneLink.ap the module owns the profile: there is no nmcli add or
-# modify here, only a restart of NetworkManager-ensure-profiles so the
-# declaration (and a rotated PSK) is reloaded.
-#
-#   phone-ap-create            create phonelink if it is missing
-#   phone-ap-create --refresh  rewrite its settings and PSK (after rotation)
-#   phone-ap-create --check    report the profile and secret, change nothing
+# phone-ap-create lives in ../lib/python/phone_link/commands (one function per
+# script). This wrapper only resolves the package next to the checkout or the
+# store install, then hands over to it.
 set -eu
-. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
 
-usage() {
-  cat >&2 <<'EOF'
-usage: phone-ap-create [--refresh] [--check]
-
-Creates the NetworkManager AP profile $PHONE_AP_CON with the SSID, WPA2 PSK
-and address from PHONE_AP_SSID, PHONE_AP_PASS (in $PHONE_SECRETS) and
-PHONE_AP_ADDRESS. The PSK stays out of the Nix store. --refresh rewrites an
-existing profile, e.g. after rotating the password; --check only reports.
-
-When phoneLink.ap declares the profile, --refresh restarts the
-NetworkManager-ensure-profiles unit instead of editing NetworkManager.
-EOF
-}
-
-orig_args=("$@")
-refresh=0
-check_only=0
-while [ $# -gt 0 ]; do
-  case $1 in
-    --refresh) refresh=1 ;;
-    --check) check_only=1 ;;
-    -h | --help) usage; exit 0 ;;
-    *)
-      usage
-      die "unknown argument: $1"
-      ;;
-  esac
-  shift
+here=$(dirname -- "$(readlink -f -- "$0")")
+for candidate in "$here/../lib/python" "$here/../share/phone-link/lib/python"; do
+  if [ -d "$candidate/phone_link" ]; then
+    export PYTHONPATH="$candidate${PYTHONPATH:+:$PYTHONPATH}"
+    break
+  fi
 done
-
-profile_exists() {
-  nmcli -t -f NAME con show 2>/dev/null | grep -Fxq "$PHONE_AP_CON"
-}
-
-if [ "$check_only" = 1 ]; then
-  if profile_exists; then
-    log "$PHONE_AP_CON exists"
-  else
-    log "$PHONE_AP_CON is missing"
-  fi
-  if ap_declarative; then
-    log "$PHONE_AP_CON is declared by phoneLink.ap"
-    log "PSK source: $PHONE_SECRETS (read by $PHONE_AP_ENSURE_UNIT as root)"
-  elif [ -r "$PHONE_SECRETS" ]; then
-    log "PSK source: $PHONE_SECRETS (PHONE_AP_PASS)"
-  else
-    log "PSK source: $PHONE_SECRETS not readable (run with sudo)"
-  fi
-  profile_exists && exit 0
-  exit 1
-fi
-
-if ap_declarative; then
-  if profile_exists && [ "$refresh" = 0 ]; then
-    log "$PHONE_AP_CON is declared by phoneLink.ap and exists"
-    exit 0
-  fi
-  as_root "${orig_args[@]}"
-  log "reloading $PHONE_AP_CON from phoneLink.ap"
-  systemctl restart "$PHONE_AP_ENSURE_UNIT" \
-    || die "could not restart $PHONE_AP_ENSURE_UNIT"
-  profile_exists || die "$PHONE_AP_CON is still missing after the reload"
-  log "$PHONE_AP_CON reloaded; run phone-ap-up to activate it"
-  exit 0
-fi
-
-if profile_exists && [ "$refresh" = 0 ]; then
-  log "$PHONE_AP_CON already exists (use --refresh to rewrite its PSK)"
-  exit 0
-fi
-
-as_root "${orig_args[@]}"
-pass=$(phone_ap_pass) || exit 1
-
-if profile_exists; then
-  log "refreshing $PHONE_AP_CON from $PHONE_SECRETS"
-  nmcli connection modify "$PHONE_AP_CON" \
-    ssid "$PHONE_AP_SSID" \
-    802-11-wireless.mode ap \
-    802-11-wireless.band bg \
-    802-11-wireless.channel 1 \
-    wifi-sec.key-mgmt wpa-psk \
-    wifi-sec.psk "$pass" \
-    ipv4.method shared \
-    ipv4.addresses "$PHONE_AP_ADDRESS" \
-    || die "nmcli connection modify failed"
-else
-  log "creating $PHONE_AP_CON from $PHONE_SECRETS"
-  nmcli connection add type wifi ifname "$PHONE_AP_IF" con-name "$PHONE_AP_CON" \
-    autoconnect no \
-    ssid "$PHONE_AP_SSID" \
-    802-11-wireless.mode ap \
-    802-11-wireless.band bg \
-    802-11-wireless.channel 1 \
-    wifi-sec.key-mgmt wpa-psk \
-    wifi-sec.psk "$pass" \
-    ipv4.method shared \
-    ipv4.addresses "$PHONE_AP_ADDRESS" \
-    || die "nmcli connection add failed"
-fi
-
-profile_exists || die "$PHONE_AP_CON is still missing after create"
-mode=$(nmcli -g 802-11-wireless.mode connection show "$PHONE_AP_CON" 2>/dev/null || true)
-[ "$mode" = ap ] || die "$PHONE_AP_CON is not in AP mode (got: ${mode:-unknown})"
-log "$PHONE_AP_CON is ready; run phone-ap-up to activate it"
+export PYTHONDONTWRITEBYTECODE=1
+exec python3 -m phone_link.commands phone-ap-create "$@"

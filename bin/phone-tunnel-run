@@ -1,50 +1,15 @@
 #!/usr/bin/env bash
-# Run the phone tunnel in the foreground from the config NixOS built.
-#
-#   sudo phone-tunnel-run               upstream = the phone's AP address
-#   sudo phone-tunnel-run --via-adb     upstream = 127.0.0.1 through adb reverse
-#   sudo phone-tunnel-run --config PATH explicit sing-box config
-#
-# --via-adb is the fallback for proxy apps that only listen on 127.0.0.1 or
-# that did not bind the AP interface: adb forwards locals to the phone, so the
-# tunnel works regardless of the phone's address. It needs a live adb link.
+# phone-tunnel-run lives in ../lib/python/phone_link/commands (one function per
+# script). This wrapper only resolves the package next to the checkout or the
+# store install, then hands over to it.
 set -eu
-. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
-as_root "$@"
 
-cfg=""
-via_adb=0
-while [ $# -gt 0 ]; do
-  case $1 in
-    --config) cfg=$2; shift 2;;
-    --via-adb) via_adb=1; shift;;
-    *) die "unknown argument: $1";;
-  esac
+here=$(dirname -- "$(readlink -f -- "$0")")
+for candidate in "$here/../lib/python" "$here/../share/phone-link/lib/python"; do
+  if [ -d "$candidate/phone_link" ]; then
+    export PYTHONPATH="$candidate${PYTHONPATH:+:$PYTHONPATH}"
+    break
+  fi
 done
-
-if [ -z "$cfg" ]; then
-  cfg=$(ls -t /nix/store/*-phone-tun.json 2>/dev/null | head -1 || true)
-  [ -n "$cfg" ] || die "no built phone-tun.json; build the configuration first"
-fi
-
-sing_box=$(sed -n 's/^ExecStart=\([^ ]*sing-box\) run.*/\1/p' /etc/systemd/system/phone-tun.service 2>/dev/null)
-[ -n "$sing_box" ] || sing_box=$(command -v sing-box || true)
-[ -x "$sing_box" ] || die "sing-box binary not found"
-
-tmp=$(mktemp /run/phone-tun.XXXXXX.json)
-trap 'rm -f "$tmp"' EXIT
-# shellcheck source=/dev/null
-. "$PHONE_SECRETS"
-sed "s|@PHONE_SOCKS_PASS@|${PHONE_SOCKS_PASS:?}|" "$cfg" > "$tmp"
-chmod 600 "$tmp"
-
-if [ "$via_adb" = 1 ]; then
-  adb reverse "tcp:$PHONE_PROXY_PORT" "tcp:$PHONE_PROXY_PORT" >/dev/null \
-    || die "adb reverse failed (is adb connected?)"
-  sed -i "s|\"server\": \"[^\"]*\"|\"server\": \"127.0.0.1\"|" "$tmp"
-  log "tunnel upstream: 127.0.0.1:$PHONE_PROXY_PORT (adb reverse)"
-fi
-
-log "sing-box config: $tmp"
-log "press Ctrl-C to stop; the TUN and its routes go away with it"
-exec "$sing_box" run -c "$tmp"
+export PYTHONDONTWRITEBYTECODE=1
+exec python3 -m phone_link.commands phone-tunnel-run "$@"

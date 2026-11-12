@@ -123,10 +123,15 @@ Or straight from the checkout: `./bin/phone-net-status`.
 `phone-doctor` is a Python package under `lib/python/phone_doctor`, with one
 module per symptom group (`flake`, `host`, `phone`, `secrets`, `proxy`,
 `tunnel`, `tether`, `internet`, `adb_wifi`); `bin/phone-doctor` only resolves it.
+`lib/phone-net.sh` remains for the live harness in `tests/live`.
 
-`lib/phone-net.sh` holds the shared functions (`phone_proxy_check`, `tcp_open`,
-`phone_ips`, `adb_transport`, …); source it so addresses and ports live in one
-place.
+`lib/python/phone_link/commands` holds the CLI half: one function per `bin/`
+script, grouped by area (`status`, `phone`, `network`, `proxy`, `device`,
+`maintenance`, `doctor_fix`), with `settings`, `shell`, `phone` and `ui` as the
+shared layer. A `bin/phone-*` file is a thin shim that resolves the package next
+to the checkout or the store install and hands over to it, so the script names
+stay the contract: `phone_link.actions`, the Nix wrappers, the doctor and the
+tests all address them by name.
 
 ## GUI
 

@@ -53,8 +53,8 @@ sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/nix"
 chmod +x "$STUBS/curl" "$STUBS/google-chrome" "$STUBS/nix"
 # The script gets only the stubs: falling back to a real google-chrome or nix
 # would make the "missing binary" cases pass for the wrong reason. The stubs
-# still need these host tools.
-for tool in timeout date grep readlink dirname cat; do
+# still need these host tools, and the script's shim needs an interpreter.
+for tool in timeout date grep readlink dirname cat python3; do
   ln -sf "$(command -v "$tool")" "$STUBS/$tool"
 done
 export PATH="$STUBS:$PATH"

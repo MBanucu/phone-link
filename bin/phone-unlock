@@ -1,101 +1,15 @@
 #!/usr/bin/env bash
-# Unlock the phone's lock screen.
-#
-#   phone-unlock            wake, swipe, enter the PIN, verify it unlocked
-#   phone-unlock --check    report locked or unlocked, change nothing
-#
-# The PIN is read from $PHONE_PIN, or from PHONE_PIN in $PHONE_SECRETS
-# (root-only), so either export it or run this with sudo. Typing it goes
-# through `adb shell input text`, which is fine on a phone only you control but
-# does put the digits in the phone's process arguments for a moment.
+# phone-unlock lives in ../lib/python/phone_link/commands (one function per
+# script). This wrapper only resolves the package next to the checkout or the
+# store install, then hands over to it.
 set -eu
-. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
 
-usage() {
-  cat >&2 <<'EOF'
-usage: phone-unlock [--check]
-
-Unlocks the phone with PHONE_PIN (environment) or PHONE_PIN from
-$PHONE_SECRETS. --check only reports whether the keyguard is showing.
-EOF
-}
-
-check_only=0
-while [ $# -gt 0 ]; do
-  case $1 in
-    --check) check_only=1 ;;
-    -h | --help) usage; exit 0 ;;
-    *)
-      usage
-      die "unknown argument: $1"
-      ;;
-  esac
-  shift
-done
-
-# Two adb transports (USB and Wi-Fi) are normal here, so pin every command.
-serial=$(phone_serial) || die "no phone attached (see adb devices)"
-
-# `dumpsys window policy` prints "showing=true|false" for the keyguard.
-keyguard_showing() {
-  adb -s "$serial" shell dumpsys window policy 2>/dev/null \
-    | tr -d '\r' | sed -n 's/^ *showing=\(true\|false\)$/\1/p' | head -1
-}
-
-state=$(keyguard_showing)
-[ -n "$state" ] || die "cannot read the keyguard state from the phone"
-
-if [ "$state" = false ]; then
-  log "phone is already unlocked"
-  exit 0
-fi
-
-if [ "$check_only" = 1 ]; then
-  log "phone is locked"
-  exit 1
-fi
-
-pin=${PHONE_PIN:-}
-if [ -z "$pin" ]; then
-  [ -r "$PHONE_SECRETS" ] \
-    || die "PHONE_PIN is unset and $PHONE_SECRETS is not readable (export PHONE_PIN or run with sudo)"
-  # shellcheck disable=SC1090
-  . "$PHONE_SECRETS"
-  pin=${PHONE_PIN:-}
-fi
-[ -n "$pin" ] || die "PHONE_PIN is empty (set it in $PHONE_SECRETS or the environment)"
-case $pin in
-  *[!0-9]*) die "PHONE_PIN must be digits only" ;;
-esac
-
-# Swipe geometry from the real panel size, so this is not tied to one phone.
-size=$(adb -s "$serial" shell wm size 2>/dev/null | tr -d '\r' \
-  | sed -n 's/^Physical size: \([0-9]*\)x\([0-9]*\).*/\1 \2/p' | head -1)
-if [ -n "$size" ]; then
-  read -r width height <<<"$size"
-else
-  width=1440
-  height=3200
-fi
-x=$((width / 2))
-from_y=$((height * 78 / 100))
-to_y=$((height * 22 / 100))
-
-log "phone is locked; waking it and entering the PIN"
-adb -s "$serial" shell input keyevent KEYCODE_WAKEUP
-adb -s "$serial" shell input keyevent KEYCODE_HOME
-sleep 1
-adb -s "$serial" shell input swipe "$x" "$from_y" "$x" "$to_y" 250
-sleep 1
-adb -s "$serial" shell input text "$pin"
-adb -s "$serial" shell input keyevent KEYCODE_ENTER
-
-for _ in 1 2 3 4 5; do
-  sleep 1
-  if [ "$(keyguard_showing)" = false ]; then
-    log "unlocked"
-    exit 0
+here=$(dirname -- "$(readlink -f -- "$0")")
+for candidate in "$here/../lib/python" "$here/../share/phone-link/lib/python"; do
+  if [ -d "$candidate/phone_link" ]; then
+    export PYTHONPATH="$candidate${PYTHONPATH:+:$PYTHONPATH}"
+    break
   fi
 done
-
-die "still locked after entering the PIN (wrong PIN, or the lock screen needs a manual swipe first)"
+export PYTHONDONTWRITEBYTECODE=1
+exec python3 -m phone_link.commands phone-unlock "$@"

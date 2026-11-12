@@ -1,120 +1,15 @@
 #!/usr/bin/env bash
-# Report whether the phone supports a Wi-Fi client and its hotspot at the same
-# time (STA + AP concurrency), using only read-only adb queries.
-#
-#   phone-wifi-concurrency
-#
-# Exit 0 when supported, 1 when not supported, 2 when the phone does not say.
-# The report is capability-based; running phone-ap-up while connected to a
-# network is the only end-to-end confirmation.
+# phone-wifi-concurrency lives in ../lib/python/phone_link/commands (one
+# function per script). This wrapper only resolves the package next to the
+# checkout or the store install, then hands over to it.
 set -eu
-. "$(dirname -- "$(readlink -f -- "$0")")/../lib/phone-net.sh"
 
-usage() {
-  cat >&2 <<'EOF'
-usage: phone-wifi-concurrency
-
-Reports whether Wi-Fi client mode (STA) and hotspot mode (AP) can run at the
-same time. Read-only: nothing is enabled, disabled or tapped.
-EOF
-}
-
-while [ $# -gt 0 ]; do
-  case $1 in
-    -h | --help) usage; exit 0 ;;
-    *)
-      usage
-      die "unknown argument: $1"
-      ;;
-  esac
+here=$(dirname -- "$(readlink -f -- "$0")")
+for candidate in "$here/../lib/python" "$here/../share/phone-link/lib/python"; do
+  if [ -d "$candidate/phone_link" ]; then
+    export PYTHONPATH="$candidate${PYTHONPATH:+:$PYTHONPATH}"
+    break
+  fi
 done
-
-serial=$(phone_serial) || die "no phone attached (see adb devices)"
-
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
-wifi=$tmp/wifi.txt
-status=$tmp/status.txt
-addr=$tmp/addr.txt
-
-adb -s "$serial" shell dumpsys wifi >"$wifi" 2>/dev/null \
-  || die "could not read dumpsys wifi (is the phone authorised for adb?)"
-adb -s "$serial" shell cmd wifi status >"$status" 2>/dev/null || : >"$status"
-adb -s "$serial" shell ip -4 -o addr show >"$addr" 2>/dev/null || : >"$addr"
-sed -i 's/\r$//' "$wifi" "$status" "$addr"
-
-model=$(adb -s "$serial" shell getprop ro.product.model 2>/dev/null | tr -d '\r' | head -1)
-release=$(adb -s "$serial" shell getprop ro.build.version.release 2>/dev/null | tr -d '\r' | head -1)
-sdk=$(adb -s "$serial" shell getprop ro.build.version.sdk 2>/dev/null | tr -d '\r' | head -1)
-
-# The framework's own verdict, from dumpsys wifi: "STA + AP Concurrency
-# Supported: true|false".
-sta_ap=$(sed -n 's/^STA + AP Concurrency Supported: \(true\|false\)$/\1/p' "$wifi" | head -1)
-sta_sta=$(sed -n 's/^STA + STA Concurrency Supported: \(true\|false\)$/\1/p' "$wifi" | head -1)
-
-# The driver/HAL feature list. WIFI_FEATURE_AP_STA is advertised only when the
-# chip can keep a client link and an AP interface up together.
-features=$(sed -n 's/^SupportedFeatures: \[\(.*\)\]$/\1/p' "$wifi" | head -1 | tr -d ' ')
-case ",$features," in
-  *,WIFI_FEATURE_AP_STA,*) has_ap_sta=true ;;
-  *) has_ap_sta=false ;;
-esac
-case ",$features," in
-  *,WIFI_FEATURE_DUAL_BAND_SIMULTANEOUS,*) has_dual_band=true ;;
-  *) has_dual_band=false ;;
-esac
-
-# Whether both managers exist right now, and which interfaces are addressable.
-# Records are appended chronologically, so the last one is the current state.
-client_mgr=$(sed -n 's/.*num ClientModeManagers:\([0-9][0-9]*\).*/\1/p' "$wifi" | tail -1)
-softap_mgr=$(sed -n 's/.*num SoftApManagers:\([0-9][0-9]*\).*/\1/p' "$wifi" | tail -1)
-ap_ip=$(awk '$2 ~ /^ap/ {print $4; exit}' "$addr" | cut -d/ -f1)
-wlan_ip=$(awk '$2 ~ /^wlan/ {print $4; exit}' "$addr" | cut -d/ -f1)
-
-if grep -q '^Wifi is enabled' "$status"; then
-  wifi_state=enabled
-elif grep -q '^Wifi is disabled' "$status"; then
-  wifi_state=disabled
-else
-  wifi_state="unknown"
-fi
-ssid=$(sed -n 's/^Wifi is connected to "\([^"]*\)".*/\1/p' "$status" | head -1)
-if [ -n "$ssid" ]; then
-  wifi_state="$wifi_state, connected to \"$ssid\""
-elif grep -q '^Wifi is not connected' "$status"; then
-  wifi_state="$wifi_state, not connected"
-fi
-if [ -n "$ap_ip" ]; then
-  ap_state="active on ap0 ($ap_ip)"
-else
-  ap_state="not active"
-fi
-
-log "phone:     ${model:-unknown} (Android ${release:-?}, sdk ${sdk:-?})"
-log "framework: STA + AP concurrency = ${sta_ap:-unknown}${sta_sta:+ (STA + STA = $sta_sta)}"
-log "driver:    AP_STA feature = $has_ap_sta, simultaneous dual band = $has_dual_band"
-log "current:   Wi-Fi $wifi_state; hotspot $ap_state${client_mgr:+; managers client=$client_mgr softap=$softap_mgr}${wlan_ip:+; wlan0 $wlan_ip}"
-
-case $sta_ap in
-  true)
-    log "verdict:   Wi-Fi client and hotspot can run at the same time"
-    exit 0
-    ;;
-  false)
-    log "verdict:   Wi-Fi client and hotspot cannot run at the same time"
-    exit 1
-    ;;
-esac
-
-# No framework line (older builds): fall back to the driver feature and what the
-# managers are doing right now.
-if [ "$has_ap_sta" = true ] && [ "${client_mgr:-0}" -ge 1 ] && [ "${softap_mgr:-0}" -ge 1 ]; then
-  log "verdict:   both managers are up, so concurrency is working despite no framework line"
-  exit 0
-fi
-if [ "$has_ap_sta" = true ]; then
-  log "verdict:   the driver advertises STA+AP but the framework does not report support"
-  exit 2
-fi
-log "verdict:   no STA+AP concurrency support found"
-exit 1
+export PYTHONDONTWRITEBYTECODE=1
+exec python3 -m phone_link.commands phone-wifi-concurrency "$@"
