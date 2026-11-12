@@ -14,9 +14,9 @@ cable.
   Gradle
 - `devShells.default`, `devShells.android` (the APK toolchain), `formatter`,
   `checks`
-- `android/` — the SOCKS5 proxy APK of our own, with a panel for on-device
-  start/stop, built without Gradle: `nix develop .#android && ./android/build.sh`,
-  see `android/README.md`
+- `android/` — the SOCKS5 proxy APK of our own, with a panel and a Quick
+  Settings tile for on-device start/stop, built without Gradle:
+  `nix develop .#android && ./android/build.sh`, see `android/README.md`
 - `CHANGELOG.md` — released changes, Keep a Changelog format
 - `docs/phone-network.md` — measured behaviour, evidence and the traps
 

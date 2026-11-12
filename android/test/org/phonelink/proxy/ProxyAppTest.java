@@ -254,6 +254,14 @@ public final class ProxyAppTest {
                     ProxyState.waiting().describe(), "waiting");
         });
 
+        test("running separates a paused service from a stopped one", () -> {
+            assertTrue(!ProxyState.stopped().running, "stopped is not running");
+            assertTrue(ProxyState.waiting().running, "waiting is running");
+            assertTrue(ProxyState.paused("on another network").running, "paused is running");
+            assertTrue(ProxyState.listening(1080, 0).running, "listening is running");
+            assertTrue(!ProxyState.stopped().listening, "stopped is not listening");
+        });
+
         // --- runtime -------------------------------------------------------
 
         test("the runtime forwards state to listeners until they leave", () -> {

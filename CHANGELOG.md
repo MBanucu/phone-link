@@ -23,7 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through the same `ConfigStore` as the adb extras and reads live state from a
   shared `ProxyRuntime`, so both control paths configure one listener; the
   notification now opens the panel.
-- `tests/proxy-app.test.sh` runs 24 hermetic cases for the app (handshake,
+- The same start and stop are on a Quick Settings tile whose subtitle says
+  `listening`, `paused` or `off`. A tile click may start a foreground service
+  from the background, but Android only accepts the `location` type there when
+  the app may read location in the background, so the service asks for that
+  permission and falls back to `specialUse` instead of crashing the shade when
+  it is denied — in which case the SSID is redacted and the listener stays
+  shut.
+- `tests/proxy-app.test.sh` runs 25 hermetic cases for the app (handshake,
   credential failures, CONNECT and reply codes, relay, half-close, client
   counting, configuration rules, status text, runtime listener) on a plain JDK,
   inside the `script` check;

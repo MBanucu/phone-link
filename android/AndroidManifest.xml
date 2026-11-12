@@ -28,6 +28,12 @@
     <!-- The SSID of the current Wi-Fi is redacted without location permission
          and location switched on; the uplink predicate matches on it. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- A tile click is user interaction, which is enough to start a foreground
+         service, but Android still rejects the location service type unless the
+         app may hold location while it is in the background. Grant "Allow all
+         the time"; without it the tile starts the proxy with the SSID hidden
+         and the listener stays shut. -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -58,6 +64,19 @@
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="SOCKS5 uplink proxy for the phone-link tunnel" />
+        </service>
+
+        <!-- Quick Settings tile: the system binds it, so the permission is the
+             contract rather than a gate we apply. -->
+        <service
+            android:name=".ProxyTile"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_proxy"
+            android:label="@string/tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
         </service>
 
         <receiver

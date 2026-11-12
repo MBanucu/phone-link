@@ -11,4 +11,9 @@
     <string name="label_password">Password</string>
     <string name="label_ssid">SSID the listener may run on</string>
     <string name="label_any_network">Ignore the SSID and always listen</string>
+    <string name="tile_label">Proxy</string>
+    <string name="tile_listening">listening</string>
+    <string name="tile_paused">paused</string>
+    <string name="tile_off">off</string>
+    <string name="tile_open_app">Open the app to start the proxy</string>
 </resources>

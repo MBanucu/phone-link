@@ -6,6 +6,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
+import android.content.pm.ServiceInfo;
 import android.graphics.drawable.Icon;
 import android.os.Build;
 import android.os.IBinder;
@@ -78,7 +79,7 @@ public final class ProxyService extends Service
         }
 
         // Must happen within five seconds of startForegroundService().
-        startForeground(NOTIFICATION_ID, buildNotification("starting"));
+        beginForeground();
 
         try {
             config = ConfigStore.resolve(this, intent);
@@ -88,6 +89,29 @@ public final class ProxyService extends Service
         }
         startWatching();
         return START_STICKY;
+    }
+
+    /**
+     * The location type keeps the SSID readable while the app is not in front,
+     * which is the whole point when the tile starts us from the shade. Android
+     * refuses that type for a background start unless the app may hold location
+     * in the background, so drop it and say so rather than crash: without it the
+     * uplink cannot tell which Wi-Fi this is and the listener simply stays shut.
+     */
+    private void beginForeground() {
+        Notification notification = buildNotification("starting");
+        boolean specialUse = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE;
+        int type = ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
+        if (specialUse) {
+            type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
+        }
+        try {
+            startForeground(NOTIFICATION_ID, notification, type);
+        } catch (SecurityException e) {
+            Log.w(TAG, "no location in the background: the listener will stay shut", e);
+            startForeground(NOTIFICATION_ID, notification,
+                    specialUse ? ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE : 0);
+        }
     }
 
     @Override

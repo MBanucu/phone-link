@@ -72,13 +72,13 @@ dev shell. `debug.keystore` is created on the first build and kept, so
 
 - `tests/proxy-app.test.sh` — hermetic, plain JDK. It compiles `Upstream`,
   `Closeables`, `ProxyConfig`, `ProxyState`, `ProxyRuntime` and `Socks5Server`
-  **without** `android.jar` and runs 24 cases: method negotiation, both
+  **without** `android.jar` and runs 25 cases: method negotiation, both
   credential failures, unauthenticated mode, CONNECT for IPv4 and for a domain
   name, relaying 32 KiB, half-close, a refused command, an unknown address
   type, an upstream failure reply, client counting, a non-SOCKS greeting; the
   configuration rules (port range, credentials, anonymous, SSID, byte limits);
-  the status text the panel and the notification share; and the runtime
-  listener. This is why the code has a `Logger` seam, an `Upstream` interface
+  the status text the panel, the tile and the notification share; the runtime
+  listener; and the `running` flag the tile turns into its subtitle. This is why the code has a `Logger` seam, an `Upstream` interface
   and a config/state split instead of `Log.i`, `Egress` and string building
   inside the service — and why the `script` check carries a JDK.
 - `tests/live/proxy-app.sh` — needs a phone with a Wi-Fi client link and the
@@ -119,6 +119,30 @@ through the same `ConfigStore` as the adb extras, so both paths configure one
 listener. `anonymous` stays adb-only, because the panel always asks for a
 password; the panel's Start also re-reads the fields, so changing them and
 pressing Start restarts the listener with the new settings.
+
+The same two actions are on a Quick Settings tile: tapping "Phone link proxy"
+starts the service, tapping it again stops it, and the subtitle says what is
+happening — `listening`, `paused` (the service is up but the SSID did not
+match) or `off`. The tile follows the panel, adb and the boot receiver because
+all of them publish into the same `ProxyRuntime`.
+
+A tile click is user interaction, so the tile may start a foreground service
+from the background, but Android still refuses the `location` service type for
+such a start unless the app may read location *in the background*. Grant
+"Allow all the time" in the app's location settings (`adb install -g` does it
+for a test build). Without it the service starts with `types=specialUse`, the
+SSID reads `<unknown ssid>`, and the tile honestly says `paused`.
+
+```sh
+adb shell cmd statusbar add-tile org.phonelink.proxy/.ProxyTile
+adb shell cmd statusbar expand-settings
+adb shell cmd statusbar click-tile org.phonelink.proxy/.ProxyTile
+```
+
+`click-tile` is a no-op while the shade is closed, so expand it first; to check
+the result, `dumpsys activity services org.phonelink.proxy | grep isForeground`
+should show `types=0x40000008` (location and specialUse) and `curl` through the
+port should answer `200`.
 
 Check it:
 
