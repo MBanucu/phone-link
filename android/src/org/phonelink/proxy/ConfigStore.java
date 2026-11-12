@@ -29,6 +29,8 @@ final class ConfigStore {
     static final String EXTRA_ANY_NETWORK = "any_network";
     static final String EXTRA_AUTO_START = "auto_start";
     static final String EXTRA_ADB_WIFI = "adb_wifi";
+    /** The saved configuration to start with, see {@link #resolve}. */
+    static final String EXTRA_PROFILE = "profile";
 
     private static final String PREFS = "config";
     private static final String KEY_PORT = "port";
@@ -43,7 +45,9 @@ final class ConfigStore {
     static final String KEY_ADB_WIFI = "adb_wifi";
     static final String KEY_SELECTED_PROFILE = "selected_profile";
 
-    private static final String KEY_PROFILES = "profiles";
+    // Package-private for the same reason as KEY_AUTO_START: the panel shows a
+    // configuration the moment adb saves one.
+    static final String KEY_PROFILES = "profiles";
     private static final String PROFILE_PREFIX = "profile.";
 
     private ConfigStore() {
@@ -124,6 +128,9 @@ final class ConfigStore {
      * fields rather than a serialised blob that would need its own escaping.
      * The password is stored like the active one: private preferences of an
      * app that is not backed up.
+     *
+     * <p>A configuration is the whole panel: the listener's settings and the two
+     * service switches, so "that setup" means the same thing after a restart.
      */
     static List<String> profileNames(Context context) {
         Set<String> names = prefs(context).getStringSet(KEY_PROFILES, null);
@@ -147,7 +154,12 @@ final class ConfigStore {
                 prefs.getBoolean(profileKey(name, KEY_ANONYMOUS), false));
     }
 
-    static void saveProfile(Context context, String name, ProxyConfig config) {
+    static void saveProfile(
+            Context context,
+            String name,
+            ProxyConfig config,
+            boolean autoStart,
+            boolean adbWireless) {
         Set<String> names = new HashSet<>(profileNames(context));
         names.add(name);
         prefs(context)
@@ -159,7 +171,19 @@ final class ConfigStore {
                 .putBoolean(profileKey(name, KEY_ANONYMOUS), config.anonymous)
                 .putString(profileKey(name, KEY_SSID), config.ssid)
                 .putBoolean(profileKey(name, KEY_ANY_NETWORK), config.anyNetwork)
+                .putBoolean(profileKey(name, KEY_AUTO_START), autoStart)
+                .putBoolean(profileKey(name, KEY_ADB_WIFI), adbWireless)
                 .apply();
+    }
+
+    /** Whether the saved configuration wants the service to survive a reboot. */
+    static boolean profileAutoStart(Context context, String name) {
+        return prefs(context).getBoolean(profileKey(name, KEY_AUTO_START), false);
+    }
+
+    /** Whether the saved configuration manages wireless debugging. */
+    static boolean profileAdbWireless(Context context, String name) {
+        return prefs(context).getBoolean(profileKey(name, KEY_ADB_WIFI), true);
     }
 
     static void deleteProfile(Context context, String name) {
@@ -176,6 +200,8 @@ final class ConfigStore {
                 .remove(profileKey(name, KEY_ANONYMOUS))
                 .remove(profileKey(name, KEY_SSID))
                 .remove(profileKey(name, KEY_ANY_NETWORK))
+                .remove(profileKey(name, KEY_AUTO_START))
+                .remove(profileKey(name, KEY_ADB_WIFI))
                 .apply();
     }
 
@@ -197,6 +223,22 @@ final class ConfigStore {
      * top, validated and persisted.
      */
     static ProxyConfig resolve(Context context, Intent intent) {
+        // A saved configuration replaces the stored one before the extras are
+        // applied, so `START --es profile hotel --es port 1081` means "that
+        // configuration on another port" rather than a mix of the two.
+        if (intent != null && intent.hasExtra(EXTRA_PROFILE)) {
+            String name = value(intent.getStringExtra(EXTRA_PROFILE));
+            ProxyConfig saved = profile(context, name);
+            if (saved == null) {
+                throw new IllegalArgumentException(
+                        "no saved configuration called \"" + name + "\"");
+            }
+            save(context, saved);
+            // The two service switches belong to a configuration as well; an
+            // explicit --ez auto_start/--ez adb_wifi still overrides them below.
+            setAutoStart(context, profileAutoStart(context, name));
+            setAdbWireless(context, profileAdbWireless(context, name));
+        }
         ProxyConfig stored = load(context);
         int port = stored.port;
         String user = stored.user;

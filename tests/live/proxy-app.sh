@@ -15,11 +15,15 @@
 #      through Reset, so the form matches the running service first),
 #   8. require an unrelated SSID to keep the port closed with the service up,
 #   9. require any_network=true to bypass the predicate,
-#  10. stop it,
-#  11. start and stop it from the Quick Settings tile, which needs the phone
+#  10. save the running configuration with SAVE_PROFILE, require dumpsys and
+#      the panel's Saved page to list it, start it again by name after moving
+#      the listener somewhere else, and require an unknown name to start
+#      nothing,
+#  11. stop it,
+#  12. start and stop it from the Quick Settings tile, which needs the phone
 #      unlocked: the shade ignores clicks on a locked screen, so that step is
 #      skipped there,
-#  12. uninstall (KEEP_APP=1 keeps it installed).
+#  13. uninstall (KEEP_APP=1 keeps it installed).
 #
 #   tests/live/proxy-app.sh
 #
@@ -83,9 +87,35 @@ cleanup() {
 trap cleanup EXIT
 
 start_app() {
+  # anonymous is pinned: a configuration a previous run left in the store must
+  # not turn the test's listener into an open relay.
   shell am start-foreground-service -n "$SERVICE" -a "$START" \
-    --ei port "$PORT" --es user "$USER_NAME" --es password "$PASSWORD" "$@" \
-    >/dev/null 2>&1
+    --ei port "$PORT" --es user "$USER_NAME" --es password "$PASSWORD" \
+    --ez anonymous false "$@" >/dev/null 2>&1
+}
+
+# The listener is rebuilt asynchronously after Start, so poll for the state
+# instead of sleeping and hoping. "no" also requires that the credentials do
+# get through, since a closed port would refuse a bare request as well.
+wait_anonymous() { # wait_anonymous yes|no
+  local want=$1 free i
+  for i in $(seq 15); do
+    if curl -sS -m 3 -o /dev/null --socks5-hostname "$ADDRESS:$PORT" \
+      https://example.com >/dev/null 2>&1; then
+      free=yes
+    else
+      free=no
+    fi
+    if [ "$free" = "$want" ]; then
+      if [ "$want" = no ] && ! through_proxy; then
+        sleep 1
+        continue
+      fi
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
 }
 
 foreground() { shell dumpsys activity services "$PKG" | grep -q 'isForeground=true'; }
@@ -104,9 +134,10 @@ panel_auto_start_checked() {
   shell cat /sdcard/proxy-app-ui.xml | grep -q 'id/auto_start"[^/]*checked="true"'
 }
 
-# The panel is taller than the screen, and uiautomator only reports what is on
-# it, so every control is found by scrolling. Drags start on the right edge,
-# outside the edit fields, so the ScrollView owns the gesture.
+# The panel shows one page at a time behind the menu at the top, and
+# uiautomator only reports what is on screen, so a control is looked for after
+# switching to its page and, inside a page, by scrolling. Drags start on the
+# right edge, outside the edit fields, so the page's ScrollView owns them.
 ui_dump() {
   shell uiautomator dump /sdcard/proxy-app-ui.xml >/dev/null 2>&1 || return 1
   shell cat /sdcard/proxy-app-ui.xml | tr -d '\r'
@@ -125,6 +156,20 @@ ui_bounds() { # ui_bounds ID -> "x y" of the node's centre
 
 panel_top() {
   for _ in 1 2 3 4; do shell input swipe 1390 700 1390 2200 150; done
+  sleep 1
+}
+
+panel_tab() { # panel_tab Selection -> taps that page in the menu
+  local x y
+  x=""
+  y=""
+  read -r x y <<EOF
+$(ui_dump | tr '>' '\n' | grep "text=\"$1\"" | head -1 |
+  sed -n 's/.*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/p' |
+  awk '{ if (NF == 4) print int(($1 + $3) / 2), int(($2 + $4) / 2) }')
+EOF
+  [ -n "$x" ] || return 1
+  shell input tap "$x" "$y"
   sleep 1
 }
 
@@ -254,13 +299,16 @@ else
 fi
 shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
 sleep 1
-if panel_auto_start_checked; then ok 'the panel shows auto_start on'; else
+if panel_tab Service && panel_auto_start_checked; then
+  ok 'the panel shows auto_start on'
+else
   bad 'the panel shows auto_start on'
 fi
 
 step 'panel state'
 shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
 sleep 1
+panel_tab Service
 state=$(ui_text_seek adb_state)
 case $state in
   'Wireless debugging: on'*|'Wireless debugging: off'*|\
@@ -282,12 +330,11 @@ else
 fi
 
 step 'anonymous from the panel'
+panel_tab Listener
 # Reset first: the adb-driven steps above changed what the service runs with,
 # while the panel still holds the values it was created with.
 if panel_tap reset && panel_tap anonymous && panel_tap start; then
-  sleep 3
-  if curl -sS -m 10 -o /dev/null --socks5-hostname "$ADDRESS:$PORT" \
-    https://example.com >/dev/null 2>&1; then
+  if wait_anonymous yes; then
     ok 'the anonymous checkbox is applied by Start'
   else
     bad 'the anonymous checkbox is applied by Start'
@@ -296,17 +343,15 @@ if panel_tap reset && panel_tap anonymous && panel_tap start; then
   # credentials again, and nobody without them does.
   panel_tap anonymous
   panel_tap start
-  sleep 3
-  if through_proxy; then
+  if wait_anonymous no; then
     ok 'unticking it asks for a password again'
   else
     bad 'unticking it asks for a password again'
   fi
-  if curl -sS -m 10 -o /dev/null --socks5-hostname "$ADDRESS:$PORT" \
-    https://example.com >/dev/null 2>&1; then
-    bad 'without the checkbox a password is required'
+  if through_proxy; then
+    ok 'and the credentials still work'
   else
-    ok 'without the checkbox a password is required'
+    bad 'and the credentials still work'
   fi
 else
   bad 'the panel controls are reachable'
@@ -324,6 +369,86 @@ step 'predicate bypass'
 start_app --es ssid "not-$SSID" --ez any_network true
 sleep 2
 if through_proxy; then ok 'any_network serves requests'; else bad 'any_network serves requests'; fi
+
+step 'profiles over adb'
+start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
+sleep 2
+save_profile() {
+  shell am start-foreground-service -n "$SERVICE" \
+    -a org.phonelink.proxy.action.SAVE_PROFILE --es profile "$1" >/dev/null 2>&1
+  sleep 2
+}
+if save_profile harness-one; then
+  if phone logcat -d -s phone-link-proxy | grep -q 'saved configuration "harness-one"'; then
+    ok 'SAVE_PROFILE keeps the running configuration'
+  else
+    bad 'SAVE_PROFILE keeps the running configuration'
+  fi
+  if shell dumpsys activity service "$SERVICE" | grep -q '"harness-one" — port'; then
+    ok 'dumpsys lists what is saved'
+  else
+    bad 'dumpsys lists what is saved'
+  fi
+  shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
+  sleep 1
+  panel_tab Saved
+  if ui_dump | tr '>' '\n' | grep -q 'text="harness-one"'; then
+    ok 'the panel lists a configuration saved over adb'
+  else
+    bad 'the panel lists a configuration saved over adb'
+  fi
+  # Move the running configuration somewhere else, then start the saved one by
+  # name: it has to come back exactly as it was saved.
+  start_app --es ssid "$SSID" --ez any_network false --ei port 19999
+  sleep 2
+  shell am start-foreground-service -n "$SERVICE" \
+    -a org.phonelink.proxy.action.START --es profile harness-one >/dev/null 2>&1
+  sleep 3
+  if through_proxy; then
+    ok 'START --es profile brings a saved configuration back'
+  else
+    bad 'START --es profile brings a saved configuration back'
+  fi
+  # A configuration is the whole panel, so the two service switches come back
+  # with it: turn them off, start the saved one by name, and read the store's
+  # answer out of dumpsys.
+  start_app --es ssid "$SSID" --ez any_network false --ez auto_start false \
+    --ez adb_wifi false
+  sleep 2
+  shell am start-foreground-service -n "$SERVICE" \
+    -a org.phonelink.proxy.action.START --es profile harness-one >/dev/null 2>&1
+  sleep 3
+  now=$(shell dumpsys activity service "$SERVICE")
+  if printf '%s\n' "$now" | grep -q 'auto-start  true'; then
+    ok 'the saved auto-start comes back with the configuration'
+  else
+    bad 'the saved auto-start comes back with the configuration'
+  fi
+  if printf '%s\n' "$now" | grep -q 'adb_wifi    true'; then
+    ok 'the saved wireless-debugging switch comes back with it'
+  else
+    bad 'the saved wireless-debugging switch comes back with it'
+  fi
+  shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
+  sleep 2
+  shell am start-foreground-service -n "$SERVICE" \
+    -a org.phonelink.proxy.action.START --es profile harness-absent >/dev/null 2>&1
+  sleep 2
+  if port_closed; then
+    ok 'an unknown profile name starts nothing'
+  else
+    bad 'an unknown profile name starts nothing'
+  fi
+  if phone logcat -d -s phone-link-proxy |
+    grep -q 'no saved configuration called "harness-absent"'; then
+    ok 'and says why'
+  else
+    bad 'and says why'
+  fi
+  # Leave the harness on the configuration the remaining steps expect.
+  start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
+  sleep 2
+fi
 
 step 'stop'
 shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1

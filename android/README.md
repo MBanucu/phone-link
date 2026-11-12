@@ -198,6 +198,11 @@ setting, so it needs the one permission adb can hand out:
 adb shell pm grant org.phonelink.proxy android.permission.WRITE_SECURE_SETTINGS
 ```
 
+The panel is one screen with three pages behind a menu — `Listener`, `Saved`
+and `Service` — while the state lines above and `Start`/`Stop` below never
+move, so nothing has to be scrolled to reach a button: everything that was
+spread over a scrolling form fits one page at a time.
+
 The panel starts with two lines of fact rather than intent: what the service is
 doing (`listening on 0.0.0.0:1081 · 0 clients`), and what it is doing it with —
 `In use: port 1081 · SSID PhoneLink · user proxy`, or `Last started: …` when it
@@ -209,15 +214,19 @@ Saved configurations sit under it, like a site manager: `Save as…` asks for a
 name and keeps the form under it (a name that already exists is only
 overwritten after asking, unless it is the selected one, which is the ordinary
 "save again"), the picker lists what is saved and the line below it says what
-the selected one holds (`Holds: port 1081 · SSID PhoneLink · user proxy`, never
-the password), `Load` puts it into the form without starting anything or
-storing it, and `Delete` removes one after a confirmation. The selection is
-remembered across restarts. Configurations cover the listener only; the two
-switches below the form (auto-start, wireless debugging) say what the service
-does, not what a configuration is.
+the selected one holds (`Holds: port 1081 · SSID PhoneLink · user proxy ·
+auto-start on · wireless debugging on`, never the password), `Load` puts it
+into the form without starting anything or storing it, and `Delete` removes one
+after a confirmation. The selection is remembered across restarts. A
+configuration is the whole panel, the two service switches included, so a
+loaded one is a draft of exactly what `Start` would apply — pressing it writes
+the switches as well.
 
 Both preference checkboxes follow the store, so `--ez auto_start …` or
 `--ez adb_wifi …` while the panel is open shows up there without reopening it.
+Ticking wireless debugging stores it at once — it only changes what happens on
+the next SSID match — while auto-start, and everything a saved configuration
+brought, waits for Start and shows `Not applied yet — press Start`.
 Under the wireless-debugging checkbox a line says what Android is doing right
 now (`Wireless debugging: on — adb can reach the phone`), and why the app cannot
 help when the permission was never granted. Everything else on the panel is
@@ -289,9 +298,25 @@ sticky restart or the boot receiver reuses them:
 | `any_network` (`--ez`) | `false` | ignore the predicate and always listen (tests) |
 | `auto_start` (`--ez`) | `false` | come back after a reboot and stay up (the SSID still gates the port) |
 | `adb_wifi` (`--ez`) | `true` | turn wireless debugging back on when the phone joins the SSID (needs `WRITE_SECURE_SETTINGS`) |
+| `profile` (`--es`) | — | the saved configuration to start from; the extras above are applied on top of it |
 
 Every extra is persisted, so a later start without one reuses the stored value;
 pass it explicitly to change a setting.
+
+A configuration the service already has can be kept under a name, which is what
+the panel's `Save as…` does and what an agent does without a screen:
+
+```sh
+adb shell am start-foreground-service -n org.phonelink.proxy/.ProxyService \
+    -a org.phonelink.proxy.action.SAVE_PROFILE --es profile hotel
+```
+
+Saving does not disturb a running listener. `dumpsys` lists what is saved with
+the two switches each one holds, the panel's `Saved` page shows the same names,
+and `START --es profile hotel` starts that configuration again later, on any
+port or SSID the same command adds on top. An unknown name starts nothing and
+logs `no saved configuration called "hotel"`; a name that already exists is
+replaced, which is the "save again" the panel asks about and adb does not.
 
 Passing the credential on the `am` command line puts it in the shell process's
 argv for the moment the command runs — the same exposure as any `adb shell`

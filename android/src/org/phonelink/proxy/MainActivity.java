@@ -22,6 +22,7 @@ import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.RadioGroup;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -37,6 +38,9 @@ import java.util.List;
  * match needs.
  */
 public final class MainActivity extends Activity implements ProxyRuntime.Listener {
+
+    /** Which page the menu had selected, so a rotation does not send it home. */
+    private static final String STATE_TAB = "tab";
 
     private EditText port;
     private EditText user;
@@ -57,8 +61,14 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     private TextView profileSummary;
     private Button loadButton;
     private Button deleteButton;
+    private RadioGroup tabs;
+    private View listenerPage;
+    private View savedPage;
+    private View servicePage;
     private ArrayAdapter<String> profileNames;
     private String selectedProfile;
+    /** Set while a configuration is put into the form, so nothing is stored. */
+    private boolean loading;
 
     /**
      * The two preferences behind the checkboxes can also be changed over adb
@@ -74,6 +84,9 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
                     autoStart.setChecked(ConfigStore.autoStart(this));
                 } else if (ConfigStore.KEY_SELECTED_PROFILE.equals(key)) {
                     return;
+                } else if (ConfigStore.KEY_PROFILES.equals(key)) {
+                    // A configuration saved over adb is a new name in the picker.
+                    refreshProfiles();
                 } else {
                     // A configuration the service just stored: show it as in use
                     // without touching the form, which may be mid-edit.
@@ -114,6 +127,11 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         profileSummary = findViewById(R.id.profile_summary);
         loadButton = findViewById(R.id.load_profile);
         deleteButton = findViewById(R.id.delete_profile);
+        tabs = findViewById(R.id.tabs);
+        listenerPage = findViewById(R.id.page_listener);
+        savedPage = findViewById(R.id.page_saved);
+        servicePage = findViewById(R.id.page_service);
+        tabs.setOnCheckedChangeListener((group, checked) -> showPage(checked));
 
         profileNames = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item);
         profileNames.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
@@ -151,13 +169,21 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         watchForEdits();
         // The battery line is only a warning while auto-start promises a
         // restart the app cannot deliver.
-        autoStart.setOnCheckedChangeListener((button, checked) -> renderBattery());
+        autoStart.setOnCheckedChangeListener((button, checked) -> {
+            renderBattery();
+            renderPending();
+        });
         adbWireless.setChecked(ConfigStore.adbWireless(this));
         // Unlike the fields above this is one preference, not part of a start:
         // it takes effect on the next SSID match either way, so saving it now
         // is what the checkbox appears to promise.
         adbWireless.setOnCheckedChangeListener((button, checked) -> {
+            if (loading) {
+                // A loaded configuration is a draft until Start, like the fields.
+                return;
+            }
             ConfigStore.setAdbWireless(this, checked);
+            renderPending();
             if (checked && !AdbWireless.granted(this)) {
                 Toast.makeText(this, R.string.adb_wifi_ungranted, Toast.LENGTH_LONG).show();
             }
@@ -171,9 +197,30 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         render(ProxyRuntime.state());
         renderPending();
         refreshProfiles();
+        tabs.check(savedInstanceState == null
+                ? R.id.tab_listener
+                : savedInstanceState.getInt(STATE_TAB, R.id.tab_listener));
+        // check() only reports a change, so a page restored by the framework
+        // would otherwise stay hidden.
+        showPage(tabs.getCheckedRadioButtonId());
         if (getIntent().getBooleanExtra(Help.EXTRA_HELP, false)) {
             showHelp();
         }
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.putInt(STATE_TAB, tabs.getCheckedRadioButtonId());
+    }
+
+    /** The menu: exactly one page is up, so nothing has to be scrolled past. */
+    private void showPage(int checked) {
+        boolean saved = checked == R.id.tab_saved;
+        boolean service = checked == R.id.tab_service;
+        listenerPage.setVisibility(saved || service ? View.GONE : View.VISIBLE);
+        savedPage.setVisibility(saved ? View.VISIBLE : View.GONE);
+        servicePage.setVisibility(service ? View.VISIBLE : View.GONE);
     }
 
     /** The panel is already up and adb asked for the help again. */
@@ -256,17 +303,26 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
 
     /** Put the configuration in use back into the form, dropping any edits. */
     private void resetToActive() {
-        loadIntoFields(ConfigStore.load(this));
+        loadIntoFields(ConfigStore.load(this), ConfigStore.autoStart(this),
+                ConfigStore.adbWireless(this));
         renderPending();
     }
 
-    private void loadIntoFields(ProxyConfig config) {
-        port.setText(Integer.toString(config.port));
-        user.setText(config.user);
-        password.setText(config.password);
-        ssid.setText(config.ssid);
-        anonymous.setChecked(config.anonymous);
-        anyNetwork.setChecked(config.anyNetwork);
+    /** The whole panel: the listener's settings and the two service switches. */
+    private void loadIntoFields(ProxyConfig config, boolean autoStartOn, boolean adbOn) {
+        loading = true;
+        try {
+            port.setText(Integer.toString(config.port));
+            user.setText(config.user);
+            password.setText(config.password);
+            ssid.setText(config.ssid);
+            anonymous.setChecked(config.anonymous);
+            anyNetwork.setChecked(config.anyNetwork);
+            autoStart.setChecked(autoStartOn);
+            adbWireless.setChecked(adbOn);
+        } finally {
+            loading = false;
+        }
     }
 
     /** A saved configuration into the form; nothing is started or stored. */
@@ -277,7 +333,8 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         if (saved == null) {
             return;
         }
-        loadIntoFields(saved);
+        loadIntoFields(saved, ConfigStore.profileAutoStart(this, selectedProfile),
+                ConfigStore.profileAdbWireless(this, selectedProfile));
         renderPending();
     }
 
@@ -316,7 +373,8 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
                 : ConfigStore.profile(this, selectedProfile);
         profileSummary.setText(saved == null
                 ? getString(R.string.profiles_none)
-                : getString(R.string.profile_holds, saved.summary()));
+                : getString(R.string.profile_holds, saved.summary()
+                        + serviceSummary(selectedProfile)));
     }
 
     private void askProfileName() {
@@ -366,8 +424,16 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         storeProfile(name, config);
     }
 
+    /** The two service switches of a saved configuration, for the summary. */
+    private String serviceSummary(String name) {
+        return " · auto-start " + (ConfigStore.profileAutoStart(this, name) ? "on" : "off")
+                + " · wireless debugging "
+                + (ConfigStore.profileAdbWireless(this, name) ? "on" : "off");
+    }
+
     private void storeProfile(String name, ProxyConfig config) {
-        ConfigStore.saveProfile(this, name, config);
+        ConfigStore.saveProfile(this, name, config, autoStart.isChecked(),
+                adbWireless.isChecked());
         ConfigStore.setSelectedProfile(this, name);
         refreshProfiles();
         Toast.makeText(this, getString(R.string.profile_saved, name), Toast.LENGTH_SHORT).show();
@@ -437,7 +503,11 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
                 || !passwordNow.equals(stored.password)
                 || !ssid.getText().toString().equals(stored.ssid)
                 || anonymousNow != stored.anonymous
-                || anyNetwork.isChecked() != stored.anyNetwork;
+                || anyNetwork.isChecked() != stored.anyNetwork
+                // The switches are part of a configuration too; a loaded one
+                // is a draft until Start writes them.
+                || autoStart.isChecked() != ConfigStore.autoStart(this)
+                || adbWireless.isChecked() != ConfigStore.adbWireless(this);
     }
 
     /**
@@ -514,6 +584,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         }
         ConfigStore.save(this, config);
         ConfigStore.setAutoStart(this, autoStart.isChecked());
+        ConfigStore.setAdbWireless(this, adbWireless.isChecked());
         renderActive();
         renderPending();
         if (autoStart.isChecked() && !batteryExempt()) {

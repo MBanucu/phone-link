@@ -23,6 +23,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "no phone attached" is reported only when the phone really is absent.
   `PHONE_ADB_MDNS=0` disables the lookup.
 
+### Changed
+
+- The panel fits one screen. The state lines and `Start`/`Stop` are fixed at the
+top and bottom and the middle is a menu of three pages — `Listener`, `Saved`,
+`Service` — so nothing has to be scrolled to reach a button; the pages are
+remembered across a rotation. Everything the old form held is on one page at a
+time, and the pages scroll only if a smaller screen needs it.
+- A saved configuration is the whole panel, not half of it: the two service
+  switches (auto-start, wireless debugging) are stored and restored with the
+  listener's fields, the `Holds:` line names them, and loading one leaves the
+  switches as a draft until Start, like the fields (measured: loading a saved
+  configuration with both off flips both boxes, shows `Not applied yet`, and
+  leaves the running service on its own values).
+- Saving and loading configurations over adb: `SAVE_PROFILE` keeps what the
+  service has under `--es profile NAME` without disturbing a running listener,
+  `START --es profile NAME` starts that configuration again with any other
+  extra applied on top, `dumpsys` lists what is saved with each one's switches,
+  and an unknown name starts nothing and says so. Measured on the phone: a
+  profile holding `auto-start on · wireless debugging on` brought both back to
+  `true` after they had been set to `false`.
+
 ### Added
 
 - The app explains itself. An `Info` button next to the panel's state line

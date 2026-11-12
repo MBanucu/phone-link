@@ -16,6 +16,7 @@ import android.util.Log;
 import java.io.FileDescriptor;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -39,6 +40,8 @@ public final class ProxyService extends Service
 
     static final String ACTION_START = "org.phonelink.proxy.action.START";
     static final String ACTION_STOP = "org.phonelink.proxy.action.STOP";
+    /** Keep the configuration the service has under a name, and stop. */
+    static final String ACTION_SAVE_PROFILE = "org.phonelink.proxy.action.SAVE_PROFILE";
 
     private static final int NOTIFICATION_ID = 1;
     private static final int ERROR_NOTIFICATION_ID = 2;
@@ -54,6 +57,8 @@ public final class ProxyService extends Service
     private Uplink uplink;
     private ProxyConfig config;
     private ProxyState state = ProxyState.stopped();
+    /** Whether this instance has already been asked to do something. */
+    private boolean startedBefore;
 
     @Override
     public void onCreate() {
@@ -76,13 +81,23 @@ public final class ProxyService extends Service
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? ACTION_START : intent.getAction();
         boolean stopping = ACTION_STOP.equals(action);
+        boolean saving = ACTION_SAVE_PROFILE.equals(action);
+        // A service that was already doing something is not restarted by a
+        // save, and a start that only came for the save has to go away again.
+        boolean first = !startedBefore;
+        startedBefore = true;
 
         // Must happen within five seconds of startForegroundService(), which is
         // how the scripts deliver a stop as well: a stop that skipped this was
         // reported as a foreground service that never reached the foreground.
-        boolean foreground = beginForeground(stopping ? "stopping" : "starting");
+        boolean foreground = beginForeground(
+                stopping ? "stopping" : saving ? "saving" : "starting");
         if (stopping) {
             stopSelf();
+            return START_NOT_STICKY;
+        }
+        if (saving) {
+            saveCurrent(intent, first);
             return START_NOT_STICKY;
         }
         if (!foreground) {
@@ -163,6 +178,19 @@ public final class ProxyService extends Service
         writer.println("  auto-start  " + ConfigStore.autoStart(this));
         writer.println("  adb_wifi    " + ConfigStore.adbWireless(this)
                 + " (Android's switch is " + (AdbWireless.on(this) ? "on" : "off") + ")");
+        List<String> saved = ConfigStore.profileNames(this);
+        if (saved.isEmpty()) {
+            writer.println("  saved       none");
+        }
+        for (String name : saved) {
+            ProxyConfig profile = ConfigStore.profile(this, name);
+            writer.println("  saved       \"" + name + "\" — "
+                    + (profile == null ? "?" : profile.summary())
+                    + " · auto-start "
+                    + (ConfigStore.profileAutoStart(this, name) ? "on" : "off")
+                    + " · wireless debugging "
+                    + (ConfigStore.profileAdbWireless(this, name) ? "on" : "off"));
+        }
         writer.flush();
     }
 
@@ -208,6 +236,32 @@ public final class ProxyService extends Service
         } else {
             stopListening();
             publish(ProxyState.paused(why));
+        }
+    }
+
+    /**
+     * {@code SAVE_PROFILE} keeps the configuration the service has under a name,
+     * so an agent can configure the listener once and then start it by name.
+     * The same store as the panel's {@code Save as…}, so either sees the other.
+     */
+    private void saveCurrent(Intent intent, boolean first) {
+        String name = intent == null
+                ? ""
+                : intent.getStringExtra(ConfigStore.EXTRA_PROFILE);
+        name = name == null ? "" : name.trim();
+        if (name.isEmpty()) {
+            fail(getString(R.string.error_profile_name));
+            return;
+        }
+        ConfigStore.saveProfile(this, name, ConfigStore.load(this),
+                ConfigStore.autoStart(this), ConfigStore.adbWireless(this));
+        Log.i(TAG, "saved configuration \"" + name + "\"");
+        if (first) {
+            stopSelf();
+        } else {
+            // Saving a name is not a restart: a running proxy keeps running and
+            // just gets its notification text back.
+            publish(state);
         }
     }
 

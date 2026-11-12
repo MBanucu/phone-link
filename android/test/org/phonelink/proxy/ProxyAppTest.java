@@ -249,11 +249,13 @@ public final class ProxyAppTest {
             String text = Help.text();
             for (String extra : List.of("--ei port", "--es user", "--es password",
                     "--es ssid", "--ez anonymous", "--ez any_network",
-                    "--ez auto_start", "--ez adb_wifi")) {
+                    "--ez auto_start", "--ez adb_wifi", "--es profile")) {
                 assertTrue(text.contains(extra), "help does not mention " + extra);
             }
             assertTrue(text.contains("org.phonelink.proxy.action.START"), "no start action");
             assertTrue(text.contains("org.phonelink.proxy.action.STOP"), "no stop action");
+            assertTrue(text.contains("org.phonelink.proxy.action.SAVE_PROFILE"),
+                    "no save-profile action");
             // The panel and the service print this same text, so the command
             // that reaches it from adb has to be in it.
             assertTrue(text.contains(Help.ADB_DUMP), "help does not say how to print it");

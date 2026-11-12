@@ -248,8 +248,10 @@ tunnel, requires a wrong password to be refused, requires the panel's "Listen
 without authentication" checkbox to drop the password on Start and unticking
 it to demand one again, requires an unrelated SSID to keep the port closed
 while the service stays up, requires `any_network=true` to bypass the
-predicate, stops it, then starts and stops it again from the
-Quick Settings tile (skipped when the phone stays locked, since the shade
+predicate, saves the running configuration over adb and requires `dumpsys` and
+the panel to list it, starts it again by name (the two service switches come
+back with it) and requires an unknown name to start nothing, stops it, then
+starts and stops it again from the Quick Settings tile (skipped when the phone stays locked, since the shade
 ignores clicks there) and uninstalls. It leaves the vendored proxy alone
 (`KEEP_APP=1` keeps the new app installed, `PROXY_APP_PORT` picks another port).
 
