@@ -44,6 +44,8 @@ public final class ProxyService extends Service
     static final String ACTION_SAVE_PROFILE = "org.phonelink.proxy.action.SAVE_PROFILE";
     /** Remove a saved configuration by name. */
     static final String ACTION_DELETE_PROFILE = "org.phonelink.proxy.action.DELETE_PROFILE";
+    /** Give a saved configuration another name: --es profile OLD --es to NEW. */
+    static final String ACTION_RENAME_PROFILE = "org.phonelink.proxy.action.RENAME_PROFILE";
 
     private static final int NOTIFICATION_ID = 1;
     private static final int ERROR_NOTIFICATION_ID = 2;
@@ -85,6 +87,7 @@ public final class ProxyService extends Service
         boolean stopping = ACTION_STOP.equals(action);
         boolean saving = ACTION_SAVE_PROFILE.equals(action);
         boolean deleting = ACTION_DELETE_PROFILE.equals(action);
+        boolean renaming = ACTION_RENAME_PROFILE.equals(action);
         // A service that was already doing something is not restarted by a
         // save or a delete, and a start that only came for one has to go away
         // again.
@@ -96,7 +99,9 @@ public final class ProxyService extends Service
         // reported as a foreground service that never reached the foreground.
         boolean foreground = beginForeground(stopping
                 ? "stopping"
-                : saving ? "saving" : deleting ? "deleting" : "starting");
+                : saving ? "saving"
+                : deleting ? "deleting"
+                : renaming ? "renaming" : "starting");
         if (stopping) {
             stopSelf();
             return START_NOT_STICKY;
@@ -107,6 +112,10 @@ public final class ProxyService extends Service
         }
         if (deleting) {
             deleteSaved(intent, first);
+            return START_NOT_STICKY;
+        }
+        if (renaming) {
+            renameSaved(intent, first);
             return START_NOT_STICKY;
         }
         if (!foreground) {
@@ -318,6 +327,40 @@ public final class ProxyService extends Service
         }
         EventLog.addTo(name, "deleted \"" + name + "\"");
         Log.i(TAG, "deleted configuration \"" + name + "\"");
+        if (first) {
+            stopSelf();
+        } else {
+            publish(state);
+        }
+    }
+
+    /** {@code RENAME_PROFILE}: the panel's Rename, without the screen. */
+    private void renameSaved(Intent intent, boolean first) {
+        String name = intent == null
+                ? ""
+                : intent.getStringExtra(ConfigStore.EXTRA_PROFILE);
+        String to = intent == null ? "" : intent.getStringExtra(ConfigStore.EXTRA_TO);
+        name = name == null ? "" : name.trim();
+        to = to == null ? "" : to.trim();
+        if (name.isEmpty() || to.isEmpty()) {
+            fail(getString(R.string.error_profile_name));
+            return;
+        }
+        if (ConfigStore.profile(this, name) == null) {
+            fail(getString(R.string.error_profile_missing, name));
+            return;
+        }
+        if (!ConfigStore.renameProfile(this, name, to)) {
+            fail(getString(R.string.error_profile_exists, to));
+            return;
+        }
+        EventLog.addTo(to, "renamed \"" + name + "\" to \"" + to + "\"");
+        // A proxy that is running under the old name keeps logging under the
+        // new one instead of a name that no longer exists.
+        if (state.running && to.equals(ConfigStore.inUse(this))) {
+            EventLog.setActiveTag(to);
+        }
+        Log.i(TAG, "renamed configuration \"" + name + "\" to \"" + to + "\"");
         if (first) {
             stopSelf();
         } else {

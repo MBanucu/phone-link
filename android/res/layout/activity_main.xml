@@ -1,19 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Two screens. Home is the list of saved proxies — the thing the app is for —
-  and one of them is opened for the settings and the log of that proxy. The
-  header keeps the warning mark, the Info button and the menu; the state is one
-  small line above the buttons at the bottom instead of a block at the top, so
-  the list gets the room.
+  Two screens. Home is the list of proxies; a proxy opens into three segments —
+  Listener, Service, Log — with one toggle and one line of state under them, so
+  no page is a form the length of the phone. Every control that is not obvious
+  carries the same "i" mark, and the header carries the app's own Info, the
+  menu and the warning.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:paddingStart="20dp"
-    android:paddingTop="8dp"
+    android:paddingTop="6dp"
     android:paddingEnd="20dp"
-    android:paddingBottom="12dp">
+    android:paddingBottom="10dp">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -21,15 +21,12 @@
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
-        <!-- Only on an opened proxy: there is exactly one level to go up. -->
-        <Button
+        <ImageButton
             android:id="@+id/back"
-            style="?android:attr/buttonStyleSmall"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            style="@style/HeaderMark"
+            android:layout_marginEnd="4dp"
             android:contentDescription="@string/action_back"
-            android:minWidth="0dp"
-            android:text="@string/back_mark"
+            android:src="@drawable/ic_back"
             android:visibility="gone" />
 
         <TextView
@@ -37,40 +34,30 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:alpha="0.6"
             android:ellipsize="end"
             android:maxLines="1"
-            android:text="@string/app_name"
-            android:textAppearance="?android:attr/textAppearanceSmall" />
+            android:text="@string/home_title"
+            android:textAppearance="?android:attr/textAppearanceMedium"
+            android:textStyle="bold" />
 
-        <Button
+        <ImageButton
             android:id="@+id/warning"
-            style="?android:attr/buttonStyleSmall"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            style="@style/HeaderMark"
             android:contentDescription="@string/warning_description"
-            android:minWidth="0dp"
-            android:text="@string/warning_mark"
-            android:textColor="@color/warning"
-            android:textStyle="bold"
+            android:src="@drawable/ic_warning"
+            android:tint="@color/warning"
             android:visibility="gone" />
 
-        <Button
+        <ImageButton
             android:id="@+id/info"
-            style="?android:attr/buttonStyleSmall"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:minWidth="0dp"
-            android:text="@string/action_info" />
+            style="@style/HeaderMark"
+            android:src="@drawable/ic_info" />
 
-        <Button
+        <ImageButton
             android:id="@+id/menu"
-            style="?android:attr/buttonStyleSmall"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            style="@style/HeaderMark"
             android:contentDescription="@string/action_menu"
-            android:minWidth="0dp"
-            android:text="@string/menu_label" />
+            android:src="@drawable/ic_menu" />
     </LinearLayout>
 
     <FrameLayout
@@ -78,7 +65,7 @@
         android:layout_height="0dp"
         android:layout_weight="1">
 
-        <!-- Every saved proxy, each with its own state and its own settings. -->
+        <!-- Every saved proxy, each with its own state and its own button. -->
         <ScrollView
             android:id="@+id/screen_home"
             android:layout_width="match_parent"
@@ -89,13 +76,14 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:paddingTop="4dp">
+                android:paddingTop="6dp">
 
                 <TextView
                     android:id="@+id/home_empty"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:paddingBottom="12dp"
+                    android:alpha="0.75"
                     android:text="@string/home_empty"
                     android:textAppearance="?android:attr/textAppearanceSmall"
                     android:visibility="gone" />
@@ -106,248 +94,395 @@
                     android:layout_height="wrap_content"
                     android:orientation="vertical" />
 
-                <Button
-                    android:id="@+id/new_profile"
-                    style="?android:attr/buttonStyleSmall"
-                    android:layout_width="match_parent"
+                <LinearLayout
+                    style="@style/FieldLabelRow"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:text="@string/action_new" />
+                    android:paddingTop="4dp">
+
+                    <Button
+                        android:id="@+id/new_profile"
+                        style="?android:attr/buttonStyleSmall"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/action_new" />
+
+                    <ImageButton
+                        android:id="@+id/info_new"
+                        style="@style/InfoMark" />
+                </LinearLayout>
             </LinearLayout>
         </ScrollView>
 
-        <!-- One proxy: what it is, the switch that keeps it running, and what
-             it has done since it was started. -->
-        <ScrollView
+        <!-- One proxy: three segments, one toggle, one line of state. -->
+        <LinearLayout
             android:id="@+id/screen_profile"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:fillViewport="true"
+            android:orientation="vertical"
             android:visibility="gone">
 
+            <RadioGroup
+                android:id="@+id/tabs"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingTop="4dp"
+                android:paddingBottom="6dp">
+
+                <RadioButton
+                    android:id="@+id/tab_listener"
+                    style="@style/Segment"
+                    android:text="@string/tab_listener" />
+
+                <RadioButton
+                    android:id="@+id/tab_service"
+                    style="@style/Segment"
+                    android:text="@string/tab_service" />
+
+                <RadioButton
+                    android:id="@+id/tab_log"
+                    style="@style/Segment"
+                    android:text="@string/tab_log" />
+            </RadioGroup>
+
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1">
+
+                <!-- What the listener is. -->
+                <ScrollView
+                    android:id="@+id/page_listener"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:fillViewport="true">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <LinearLayout style="@style/FieldLabelRow">
+                            <TextView
+                                style="@style/FieldLabel"
+                                android:labelFor="@+id/port"
+                                android:text="@string/label_port" />
+                            <ImageButton
+                                android:id="@+id/info_port"
+                                style="@style/InfoMark" />
+                        </LinearLayout>
+
+                        <EditText
+                            android:id="@+id/port"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:autofillHints=""
+                            android:inputType="number" />
+
+                        <LinearLayout style="@style/FieldLabelRow">
+                            <TextView
+                                style="@style/FieldLabel"
+                                android:labelFor="@+id/user"
+                                android:text="@string/label_user" />
+                            <ImageButton
+                                android:id="@+id/info_user"
+                                style="@style/InfoMark" />
+                        </LinearLayout>
+
+                        <EditText
+                            android:id="@+id/user"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:autofillHints="username"
+                            android:inputType="text" />
+
+                        <LinearLayout style="@style/FieldLabelRow">
+                            <TextView
+                                style="@style/FieldLabel"
+                                android:labelFor="@+id/password"
+                                android:text="@string/label_password" />
+                            <ImageButton
+                                android:id="@+id/info_password"
+                                style="@style/InfoMark" />
+                        </LinearLayout>
+
+                        <EditText
+                            android:id="@+id/password"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:autofillHints="password"
+                            android:inputType="textPassword" />
+
+                        <LinearLayout style="@style/FieldLabelRow">
+                            <TextView
+                                style="@style/FieldLabel"
+                                android:labelFor="@+id/ssid"
+                                android:text="@string/label_ssid" />
+                            <ImageButton
+                                android:id="@+id/info_ssid"
+                                style="@style/InfoMark" />
+                        </LinearLayout>
+
+                        <EditText
+                            android:id="@+id/ssid"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:autofillHints=""
+                            android:inputType="text" />
+
+                        <LinearLayout style="@style/FieldLabelRow">
+                            <CheckBox
+                                android:id="@+id/anonymous"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:paddingTop="8dp"
+                                android:text="@string/label_anonymous" />
+                            <ImageButton
+                                android:id="@+id/info_anonymous"
+                                style="@style/InfoMark" />
+                        </LinearLayout>
+
+                        <LinearLayout style="@style/FieldLabelRow">
+                            <CheckBox
+                                android:id="@+id/any_network"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:paddingTop="8dp"
+                                android:text="@string/label_any_network" />
+                            <ImageButton
+                                android:id="@+id/info_any_network"
+                                style="@style/InfoMark" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/pending"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:paddingTop="8dp"
+                            android:text="@string/pending_changes"
+                            android:textAppearance="?android:attr/textAppearanceSmall"
+                            android:visibility="gone" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingTop="10dp">
+
+                            <Button
+                                android:id="@+id/save"
+                                style="?android:attr/buttonStyleSmall"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/action_save" />
+
+                            <ImageButton
+                                android:id="@+id/info_save"
+                                style="@style/InfoMark" />
+
+                            <Button
+                                android:id="@+id/revert"
+                                style="?android:attr/buttonStyleSmall"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/action_revert" />
+
+                            <ImageButton
+                                android:id="@+id/info_revert"
+                                style="@style/InfoMark" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </ScrollView>
+
+                <!-- What the service does with it. -->
+                <ScrollView
+                    android:id="@+id/page_service"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:fillViewport="true"
+                    android:visibility="gone">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <LinearLayout style="@style/FieldLabelRow">
+                            <CheckBox
+                                android:id="@+id/auto_start"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/label_auto_start" />
+                            <ImageButton
+                                android:id="@+id/info_auto_start"
+                                style="@style/InfoMark" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/battery"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:paddingBottom="8dp"
+                            android:text="@string/battery_optimized"
+                            android:textAppearance="?android:attr/textAppearanceSmall" />
+
+                        <LinearLayout style="@style/FieldLabelRow">
+                            <CheckBox
+                                android:id="@+id/adb_wifi"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:paddingTop="8dp"
+                                android:text="@string/label_adb_wifi" />
+                            <ImageButton
+                                android:id="@+id/info_adb_wifi"
+                                style="@style/InfoMark" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/adb_state"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:paddingTop="2dp"
+                            android:text="@string/adb_wifi_state_off"
+                            android:textAppearance="?android:attr/textAppearanceSmall" />
+
+                        <TextView
+                            android:id="@+id/pending_service"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:paddingTop="8dp"
+                            android:text="@string/pending_changes"
+                            android:textAppearance="?android:attr/textAppearanceSmall"
+                            android:visibility="gone" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingTop="10dp">
+
+                            <Button
+                                android:id="@+id/save_service"
+                                style="?android:attr/buttonStyleSmall"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/action_save" />
+
+                            <ImageButton
+                                android:id="@+id/info_save_service"
+                                style="@style/InfoMark" />
+
+                            <Button
+                                android:id="@+id/revert_service"
+                                style="?android:attr/buttonStyleSmall"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/action_revert" />
+
+                            <ImageButton
+                                android:id="@+id/info_revert_service"
+                                style="@style/InfoMark" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </ScrollView>
+
+                <!-- What it has done. -->
+                <ScrollView
+                    android:id="@+id/page_log"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:fillViewport="true"
+                    android:visibility="gone">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <LinearLayout style="@style/FieldLabelRow">
+                            <TextView
+                                style="@style/SectionHeader"
+                                android:layout_weight="1"
+                                android:text="@string/tab_log" />
+                            <ImageButton
+                                android:id="@+id/info_log"
+                                style="@style/InfoMark" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/traffic"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/traffic_none"
+                            android:textAppearance="?android:attr/textAppearanceSmall" />
+
+                        <org.phonelink.proxy.TrafficView
+                            android:id="@+id/traffic_graph"
+                            android:layout_width="match_parent"
+                            android:layout_height="88dp"
+                            android:layout_marginTop="4dp"
+                            android:layout_marginBottom="8dp" />
+
+                        <TextView
+                            android:id="@+id/log_text"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:fontFamily="monospace"
+                            android:text="@string/log_empty"
+                            android:textAppearance="?android:attr/textAppearanceSmall" />
+
+                        <Button
+                            android:id="@+id/log_clear"
+                            style="?android:attr/buttonStyleSmall"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/action_clear_log" />
+                    </LinearLayout>
+                </ScrollView>
+            </FrameLayout>
+
+            <!-- One line of fact, next to the one button that changes it. -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:paddingTop="4dp">
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingTop="6dp">
 
                 <TextView
-                    android:layout_width="match_parent"
+                    android:id="@+id/footer_state"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:paddingTop="4dp"
-                    android:text="@string/section_listener"
-                    android:textAppearance="?android:attr/textAppearanceSmall"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:labelFor="@+id/port"
-                    android:text="@string/label_port" />
-
-                <EditText
-                    android:id="@+id/port"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:autofillHints=""
-                    android:inputType="number" />
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:labelFor="@+id/user"
-                    android:text="@string/label_user" />
-
-                <EditText
-                    android:id="@+id/user"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:autofillHints="username"
-                    android:inputType="text" />
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:labelFor="@+id/password"
-                    android:text="@string/label_password" />
-
-                <EditText
-                    android:id="@+id/password"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:autofillHints="password"
-                    android:inputType="textPassword" />
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:labelFor="@+id/ssid"
-                    android:text="@string/label_ssid" />
-
-                <EditText
-                    android:id="@+id/ssid"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:autofillHints=""
-                    android:inputType="text" />
-
-                <CheckBox
-                    android:id="@+id/anonymous"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:paddingTop="8dp"
-                    android:text="@string/label_anonymous" />
-
-                <CheckBox
-                    android:id="@+id/any_network"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:paddingTop="8dp"
-                    android:text="@string/label_any_network" />
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:paddingTop="12dp"
-                    android:text="@string/section_service"
-                    android:textAppearance="?android:attr/textAppearanceSmall"
-                    android:textStyle="bold" />
-
-                <CheckBox
-                    android:id="@+id/auto_start"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="@string/label_auto_start" />
-
-                <TextView
-                    android:id="@+id/battery"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:paddingBottom="8dp"
-                    android:text="@string/battery_optimized"
+                    android:layout_weight="1"
+                    android:alpha="0.8"
+                    android:ellipsize="end"
+                    android:maxLines="2"
+                    android:text="@string/footer_stopped"
                     android:textAppearance="?android:attr/textAppearanceSmall" />
 
-                <CheckBox
-                    android:id="@+id/adb_wifi"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:paddingTop="8dp"
-                    android:text="@string/label_adb_wifi" />
-
-                <TextView
-                    android:id="@+id/adb_state"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:paddingTop="2dp"
-                    android:text="@string/adb_wifi_state_off"
-                    android:textAppearance="?android:attr/textAppearanceSmall" />
-
-                <TextView
-                    android:id="@+id/pending"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:paddingTop="8dp"
-                    android:text="@string/pending_changes"
-                    android:textAppearance="?android:attr/textAppearanceSmall"
-                    android:visibility="gone" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:paddingTop="8dp">
-
-                    <Button
-                        android:id="@+id/save"
-                        style="?android:attr/buttonStyleSmall"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="@string/action_save" />
-
-                    <Button
-                        android:id="@+id/revert"
-                        style="?android:attr/buttonStyleSmall"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="@string/action_revert" />
-                </LinearLayout>
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:paddingTop="16dp"
-                    android:text="@string/section_log"
-                    android:textAppearance="?android:attr/textAppearanceSmall"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/traffic"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:paddingTop="2dp"
-                    android:text="@string/traffic_none"
-                    android:textAppearance="?android:attr/textAppearanceSmall" />
-
-                <org.phonelink.proxy.TrafficView
-                    android:id="@+id/traffic_graph"
-                    android:layout_width="match_parent"
-                    android:layout_height="88dp"
-                    android:layout_marginTop="4dp"
-                    android:layout_marginBottom="8dp" />
-
-                <TextView
-                    android:id="@+id/log_text"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:fontFamily="monospace"
-                    android:text="@string/log_empty"
-                    android:textAppearance="?android:attr/textAppearanceSmall" />
-
-                <Button
-                    android:id="@+id/log_clear"
-                    style="?android:attr/buttonStyleSmall"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:text="@string/action_clear_log" />
+                <ImageButton
+                    android:id="@+id/info_toggle"
+                    style="@style/InfoMark" />
             </LinearLayout>
-        </ScrollView>
+
+            <Button
+                android:id="@+id/toggle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="@string/action_start" />
+        </LinearLayout>
     </FrameLayout>
-
-    <!-- The state, one line, where the buttons that change it are. -->
-    <TextView
-        android:id="@+id/footer_state"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:alpha="0.8"
-        android:ellipsize="end"
-        android:maxLines="2"
-        android:paddingTop="8dp"
-        android:text="@string/footer_stopped"
-        android:textAppearance="?android:attr/textAppearanceSmall" />
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:paddingTop="4dp">
-
-        <Button
-            android:id="@+id/start"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:backgroundTint="?android:attr/colorAccent"
-            android:text="@string/action_start"
-            android:textColor="@android:color/white" />
-
-        <Button
-            android:id="@+id/stop"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/action_stop" />
-    </LinearLayout>
 </LinearLayout>

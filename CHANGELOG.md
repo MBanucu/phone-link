@@ -40,6 +40,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   report into once the service can run more than one; measured on the phone:
   starting a proxy turns its card green and says `in use · port 18080`, and
   `dumpsys` reports `profile "harness-save"`.
+- One proxy is three segments, not one long page: `Listener` holds the four
+  fields and the two listener boxes, `Service` the auto-start and
+  wireless-debugging switches with what the phone says about each, `Log` this
+  run's counters and that proxy's events. Every control on them carries its own
+  small `i` that explains it in a dialog, and so do the one button under the
+  segments, the list's `New proxy` and the log's `Clear`. The header is icons —
+  back, the warning mark, `i`, the burger — and the app's own `i` is in the
+  menu (`About this app`) as well as in the header, where a legacy text button
+  used to be.
+- The list starts and stops a proxy by itself: every card carries a button that
+  says `Start` or `Stop` according to what the service reports for *that*
+  proxy, green and `Running` with it, and it never opens the proxy or asks for
+  the battery exemption. The open proxy's one button does the same from its own
+  page, filled while it starts and plain while it stops.
 - The log is per proxy. Every entry is tagged with the proxy it belongs to —
   the service tags what happens while it runs one, the panel tags what it writes
   about a named one — so an open proxy shows its own starts, failures and
@@ -59,6 +73,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `RENAME_PROFILE` renames a saved configuration over adb (`--es profile NAME
+  --es to NEW`), and `Rename` in the panel's menu does the same on the phone:
+  the settings, the two service switches and the mark of which proxy is in use
+  move with the name, a name that is already taken is refused, and a proxy that
+  is running keeps logging under its new name.
+- A live run keeps what a later look needs: the phone's screen as an mp4, the
+  screen as XML every time uiautomator serves a dump (about two and a half
+  seconds on this phone) with an index of when each snapshot was taken, and one
+  appended row per step in `result-live/timings.csv` with its
+  seconds and its pass/fail counts. The CSV is only ever appended to, so the
+  cost of a run can be read across runs and weighed against running it before a
+  commit; `tests/live/frames.sh <recording> 0:42 95.5` turns any moment of a
+  recording into a still. `PHONE_LIVE_CAPTURE=0` skips the recording and the
+  snapshots, and the phone's autofill service is off for the run because its
+  password sheet would take the focus from the next tap.
 - The Log page counts bytes: `↓ 6.5 kB · ↑ 1.9 kB · now 0 B/s down, 0 B/s up`
   and a sparkline of the last minute, one line per direction. The counters sit
   where the relay copies (`Socks5Server.pump`), the panel samples them once a

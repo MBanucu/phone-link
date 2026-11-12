@@ -40,6 +40,13 @@
 # Not named *.test.sh: it needs a phone, a JDK, the Android SDK and installs a
 # package, so `nix flake check` must not run it. The vendored proxy is left
 # alone: this uses its own port and package.
+#
+# Every run keeps its evidence in result-live/<UTC start>/ (or
+# PHONE_LIVE_ARTIFACTS): the phone's screen as an mp4 (frames.sh pulls stills
+# out of it), the screen as XML about once a second, and the timing of each
+# step appended to result-live/timings.csv, which is never rewritten — the
+# history is what makes "is this cheap enough to run before a commit"
+# answerable. PHONE_LIVE_CAPTURE=0 skips the recording and the snapshots.
 set -u
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -54,15 +61,53 @@ PASSWORD=phonelink-test-password
 
 pass=0
 fail=0
+# The step being timed, so the CSV gets one row per step, not just the total.
+step_name=""
+step_start=0
+step_pass=0
+step_fail=0
+
 ok() {
   pass=$((pass + 1))
+  step_pass=$((step_pass + 1))
   printf 'PASS %s\n' "$*"
 }
 bad() {
   fail=$((fail + 1))
+  step_fail=$((step_fail + 1))
   printf 'FAIL %s\n' "$*"
 }
-step() { printf '\n== %s\n' "$*"; }
+
+# Milliseconds since the epoch, for the per-step timings.
+now_ms() { date +%s%3N; }
+
+# Append-only, one row per step plus a TOTAL row: the point of the file is the
+# history, so it is never rewritten and never sorted.
+timing_row() { # timing_row STEP SECONDS PASSED FAILED STATUS
+  if [ ! -f "$TIMINGS" ]; then
+    printf 'run,step,seconds,passed,failed,status\n' >"$TIMINGS"
+  fi
+  printf '%s,%s,%s,%s,%s,%s\n' "$run_id" "$1" "$2" "$3" "$4" "$5" >>"$TIMINGS"
+}
+
+flush_step() {
+  [ -n "$step_name" ] || return 0
+  local seconds
+  seconds=$(awk -v start="$step_start" -v end="$(now_ms)" \
+    'BEGIN { printf "%.1f", (end - start) / 1000 }')
+  timing_row "$step_name" "$seconds" "$step_pass" "$step_fail" \
+    "$([ "$step_fail" -eq 0 ] && echo ok || echo failed)"
+  step_name=""
+  step_pass=0
+  step_fail=0
+}
+
+step() {
+  flush_step
+  step_name=$1
+  step_start=$(now_ms)
+  printf '\n== %s\n' "$*"
+}
 
 serial=${PHONE_SERIAL:-}
 if [ -z "$serial" ]; then
@@ -80,12 +125,97 @@ fi
 phone() { adb -s "$serial" "$@"; }
 shell() { phone shell "$@"; }
 
+# Where this run's evidence goes, and the one file that outlives it.
+run_id=$(date -u +%Y%m%dT%H%M%SZ)
+ARTIFACTS=${PHONE_LIVE_ARTIFACTS:-$ROOT/result-live/$run_id}
+TIMINGS=${PHONE_LIVE_TIMINGS:-$ROOT/result-live/timings.csv}
+mkdir -p "$ARTIFACTS" "$(dirname "$TIMINGS")"
+
 # Set when this run woke the phone, so it can be put back to sleep.
 unlocked=0
 # Set when this run changed the screen timeout, so the old one can go back.
 screen_timeout=""
 
+# --- the evidence a failed run leaves behind -----------------------------
+
+capturing=0
+screenrecord_pid=""
+snapshot_pid=""
+run_start=$(now_ms)
+
+# uiautomator serves one dump at a time; a dump that arrives while another is
+# running can fail outright rather than queue, and a failed one costs a step a
+# retry, so the snapshots and the steps share this lock. A lock that outlives
+# a dozen seconds is treated as left behind by something that died holding it,
+# so a run cannot wedge.
+dump_lock() {
+  local waited=0
+  while ! mkdir "$ARTIFACTS/.dump" 2>/dev/null; do
+    sleep 0.2
+    waited=$((waited + 1))
+    if [ "$waited" -ge 60 ]; then
+      rmdir "$ARTIFACTS/.dump" 2>/dev/null
+      mkdir "$ARTIFACTS/.dump" 2>/dev/null && break
+    fi
+  done
+}
+
+dump_unlock() { rmdir "$ARTIFACTS/.dump" 2>/dev/null || true; }
+
+# The screen as XML as often as uiautomator will serve it, next to an index of
+# when each frame was taken. A dump costs about two and a half seconds on this
+# phone, so that is the rate: the recording is the record with every frame in
+# it, and these are the ones that can be read as text.
+ui_snapshots() {
+  local index=0
+  while [ -f "$ARTIFACTS/.capturing" ]; do
+    index=$((index + 1))
+    dump_lock
+    shell timeout 8 uiautomator dump /sdcard/proxy-app-shot.xml >/dev/null 2>&1
+    shell cat /sdcard/proxy-app-shot.xml 2>/dev/null | tr -d '\r' \
+      >"$ARTIFACTS/ui-$(printf '%05d' "$index").xml"
+    printf '%s,%s\n' "$index" "$(now_ms)" >>"$ARTIFACTS/ui-index.csv"
+    dump_unlock
+    sleep 0.2
+  done
+}
+
+start_capture() {
+  [ "${PHONE_LIVE_CAPTURE:-1}" = 0 ] && return 0
+  # screenrecord refuses to start with the screen off or a keyguard up, which
+  # is why this runs after the unlock step.
+  shell rm -f /sdcard/proxy-app.mp4 >/dev/null 2>&1
+  screenrecord_pid=$(shell "screenrecord --bit-rate 4000000 --time-limit 1800 \
+/sdcard/proxy-app.mp4 >/dev/null 2>&1 & echo \$!")
+  screenrecord_pid=$(printf '%s' "$screenrecord_pid" | tr -d '\r\n ')
+  : >"$ARTIFACTS/.capturing"
+  ui_snapshots &
+  snapshot_pid=$!
+  capturing=1
+  printf 'capture: screen.mp4 and ui-*.xml in %s\n' "$ARTIFACTS"
+}
+
+stop_capture() {
+  [ "$capturing" = 1 ] || return 0
+  capturing=0
+  rm -f "$ARTIFACTS/.capturing"
+  if [ -n "$snapshot_pid" ]; then
+    wait "$snapshot_pid" 2>/dev/null
+    snapshot_pid=""
+  fi
+  if [ -n "$screenrecord_pid" ]; then
+    # SIGINT is how screenrecord is asked to finalise the file.
+    shell kill -INT "$screenrecord_pid" >/dev/null 2>&1
+    sleep 2
+    phone pull /sdcard/proxy-app.mp4 "$ARTIFACTS/screen.mp4" >/dev/null 2>&1
+    shell rm -f /sdcard/proxy-app.mp4 >/dev/null 2>&1
+    screenrecord_pid=""
+  fi
+}
+
 cleanup() {
+  stop_capture
+  restore_autofill
   shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
   shell cmd statusbar collapse >/dev/null 2>&1
   # Whatever this run saved: a crash halfway through must not leave the phone
@@ -106,8 +236,18 @@ cleanup() {
   if [ -z "${KEEP_APP:-}" ]; then
     phone uninstall "$PKG" >/dev/null 2>&1
   fi
+  flush_step
+  local total
+  total=$(awk -v start="$run_start" -v end="$(now_ms)" \
+    'BEGIN { printf "%.1f", (end - start) / 1000 }')
+  timing_row TOTAL "$total" "$pass" "$fail" \
+    "$([ "$fail" -eq 0 ] && echo ok || echo failed)"
+  printf 'timings: %s\n' "$TIMINGS"
+  printf 'artifacts: %s\n' "$ARTIFACTS"
 }
+# An interrupted run finalises its recording too, or the phone keeps it.
 trap cleanup EXIT
+trap 'exit 130' INT TERM
 
 start_app() {
   # anonymous is pinned: a configuration a previous run left in the store must
@@ -170,8 +310,15 @@ panel_checked() { # panel_checked ID -> yes|no
   return 1
 }
 
+# The profile page is split into segments now, so a control is looked for on
+# the segment that holds it rather than by scrolling the whole page.
+panel_tab() { # panel_tab listener|service|log
+  ui_tap_id "tab_$1"
+}
+
 # The panel's auto_start checkbox reflects what the configuration holds.
 panel_auto_start_checked() {
+  panel_tab service || return 1
   [ "$(panel_checked auto_start)" = yes ]
 }
 
@@ -186,16 +333,27 @@ ui_dump() {
   # answer is only accepted when the panel itself is in it.
   local attempt xml
   for attempt in 1 2 3 4 5 6; do
-    # A dump can hang while a window never goes idle, so give it a deadline.
+    # A dump can hang while a window never goes idle, so give it a deadline,
+    # and it waits for a snapshot to finish instead of colliding with it.
+    dump_lock
     shell timeout 8 uiautomator dump /sdcard/proxy-app-ui.xml >/dev/null 2>&1
     xml=$(shell cat /sdcard/proxy-app-ui.xml 2>/dev/null | tr -d '\r')
+    dump_unlock
     # Accept the panel, or one of the app's own dialogs: the battery request is
     # a window of its own and the dump then holds only that one.
     if printf '%s' "$xml" | grep -q '<hierarchy' &&
-      { printf '%s' "$xml" | grep -q "$PKG:id/footer_state" ||
-        printf '%s' "$xml" | grep -q 'id/alertTitle"'; }; then
+      { printf '%s' "$xml" | grep -q "$PKG:id/header_title" ||
+        printf '%s' "$xml" | grep -q 'id/alertTitle"' ||
+        printf '%s' "$xml" | grep -q 'text="About this app"'; }; then
       printf '%s\n' "$xml"
       return 0
+    fi
+    # Nothing of the app in the dump means something else has the focus, most
+    # often a system or password-manager sheet that a typed field called up,
+    # and Back is the way past it. The app's own dialogs carry its package and
+    # are left alone; on the launcher Back does nothing.
+    if ! printf '%s' "$xml" | grep -q "package=\"$PKG\""; then
+      shell input keyevent 4 >/dev/null 2>&1
     fi
     sleep 1
   done
@@ -252,24 +410,88 @@ dismiss_battery() {
   fi
 }
 
-panel_start() {
-  panel_tap start || return 1
+# The one button on a proxy's own page starts it, and stops it while it runs.
+panel_toggle() {
+  panel_tap toggle || return 1
   sleep 1
+  dismiss_battery
+}
+
+ui_tap_text() { # ui_tap_text TEXT -> taps the one node carrying that text
+  local x y
+  x=""
+  y=""
+  read -r x y <<EOF
+$(ui_dump | tr '>' '\n' | grep "text=\"$1\"" | head -1 |
+  sed -n 's/.*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/p' |
+  awk '{ if (NF == 4) print int(($1 + $3) / 2), int(($2 + $4) / 2) }')
+EOF
+  [ -n "$x" ] || return 1
+  shell input tap "$x" "$y"
+  sleep 1
+}
+
+# The menu is a popup over the header, opened by the burger.
+menu_pick() { # menu_pick TEXT
+  ui_tap_id menu || return 1
+  sleep 1
+  ui_tap_text "$1"
+}
+
+# One card's node, found by the name in the same card: the list is a column of
+# them and a dump is flat, so the scan walks cards until a name matches.
+card_line() { # card_line NAME ID -> the node's line, or nothing
+  ui_dump | tr '>' '\n' | awk -v want="text=\"$1\"" -v id="id/$2\"" '
+    /id\/card_name"/ { hit = index($0, want) > 0 }
+    index($0, id) && hit { print; exit }'
+}
+
+# The same button on the list, pressed without opening the proxy first.
+card_toggle() { # card_toggle NAME
+  local x y
+  x=""
+  y=""
+  read -r x y <<EOF
+$(card_line "$1" card_toggle |
+  sed -n 's/.*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/p' |
+  awk '{ if (NF == 4) print int(($1 + $3) / 2), int(($2 + $4) / 2) }')
+EOF
+  [ -n "$x" ] || return 1
+  shell input tap "$x" "$y"
+  sleep 2
   dismiss_battery
 }
 
 # Is the app on the Doze allowlist a boot restart needs?
 battery_exempt() { shell cmd deviceidle whitelist | grep -q 'org.phonelink.proxy'; }
 
+# Whether the list says that proxy is the one running: the card's state word
+# and the word on its button are the two halves of the same answer.
+card_state() { # card_state NAME -> Running|Stopped|(nothing)
+  card_line "$1" card_state | sed -n 's/.*text="\([^"]*\)".*/\1/p'
+}
+
+card_button_text() { # card_button_text NAME -> Start|Stop|(nothing)
+  card_line "$1" card_toggle | sed -n 's/.*text="\([^"]*\)".*/\1/p'
+}
+
 # The list is the way in and Back is the way out, so every step that wants a
 # particular proxy starts by making sure the list is showing.
 panel_home() {
-  local attempt
+  local attempt xml
   for attempt in 1 2 3; do
-    if ui_dump | grep -q "id/new_profile\""; then
+    xml=$(ui_dump) || xml=""
+    if printf '%s' "$xml" | grep -q "id/new_profile\""; then
       return 0
     fi
-    shell input keyevent 4 >/dev/null 2>&1
+    if printf '%s' "$xml" | grep -q "id/header_title"; then
+      # The panel is up, on a proxy's page: Back is the way out to the list.
+      shell input keyevent 4 >/dev/null 2>&1
+    else
+      # The panel is not up at all — pressing Back here would land on the
+      # launcher, so bring the panel up instead.
+      shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
+    fi
     sleep 1
   done
   return 1
@@ -361,6 +583,23 @@ keyguard_showing() {
   shell dumpsys window policy | grep -q 'showing=true'
 }
 
+# The panel has a password field, and the phone's autofill service answers it
+# with a "save this password?" sheet that takes the focus and would swallow the
+# taps of the next step. It is off for the run and put back afterwards.
+autofill_service=""
+quiet_autofill() {
+  autofill_service=$(shell settings get secure autofill_service 2>/dev/null |
+    tr -d '\r')
+  shell settings put secure autofill_service null >/dev/null 2>&1
+}
+
+restore_autofill() {
+  case $autofill_service in
+    '' | null | *://*) return 0 ;;
+  esac
+  shell settings put secure autofill_service "$autofill_service" >/dev/null 2>&1
+}
+
 unlock_phone() {
   # A waiting step can outlive a short screen timeout, and then every dump is
   # taken from a sleeping phone. Ten minutes is longer than this run.
@@ -424,6 +663,10 @@ if unlock_phone; then
 else
   printf 'SKIP unlocking: needs the root-only PIN (sudo -n %s/bin/phone-unlock)\n' "$ROOT"
 fi
+# screenrecord needs an unlocked screen, and the snapshots are only useful
+# once the app is on it.
+quiet_autofill
+start_capture
 
 step 'install'
 if phone install -r -g "$APK" >/dev/null 2>&1; then
@@ -520,6 +763,7 @@ step 'panel state'
 shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
 sleep 1
 panel_open harness-panel
+panel_tab service
 state=$(ui_text_seek adb_state)
 case $state in
   'Wireless debugging: on'*|'Wireless debugging: off'*|\
@@ -543,16 +787,25 @@ fi
 step 'anonymous from the panel'
 # The open proxy is the one that starts: Start stores the form first, so the
 # anonymous box is applied to that saved configuration and not just to a form.
-if panel_open harness-panel && panel_tap anonymous && panel_start; then
+# The one button is Start only while nothing runs, so stop first.
+shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
+sleep 2
+shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
+sleep 1
+if panel_open harness-panel && panel_tab listener && panel_tap anonymous &&
+  panel_toggle; then
   if wait_anonymous yes; then
     ok 'the anonymous checkbox is applied by Start'
   else
     bad 'the anonymous checkbox is applied by Start'
   fi
-  # Put authentication back through the same controls: the tunnel works with
-  # credentials again, and nobody without them does.
+  # Put authentication back through the same controls: the running proxy is
+  # stopped, the box is ticked again and it is started, so the tunnel works
+  # with credentials again and nobody without them does.
+  panel_toggle
+  panel_tab listener
   panel_tap anonymous
-  panel_start
+  panel_toggle
   if wait_anonymous no; then
     ok 'unticking it asks for a password again'
   else
@@ -681,11 +934,13 @@ else
   bad 'the card opens the proxy to save'
   panel_where
 fi
+panel_tab listener
 panel_tap port
 shell input keyevent KEYCODE_MOVE_END 67 67 67 67 67 67
 shell input text 18099
 close_keyboard
 sleep 1
+panel_tab listener
 panel_tap save
 sleep 1
 if shell dumpsys activity service "$SERVICE" | grep -q 'harness-save.*port 18099'; then
@@ -693,10 +948,11 @@ if shell dumpsys activity service "$SERVICE" | grep -q 'harness-save.*port 18099
 else
   bad 'Save writes the form to the open proxy'
 fi
+panel_tab service
 panel_tap auto_start
 want=off
 if [ "$(panel_checked auto_start)" = yes ]; then want=on; fi
-panel_tap save
+panel_tap save_service
 sleep 1
 if shell dumpsys activity service "$SERVICE" |
   grep -q "harness-save.*auto-start $want"; then
@@ -706,6 +962,198 @@ else
   panel_where
 fi
 delete_profile_by_adb harness-save
+
+step 'card toggle'
+# The list starts and stops a proxy by itself now: the button on the card has
+# to follow what the service reports, and so does the word next to the dot.
+start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
+sleep 2
+save_profile harness-card
+shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
+sleep 2
+shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
+sleep 1
+if panel_home; then
+  state=$(card_state harness-card)
+  if [ "$state" = Stopped ]; then
+    ok 'a stopped proxy says so on its card'
+  else
+    bad "a stopped proxy says so on its card (\"$state\")"
+    panel_where
+  fi
+  if [ "$(card_button_text harness-card)" = Start ]; then
+    ok 'and its card offers Start'
+  else
+    bad 'and its card offers Start'
+  fi
+  if card_toggle harness-card; then
+    sleep 2
+    if foreground; then ok 'the card starts that proxy'; else
+      bad 'the card starts that proxy'
+    fi
+    if through_proxy; then ok 'and requests go through it'; else
+      bad 'and requests go through it'
+    fi
+    state=$(card_state harness-card)
+    if [ "$state" = Running ]; then
+      ok 'the card follows the state it created'
+    else
+      bad "the card follows the state it created (\"$state\")"
+    fi
+    if [ "$(card_button_text harness-card)" = Stop ]; then
+      ok 'and offers Stop while it runs'
+    else
+      bad 'and offers Stop while it runs'
+    fi
+    if card_toggle harness-card; then
+      sleep 2
+      if foreground; then bad 'a second press stops it'; else
+        ok 'a second press stops it'
+      fi
+      if [ "$(card_state harness-card)" = Stopped ]; then
+        ok 'and the card goes back to Stopped'
+      else
+        bad 'and the card goes back to Stopped'
+      fi
+    else
+      bad 'the card button can be pressed again'
+    fi
+  else
+    bad 'the card button can be pressed'
+    panel_where
+  fi
+else
+  bad 'the list is reachable'
+fi
+delete_profile_by_adb harness-card
+
+step 'rename'
+# A name is a label on the settings, so renaming moves the settings, the
+# service switches and the mark of which proxy is in use under the new name.
+start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
+sleep 2
+save_profile harness-old
+# Start it by name, so that proxy is the one the service reports as in use.
+shell am start-foreground-service -n "$SERVICE" \
+  -a "$START" --es profile harness-old >/dev/null 2>&1
+sleep 3
+shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
+sleep 1
+if panel_open harness-old; then
+  ok 'the proxy to rename opens'
+else
+  bad 'the proxy to rename opens'
+  panel_where
+fi
+if menu_pick Rename; then
+  sleep 1
+  # The dialog opens on its name field with the keyboard up, so the field does
+  # not have to be found among the page's own edit fields behind it.
+  if ui_dump | grep -q 'class="android.widget.EditText"'; then
+    shell input keyevent KEYCODE_MOVE_END
+    shell input keyevent 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67
+    shell input text harness-renamed
+    sleep 1
+    close_keyboard
+    sleep 1
+    if ui_tap_id button1; then
+      sleep 2
+      if shell dumpsys activity service "$SERVICE" | grep 'saved' |
+        grep -q '"harness-renamed"'; then
+        ok 'the menu renames a proxy'
+      else
+        bad 'the menu renames a proxy'
+        panel_where
+      fi
+      if shell dumpsys activity service "$SERVICE" | grep 'saved' |
+        grep -q '"harness-old"'; then
+        bad 'and the old name is gone'
+      else
+        ok 'and the old name is gone'
+      fi
+      if [ "$(ui_text header_title)" = harness-renamed ]; then
+        ok 'the page follows the new name'
+      else
+        bad "the page follows the new name ($(ui_text header_title))"
+      fi
+    else
+      bad 'the rename dialog can be answered'
+    fi
+  else
+    bad 'the rename dialog has a name field'
+  fi
+else
+  bad "the menu offers Rename"
+fi
+# The service does the same from adb, for an agent with no screen.
+shell am start-foreground-service -n "$SERVICE" \
+  -a org.phonelink.proxy.action.RENAME_PROFILE --es profile harness-renamed \
+  --es to harness-adb >/dev/null 2>&1
+sleep 2
+if shell dumpsys activity service "$SERVICE" | grep 'saved' |
+  grep -q '"harness-adb"'; then
+  ok 'RENAME_PROFILE renames from adb'
+else
+  bad 'RENAME_PROFILE renames from adb'
+fi
+if shell dumpsys activity service "$SERVICE" | grep -q 'profile *"harness-adb"'; then
+  ok 'and the proxy in use keeps its place'
+else
+  bad 'and the proxy in use keeps its place'
+fi
+delete_profile_by_adb harness-adb
+
+step 'info marks'
+# Every control carries its own i, and the app's own Info is behind the burger.
+start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
+sleep 2
+save_profile harness-info
+shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
+sleep 1
+if panel_open harness-info; then
+  ok 'a proxy opens for its info marks'
+else
+  bad 'a proxy opens for its info marks'
+  panel_where
+fi
+if panel_tab listener && ui_tap_id info_port; then
+  sleep 1
+  if ui_text alertTitle | grep -q 'Port'; then
+    ok 'the i next to a field explains that field'
+  else
+    bad 'the i next to a field explains that field'
+    panel_where
+  fi
+  shell input keyevent 4 >/dev/null 2>&1
+  sleep 1
+else
+  bad 'the field carries an i'
+fi
+if panel_tab log && ui_tap_id info_log; then
+  sleep 1
+  if ui_dump | grep -q 'id/alertTitle"'; then
+    ok 'the log page carries one too'
+  else
+    bad 'the log page carries one too'
+  fi
+  shell input keyevent 4 >/dev/null 2>&1
+  sleep 1
+else
+  bad 'the log page carries an i'
+fi
+if menu_pick 'About this app'; then
+  sleep 1
+  if ui_dump | grep -q 'RENAME_PROFILE'; then
+    ok 'About this app is in the menu and shows the contract'
+  else
+    bad 'About this app is in the menu and shows the contract'
+  fi
+  shell input keyevent 4 >/dev/null 2>&1
+  sleep 1
+else
+  bad 'the menu has About this app'
+fi
+delete_profile_by_adb harness-info
 
 step 'new proxy'
 # The list's way in: name it, and the proxy that was created opens itself.
@@ -757,20 +1205,11 @@ else
   panel_where
 fi
 sleep 2
-# The log sits under the whole form, so the page is scrolled until the counters
-# are on screen: a node below the fold is not in a dump at all.
-traffic=""
-for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
-  traffic=$(ui_dump)
-  if printf '%s' "$traffic" | grep -q 'id/traffic"'; then break; fi
-  if printf '%s' "$traffic" | grep -q 'id/log_clear"'; then
-    # The counters are above the log, so a fling to the end can go past them.
-    shell input swipe 1300 1200 1300 1900 500
-  else
-    shell input swipe 1300 2100 1300 1300 700
-  fi
-  sleep 1
-done
+# The counters and the log share the Log segment now, so nothing has to be
+# scrolled: a node below the fold would not be in a dump at all.
+panel_tab log
+sleep 1
+traffic=$(ui_dump)
 if printf '%s' "$traffic" | grep -q 'id/traffic"'; then
   ok 'the proxy page shows the traffic line'
   if printf '%s' "$traffic" | grep -q 'No traffic in this run yet'; then

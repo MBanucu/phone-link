@@ -31,6 +31,8 @@ final class ConfigStore {
     static final String EXTRA_ADB_WIFI = "adb_wifi";
     /** The saved configuration to start with, see {@link #resolve}. */
     static final String EXTRA_PROFILE = "profile";
+    /** The new name, for {@link #EXTRA_PROFILE}'s rename. */
+    static final String EXTRA_TO = "to";
 
     private static final String PREFS = "config";
     private static final String KEY_PORT = "port";
@@ -185,6 +187,32 @@ final class ConfigStore {
     /** Whether the saved configuration manages wireless debugging. */
     static boolean profileAdbWireless(Context context, String name) {
         return prefs(context).getBoolean(profileKey(name, KEY_ADB_WIFI), true);
+    }
+
+    /**
+     * Another name for the same configuration: settings, switches, the mark of
+     * which proxy is in use and the remembered selection all move with it.
+     *
+     * @return false when there is nothing to rename or the new name is taken
+     */
+    static boolean renameProfile(Context context, String from, String to) {
+        if (from == null || to == null || from.equals(to)) {
+            return false;
+        }
+        ProxyConfig saved = profile(context, from);
+        if (saved == null || profile(context, to) != null) {
+            return false;
+        }
+        saveProfile(context, to, saved, profileAutoStart(context, from),
+                profileAdbWireless(context, from));
+        deleteProfile(context, from);
+        if (from.equals(inUse(context))) {
+            setInUse(context, to);
+        }
+        if (from.equals(selectedProfile(context))) {
+            setSelectedProfile(context, to);
+        }
+        return true;
     }
 
     static void deleteProfile(Context context, String name) {

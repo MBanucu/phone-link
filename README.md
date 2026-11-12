@@ -257,11 +257,24 @@ adb, starts it again by name (the two service switches come back with it),
 requires an unknown name to start nothing, removes it again with
 `DELETE_PROFILE`, opens a card, changes its port, requires the plain `Save` to
 write the form (a toggled auto-start switch included) into that proxy, requires
-that proxy's own log to show this run's counters, its events and their port and
-`Clear` to empty them, stops it, then
+a card's own button to start and stop its proxy and to say so, requires
+`Rename` in the menu and `RENAME_PROFILE` over adb to move a proxy to a new
+name, requires the info marks and `About this app` to open their dialogs,
+requires that proxy's own log to show this run's counters, its events and their
+port and `Clear` to empty them, stops it, then
 starts and stops it again from the Quick Settings tile (skipped when the phone stays locked, since the shade
 ignores clicks there) and uninstalls. It leaves the vendored proxy alone
 (`KEEP_APP=1` keeps the new app installed, `PROXY_APP_PORT` picks another port).
+
+Every run records the evidence a failure needs: `result-live/<timestamp>/`
+holds the phone's screen as `screen.mp4` for the length of the run and the
+screen as XML for every dump uiautomator served (about every two and a half
+seconds, `ui-index.csv` says when each was taken);
+`tests/live/frames.sh result-live/<timestamp>/screen.mp4 0:42` turns any moment
+of the recording into a still. One row per step is appended to
+`result-live/timings.csv` with its seconds and its pass/fail counts, and the
+file is never rewritten, so a run's cost can be compared across runs.
+`PHONE_LIVE_CAPTURE=0` runs without the recording and the snapshots.
 
 ```sh
 tests/live/proxy-app.sh

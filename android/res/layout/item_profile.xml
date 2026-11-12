@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- One saved proxy on the home screen: its name and whether it is running,
-     then the two lines that say what it is. Tapping it opens it. -->
+<!-- One saved proxy on the home screen: its state as a dot and a word, what it
+     holds, and the one button that starts or stops it without opening it. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -9,7 +9,10 @@
     android:clickable="true"
     android:focusable="true"
     android:orientation="vertical"
-    android:padding="12dp">
+    android:paddingStart="14dp"
+    android:paddingTop="12dp"
+    android:paddingEnd="12dp"
+    android:paddingBottom="10dp">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -17,11 +20,20 @@
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
+        <View
+            android:id="@+id/card_dot"
+            android:layout_width="10dp"
+            android:layout_height="10dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/dot" />
+
         <TextView
             android:id="@+id/card_name"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
             android:textAppearance="?android:attr/textAppearanceMedium"
             android:textStyle="bold" />
 
@@ -32,12 +44,11 @@
             android:textAppearance="?android:attr/textAppearanceSmall"
             android:textStyle="bold" />
 
-        <!-- The card opens; the list is the only way into a proxy. -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:alpha="0.4"
-            android:paddingStart="8dp"
+            android:alpha="0.35"
+            android:paddingStart="6dp"
             android:text="@string/chevron"
             android:textAppearance="?android:attr/textAppearanceMedium" />
     </LinearLayout>
@@ -53,7 +64,15 @@
         android:id="@+id/card_flags"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:alpha="0.7"
-        android:paddingTop="2dp"
+        android:alpha="0.6"
+        android:paddingTop="1dp"
         android:textAppearance="?android:attr/textAppearanceSmall" />
+
+    <Button
+        android:id="@+id/card_toggle"
+        style="?android:attr/buttonStyleSmall"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/action_start" />
 </LinearLayout>

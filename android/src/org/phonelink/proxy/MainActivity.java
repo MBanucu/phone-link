@@ -5,6 +5,7 @@ import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.res.ColorStateList;
 import android.database.ContentObserver;
 import android.graphics.Typeface;
 import android.net.Uri;
@@ -15,6 +16,7 @@ import android.os.PowerManager;
 import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.util.TypedValue;
 import android.view.Menu;
 import android.view.View;
 import android.view.WindowManager;
@@ -23,23 +25,22 @@ import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
+import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 /**
  * The panel: the same settings and the same two actions as the adb contract.
  *
- * <p>Home is the list of saved proxies, each with the state it is in, because
- * that is what the app is for; opening one shows its settings, its switch that
- * keeps it running and what it has done since it was started. The list is the
- * place several proxies will report into once the service can run more than one
- * at a time — today the state on a card is that proxy's own state, and exactly
- * one of them can be running.
+ * <p>Home is the list of saved proxies, each with the state it is in and its own
+ * Start/Stop, because that is what the app is for. Opening one splits it into
+ * three segments — what the listener is, what the service does with it, and what
+ * it has done — with a single toggle that follows that proxy's state. Every
+ * control that is not self-explanatory carries the same "i" mark, and the
+ * header's marks are icons rather than the platform's old text buttons.
  *
  * <p>The activity and the service run in one process, so the live state comes
  * from {@link ProxyRuntime} rather than a binder. Starting the service from a
@@ -50,15 +51,21 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
 
     /** The proxy that was open, so a rotation does not send the user home. */
     private static final String STATE_PROFILE = "open_profile";
+    /** The segment that was showing for the same reason. */
+    private static final String STATE_TAB = "tab";
 
-    private Button back;
+    private View back;
     private TextView headerTitle;
     private View warning;
-
     private ScrollView homeScreen;
-    private ScrollView profileScreen;
+    private LinearLayout profileScreen;
     private LinearLayout profileList;
     private TextView homeEmpty;
+
+    private RadioGroup tabs;
+    private View listenerPage;
+    private View servicePage;
+    private View logPage;
 
     private EditText port;
     private EditText user;
@@ -73,10 +80,12 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     private int batteryColor;
     private TextView adbState;
     private TextView pending;
+    private TextView pendingService;
     private TextView footerState;
     private TextView logText;
     private TextView traffic;
     private TrafficView trafficGraph;
+    private Button toggle;
 
     /** The saved proxy the fields belong to; null while the list is up. */
     private String editing;
@@ -98,7 +107,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
                 } else if (ConfigStore.KEY_SELECTED_PROFILE.equals(key)) {
                     return;
                 } else if (ConfigStore.KEY_PROFILES.equals(key)) {
-                    // A proxy saved, started or deleted over adb is a card.
+                    // A proxy saved, started, renamed or deleted over adb is a card.
                     renderHome();
                     if (editing != null && ConfigStore.profile(this, editing) == null) {
                         showHome();
@@ -129,7 +138,10 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         profileScreen = findViewById(R.id.screen_profile);
         profileList = findViewById(R.id.profile_list);
         homeEmpty = findViewById(R.id.home_empty);
-
+        tabs = findViewById(R.id.tabs);
+        listenerPage = findViewById(R.id.page_listener);
+        servicePage = findViewById(R.id.page_service);
+        logPage = findViewById(R.id.page_log);
         port = findViewById(R.id.port);
         user = findViewById(R.id.user);
         password = findViewById(R.id.password);
@@ -142,26 +154,33 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         batteryColor = battery.getCurrentTextColor();
         adbState = findViewById(R.id.adb_state);
         pending = findViewById(R.id.pending);
+        pendingService = findViewById(R.id.pending_service);
         footerState = findViewById(R.id.footer_state);
         logText = findViewById(R.id.log_text);
         traffic = findViewById(R.id.traffic);
         trafficGraph = findViewById(R.id.traffic_graph);
+        toggle = findViewById(R.id.toggle);
 
-        // The mark in the header is the same warning as the battery line, and
-        // one tap from the fix.
+        tabs.setOnCheckedChangeListener((group, checked) -> showPage(checked));
+        // The warning mark is the same warning as the battery line, and one tap
+        // from the fix.
         warning.setOnClickListener(view -> askForExemption());
         findViewById(R.id.info).setOnClickListener(view -> showHelp());
         findViewById(R.id.menu).setOnClickListener(this::showMenu);
         back.setOnClickListener(view -> showHome());
         findViewById(R.id.new_profile).setOnClickListener(view -> askProfileName(null));
         findViewById(R.id.save).setOnClickListener(view -> saveForm());
+        findViewById(R.id.save_service).setOnClickListener(view -> saveForm());
         findViewById(R.id.revert).setOnClickListener(view -> revertForm());
+        findViewById(R.id.revert_service).setOnClickListener(view -> revertForm());
         findViewById(R.id.log_clear).setOnClickListener(view -> EventLog.clear());
+        toggle.setOnClickListener(view -> toggleOpenProxy());
+        wireHelp();
 
         autoStart.setOnCheckedChangeListener((button, checked) -> renderBattery());
-        // Unlike the fields above this is one preference, not part of a start:
-        // it takes effect on the next SSID match either way, so saving it now
-        // is what the checkbox appears to promise.
+        // Unlike the fields this is one preference, not part of a start: it takes
+        // effect on the next SSID match either way, so saving it now is what the
+        // checkbox appears to promise.
         adbWireless.setOnCheckedChangeListener((button, checked) -> {
             if (loading) {
                 // A proxy's settings are a draft until Save or Start.
@@ -177,11 +196,6 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         });
         watchForEdits();
 
-        Button start = findViewById(R.id.start);
-        start.setOnClickListener(view -> startListening());
-        Button stop = findViewById(R.id.stop);
-        stop.setOnClickListener(view -> stopListening());
-
         render(ProxyRuntime.state());
         String open = savedInstanceState == null
                 ? null
@@ -191,6 +205,12 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         } else {
             showHome();
         }
+        tabs.check(savedInstanceState == null
+                ? R.id.tab_listener
+                : savedInstanceState.getInt(STATE_TAB, R.id.tab_listener));
+        // check() only reports a change, so a page restored by the framework
+        // would otherwise stay hidden.
+        showPage(tabs.getCheckedRadioButtonId());
         if (getIntent().getBooleanExtra(Help.EXTRA_HELP, false)) {
             showHelp();
         }
@@ -200,6 +220,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
         outState.putString(STATE_PROFILE, editing);
+        outState.putInt(STATE_TAB, tabs.getCheckedRadioButtonId());
     }
 
     /** One level up: from a proxy back to the list. */
@@ -213,19 +234,71 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         super.onBackPressed();
     }
 
+    // -- the marks that explain ------------------------------------------
+
+    /**
+     * The "i" next to a control. One dialog, the same shape everywhere, so the
+     * panel can say what a field is without spending a paragraph of the page on
+     * it.
+     */
+    private void info(int mark, int title, int message) {
+        findViewById(mark).setOnClickListener(view -> explain(title, message));
+    }
+
+    private void explain(int title, int message) {
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(message)
+                .setPositiveButton(android.R.string.ok, null)
+                .show();
+    }
+
+    private void wireHelp() {
+        info(R.id.info_port, R.string.info_port_title, R.string.info_port);
+        info(R.id.info_user, R.string.info_user_title, R.string.info_user);
+        info(R.id.info_password, R.string.info_password_title, R.string.info_password);
+        info(R.id.info_ssid, R.string.info_ssid_title, R.string.info_ssid);
+        info(R.id.info_anonymous, R.string.info_anonymous_title, R.string.info_anonymous);
+        info(R.id.info_any_network, R.string.info_any_network_title, R.string.info_any_network);
+        info(R.id.info_auto_start, R.string.info_auto_start_title, R.string.info_auto_start);
+        info(R.id.info_adb_wifi, R.string.info_adb_wifi_title, R.string.info_adb_wifi);
+        info(R.id.info_save, R.string.info_save_title, R.string.info_save);
+        info(R.id.info_save_service, R.string.info_save_title, R.string.info_save);
+        info(R.id.info_revert, R.string.info_revert_title, R.string.info_revert);
+        info(R.id.info_revert_service, R.string.info_revert_title, R.string.info_revert);
+        info(R.id.info_toggle, R.string.info_toggle_title, R.string.info_toggle);
+        info(R.id.info_new, R.string.info_new_title, R.string.info_new);
+        info(R.id.info_log, R.string.info_log_title, R.string.info_log);
+    }
+
+    // -- the segments ----------------------------------------------------
+
+    /** One of the three segments of an open proxy, and nothing else. */
+    private void showPage(int checked) {
+        boolean service = checked == R.id.tab_service;
+        boolean log = checked == R.id.tab_log;
+        listenerPage.setVisibility(service || log ? View.GONE : View.VISIBLE);
+        servicePage.setVisibility(service ? View.VISIBLE : View.GONE);
+        logPage.setVisibility(log ? View.VISIBLE : View.GONE);
+        if (log) {
+            renderLog();
+            renderTraffic();
+        }
+    }
+
     // -- the list -------------------------------------------------------
 
     private void showHome() {
         editing = null;
-        headerTitle.setText(R.string.app_name);
+        headerTitle.setText(R.string.home_title);
         back.setVisibility(View.GONE);
         profileScreen.setVisibility(View.GONE);
         homeScreen.setVisibility(View.VISIBLE);
         renderHome();
-        renderFooter();
+        renderBattery();
     }
 
-    /** Every saved proxy, newest state first: what the app is for. */
+    /** Every saved proxy: what the app is for. */
     private void renderHome() {
         List<String> names = ConfigStore.profileNames(this);
         profileList.removeAllViews();
@@ -244,6 +317,8 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
                     ConfigStore.profileAutoStart(this, name) ? "on" : "off",
                     ConfigStore.profileAdbWireless(this, name) ? "on" : "off"));
             card.setOnClickListener(view -> openProfile(name));
+            card.findViewById(R.id.card_toggle).setOnClickListener(
+                    view -> toggleFromCard(name));
             profileList.addView(card);
         }
         refreshCards();
@@ -251,36 +326,46 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
 
     /**
      * A card's state is that proxy's own state: the in-use one follows the
-     * service, everything else is stopped. Only the badge changes as clients
-     * come and go, so the list is not rebuilt for every connection.
+     * service, everything else is stopped. Only the parts that change are
+     * touched, so the list is not rebuilt for every connection.
      */
     private void refreshCards() {
         ProxyState state = ProxyRuntime.state();
         String inUse = ConfigStore.inUse(this);
         for (int index = 0; index < profileList.getChildCount(); index++) {
             View card = profileList.getChildAt(index);
-            Object name = card.getTag();
+            Object tag = card.getTag();
+            String name = tag == null ? null : tag.toString();
             boolean mine = name != null && name.equals(inUse);
-            TextView badge = card.findViewById(R.id.card_state);
             int label;
+            int color;
             if (mine && state.listening) {
                 label = R.string.state_running;
+                color = R.color.running;
             } else if (mine && state.running) {
                 label = R.string.state_waiting;
+                color = R.color.waiting;
             } else {
                 label = R.string.state_stopped;
+                color = R.color.traffic_base;
             }
+            TextView badge = card.findViewById(R.id.card_state);
             badge.setText(label);
-            badge.setTextColor(mine && state.listening
-                    ? getColor(R.color.running)
-                    : batteryColor);
-            TextView summary = card.findViewById(R.id.card_summary);
-            ProxyConfig config = name == null ? null : ConfigStore.profile(this, (String) name);
+            badge.setTextColor(getColor(color));
+            card.findViewById(R.id.card_dot).setBackgroundTintList(
+                    ColorStateList.valueOf(getColor(color)));
+            ProxyConfig config = name == null ? null : ConfigStore.profile(this, name);
             if (config != null) {
-                summary.setText(mine && state.running
+                ((TextView) card.findViewById(R.id.card_summary)).setText(mine && state.running
                         ? getString(R.string.card_in_use, config.summary())
                         : config.summary());
             }
+            Button startStop = card.findViewById(R.id.card_toggle);
+            boolean running = mine && state.running;
+            startStop.setText(running ? R.string.action_stop : R.string.action_start);
+            startStop.setBackgroundTintList(ColorStateList.valueOf(
+                    running ? getColor(R.color.traffic_base) : accent()));
+            startStop.setTextColor(getColor(android.R.color.white));
         }
     }
 
@@ -299,13 +384,14 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         back.setVisibility(View.VISIBLE);
         homeScreen.setVisibility(View.GONE);
         profileScreen.setVisibility(View.VISIBLE);
-        profileScreen.scrollTo(0, 0);
+        listenerPage.scrollTo(0, 0);
+        servicePage.scrollTo(0, 0);
         renderBattery();
         renderAdbState();
         renderPending();
         renderLog();
         renderTraffic();
-        renderFooter();
+        renderToggle();
     }
 
     /** The whole proxy: the listener's settings and the two service switches. */
@@ -390,18 +476,18 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
 
     /** The first port from `wanted` up that no saved proxy is using. */
     private int nextFreePort(int wanted) {
-        Set<Integer> taken = new HashSet<>();
+        java.util.Set<Integer> taken = new java.util.HashSet<>();
         for (String name : ConfigStore.profileNames(this)) {
             ProxyConfig saved = ConfigStore.profile(this, name);
             if (saved != null) {
                 taken.add(saved.port);
             }
         }
-        int port = wanted;
-        while (taken.contains(port) && port < 65535) {
-            port++;
+        int free = wanted;
+        while (taken.contains(free) && free < 65535) {
+            free++;
         }
-        return port;
+        return free;
     }
 
     /** The name dialog: a new proxy, or the form under another name. */
@@ -464,6 +550,53 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         openProfile(name);
     }
 
+    /** Another name for the same proxy; its settings and its state move with it. */
+    private void askRename() {
+        if (editing == null) {
+            return;
+        }
+        final String from = editing;
+        EditText name = new EditText(this);
+        name.setText(from);
+        name.setSelection(from.length());
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.rename_title, from))
+                .setView(name)
+                .setPositiveButton(android.R.string.ok, (shown, which) ->
+                        renameTo(from, name.getText().toString().trim()))
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.show();
+        name.requestFocus();
+        dialog.getWindow().setSoftInputMode(
+                WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+    }
+
+    private void renameTo(String from, String to) {
+        if (to.isEmpty()) {
+            Toast.makeText(this, R.string.profile_name_required, Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (to.equals(from)) {
+            return;
+        }
+        if (!ConfigStore.renameProfile(this, from, to)) {
+            Toast.makeText(this, getString(R.string.profile_exists, to),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        EventLog.addTo(to, "renamed \"" + from + "\" to \"" + to + "\"");
+        // The running proxy, if this was the one, keeps logging under the new
+        // name instead of one that no longer exists.
+        if (ProxyRuntime.state().running && to.equals(ConfigStore.inUse(this))) {
+            EventLog.setActiveTag(to);
+        }
+        Toast.makeText(this, getString(R.string.profile_renamed, from, to),
+                Toast.LENGTH_SHORT).show();
+        renderHome();
+        openProfile(to);
+    }
+
     private void confirmDeleteProfile() {
         if (editing == null) {
             return;
@@ -487,15 +620,18 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
 
     // -- the header -----------------------------------------------------
 
-    /** The menu: the two proxy actions and the two whole-app views. */
+    /** The menu: the proxy actions, the app's own two views, and its Info. */
     private void showMenu(View anchor) {
         PopupMenu menu = new PopupMenu(this, anchor);
         Menu items = menu.getMenu();
+        boolean open = editing != null;
         items.add(0, 1, 0, R.string.action_new);
-        items.add(0, 2, 1, R.string.action_save).setEnabled(editing != null);
-        items.add(0, 3, 2, R.string.action_save_as).setEnabled(editing != null);
-        items.add(0, 4, 3, R.string.menu_delete).setEnabled(editing != null);
-        items.add(0, 5, 4, R.string.menu_all_events);
+        items.add(0, 2, 1, R.string.action_save).setEnabled(open);
+        items.add(0, 3, 2, R.string.action_save_as).setEnabled(open);
+        items.add(0, 4, 3, R.string.action_rename).setEnabled(open);
+        items.add(0, 5, 4, R.string.action_delete).setEnabled(open);
+        items.add(0, 6, 5, R.string.menu_all_events);
+        items.add(0, 7, 6, R.string.menu_info);
         menu.setOnMenuItemClickListener(item -> {
             switch (item.getItemId()) {
                 case 1:
@@ -508,10 +644,16 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
                     askProfileName(editing);
                     return true;
                 case 4:
-                    confirmDeleteProfile();
+                    askRename();
                     return true;
                 case 5:
+                    confirmDeleteProfile();
+                    return true;
+                case 6:
                     showAllEvents();
+                    return true;
+                case 7:
+                    showHelp();
                     return true;
                 default:
                     return false;
@@ -550,12 +692,33 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
 
     // -- state ----------------------------------------------------------
 
-    private void renderFooter() {
+    /** The accent of the theme, for the button that does something. */
+    private int accent() {
+        TypedValue value = new TypedValue();
+        getTheme().resolveAttribute(android.R.attr.colorAccent, value, true);
+        return value.data;
+    }
+
+    /** Whether this proxy is the one the service is running right now. */
+    private boolean isRunning(String name) {
         ProxyState state = ProxyRuntime.state();
-        String inUse = ConfigStore.inUse(this);
+        return state.running && name != null && name.equals(ConfigStore.inUse(this));
+    }
+
+    /** The one button under an open proxy: Start, or Stop when it is running. */
+    private void renderToggle() {
+        ProxyState state = ProxyRuntime.state();
+        boolean running = isRunning(editing);
+        toggle.setText(running ? R.string.action_stop : R.string.action_start);
+        toggle.setBackgroundTintList(ColorStateList.valueOf(
+                running ? getColor(R.color.traffic_base) : accent()));
+        toggle.setTextColor(getColor(android.R.color.white));
+        if (editing == null) {
+            return;
+        }
         if (!state.running) {
             footerState.setText(R.string.footer_stopped);
-        } else if (editing != null && !editing.equals(inUse)) {
+        } else if (!editing.equals(ConfigStore.inUse(this))) {
             footerState.setText(R.string.footer_not_this);
         } else {
             footerState.setText(state.describe());
@@ -671,7 +834,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
 
     private void render(ProxyState state) {
         refreshCards();
-        renderFooter();
+        renderToggle();
     }
 
     // -- Android's promises ----------------------------------------------
@@ -755,7 +918,8 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
 
     /**
      * The fields do nothing until Save or Start, which is not obvious from a
-     * form that looks applied, so edits get a line of their own.
+     * form that looks applied, so edits get a line of their own on both of the
+     * pages that hold fields.
      */
     private void watchForEdits() {
         TextWatcher watcher = new TextWatcher() {
@@ -781,7 +945,9 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     }
 
     private void renderPending() {
-        pending.setVisibility(pendingChanges() ? View.VISIBLE : View.GONE);
+        boolean changed = pendingChanges();
+        pending.setVisibility(changed ? View.VISIBLE : View.GONE);
+        pendingService.setVisibility(changed ? View.VISIBLE : View.GONE);
     }
 
     /** Whether the fields say something other than the saved proxy does. */
@@ -817,41 +983,53 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     }
 
     /**
-     * Start what is on screen. With a proxy open that is the form, stored first,
-     * so the proxy that runs is the one that was saved; from the list it is the
-     * proxy that was last in use.
+     * Start this proxy from its card, with the settings it already has — the
+     * form of another proxy on screen is not involved.
      */
-    private void startListening() {
-        String name = editing != null ? editing : ConfigStore.inUse(this);
+    private void toggleFromCard(String name) {
+        if (isRunning(name)) {
+            stopListening();
+            return;
+        }
         if (ConfigStore.profile(this, name) == null) {
-            name = null;
+            return;
         }
-        if (editing != null) {
-            ProxyConfig config;
-            try {
-                config = readFields();
-            } catch (IllegalArgumentException e) {
-                Toast.makeText(this, e.getMessage(), Toast.LENGTH_LONG).show();
-                return;
-            }
-            ConfigStore.saveProfile(this, editing, config, autoStart.isChecked(),
-                    adbWireless.isChecked());
-            ConfigStore.save(this, config);
-            ConfigStore.setAutoStart(this, autoStart.isChecked());
-            ConfigStore.setAdbWireless(this, adbWireless.isChecked());
-            ConfigStore.setInUse(this, editing);
-            renderHome();
-            renderPending();
+        ConfigStore.setInUse(this, name);
+        startForegroundService(new Intent(this, ProxyService.class)
+                .setAction(ProxyService.ACTION_START)
+                .putExtra(ConfigStore.EXTRA_PROFILE, name));
+    }
+
+    /** The button under an open proxy: stop it, or store the form and start it. */
+    private void toggleOpenProxy() {
+        if (editing == null) {
+            return;
         }
+        if (isRunning(editing)) {
+            stopListening();
+            return;
+        }
+        ProxyConfig config;
+        try {
+            config = readFields();
+        } catch (IllegalArgumentException e) {
+            Toast.makeText(this, e.getMessage(), Toast.LENGTH_LONG).show();
+            return;
+        }
+        ConfigStore.saveProfile(this, editing, config, autoStart.isChecked(),
+                adbWireless.isChecked());
+        ConfigStore.save(this, config);
+        ConfigStore.setAutoStart(this, autoStart.isChecked());
+        ConfigStore.setAdbWireless(this, adbWireless.isChecked());
+        ConfigStore.setInUse(this, editing);
+        renderHome();
+        renderPending();
         if (autoStartWanted() && !batteryExempt()) {
             askForExemption();
         }
-        Intent intent = new Intent(this, ProxyService.class)
-                .setAction(ProxyService.ACTION_START);
-        if (name != null) {
-            intent.putExtra(ConfigStore.EXTRA_PROFILE, name);
-        }
-        startForegroundService(intent);
+        startForegroundService(new Intent(this, ProxyService.class)
+                .setAction(ProxyService.ACTION_START)
+                .putExtra(ConfigStore.EXTRA_PROFILE, editing));
     }
 
     private void stopListening() {

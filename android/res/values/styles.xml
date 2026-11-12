@@ -9,9 +9,73 @@
     -->
     <style name="AppTheme" parent="@android:style/Theme.DeviceDefault.DayNight">
         <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
-        <!-- No title bar: it only ever held the app's own name, and the header
-             in the layout puts the Info button, the warning mark and the menu
-             in that space. -->
+        <!-- No title bar: the layout's header row holds the marks and the menu. -->
         <item name="android:windowNoTitle">true</item>
+    </style>
+
+    <!--
+      The "i" in a circle. One style, so every mark on the panel is the same
+      size and fades the same way; the header uses the larger variant.
+    -->
+    <style name="InfoMark">
+        <item name="android:layout_width">32dp</item>
+        <item name="android:layout_height">32dp</item>
+        <item name="android:layout_marginStart">4dp</item>
+        <item name="android:padding">6dp</item>
+        <item name="android:background">?android:attr/selectableItemBackgroundBorderless</item>
+        <item name="android:scaleType">fitCenter</item>
+        <item name="android:src">@drawable/ic_info</item>
+        <item name="android:tint">?android:attr/textColorSecondary</item>
+        <item name="android:contentDescription">@string/action_info_control</item>
+    </style>
+
+    <style name="HeaderMark" parent="InfoMark">
+        <item name="android:layout_width">44dp</item>
+        <item name="android:layout_height">44dp</item>
+        <item name="android:padding">10dp</item>
+        <item name="android:layout_marginStart">0dp</item>
+        <item name="android:alpha">0.75</item>
+    </style>
+
+    <!-- A label and its mark: the label takes the room, the mark stays small. -->
+    <style name="FieldLabelRow">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:paddingTop">6dp</item>
+    </style>
+
+    <style name="FieldLabel">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:textAppearance">?android:attr/textAppearanceSmall</item>
+        <item name="android:alpha">0.8</item>
+    </style>
+
+    <!-- One of the three pages of an opened proxy. -->
+    <style name="Segment">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:button">@null</item>
+        <item name="android:background">@drawable/segment</item>
+        <item name="android:gravity">center</item>
+        <item name="android:paddingTop">8dp</item>
+        <item name="android:paddingBottom">8dp</item>
+        <item name="android:textColor">@color/segment_text</item>
+        <item name="android:textSize">14sp</item>
+    </style>
+
+    <style name="SectionHeader">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:paddingTop">12dp</item>
+        <item name="android:paddingBottom">2dp</item>
+        <item name="android:textAppearance">?android:attr/textAppearanceSmall</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:letterSpacing">0.06</item>
+        <item name="android:alpha">0.7</item>
     </style>
 </resources>

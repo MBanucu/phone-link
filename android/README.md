@@ -88,15 +88,33 @@ deleted the app's stored configuration.
   split instead of `Log.i`, `Egress` and string building inside the service —
   and why the `script` check carries a JDK.
 - `tests/live/proxy-app.sh` — needs a phone with a Wi-Fi client link and the
-  built APK. It unlocks the phone through `bin/phone-unlock` when `sudo -n`
-  allows it (the shade ignores tile clicks and uiautomator cannot dump a
-  sleeping panel), then: install, open the panel and require it to stay up,
-  `auto_start` reaching the service and showing in the panel, `200` through the
-  tunnel, a wrong password refused, an unrelated SSID keeping the port closed
-  with the service up, `any_network` bypassing the predicate, stop, start and
-  stop again from the Quick Settings tile, and uninstall. A phone that stays
-  locked skips the steps that need the screen instead of failing. Not part of
-  `nix flake check`.
+  built APK (by default `android/build/phone-link-proxy.apk`, or the file named
+  by `PROXY_APP_APK`). It unlocks the phone through `bin/phone-unlock` when
+  `sudo -n` allows it (the shade ignores tile clicks and uiautomator cannot dump
+  a sleeping panel), then: install, open the list, require a card to open its
+  proxy, `auto_start` showing on the `Service` segment, the header warning and
+  the battery request, `200` through the tunnel, a wrong password refused, the
+  `anonymous` box applied by the one button, an unrelated SSID keeping the port
+  closed with the service up, `any_network` bypassing the predicate, profiles
+  saved and loaded over adb, `Save` on both segments, a card starting and
+  stopping its proxy, `Rename` from the menu and `RENAME_PROFILE` over adb, the
+  info marks and `About this app`, `New proxy`, the traffic counters and the log
+  on the `Log` segment, stop, start and stop again from the Quick Settings tile,
+  and uninstall. A phone that stays locked skips the steps that need the screen
+  instead of failing. Not part of `nix flake check`.
+
+  Every run leaves its evidence in `result-live/<UTC start>/` (gitignored, or
+  `PHONE_LIVE_ARTIFACTS`): `screen.mp4`, the phone's screen recorded for the
+  whole run, and `ui-NNNNN.xml`, uiautomator's dump of the screen as often as a
+  dump is served — about every two and a half seconds on this phone, which is
+  what one costs — with `ui-index.csv` giving each one's timestamp, so what the
+  phone showed at a moment can be re-read afterwards. `tests/live/frames.sh
+  result-live/<run>/screen.mp4 0:42 95.5` writes a still per moment; it needs
+  ffmpeg on the host. Each step's duration and pass/fail counts are appended to
+  `result-live/timings.csv`, one row per step plus a `TOTAL` row: the file is
+  never rewritten, which is what makes "how long does this run cost" a question
+  with an answer. `PHONE_LIVE_CAPTURE=0` turns the recording and the snapshots
+  off for a quick run.
 
 ## Run
 
@@ -199,18 +217,28 @@ adb shell pm grant org.phonelink.proxy android.permission.WRITE_SECURE_SETTINGS
 ```
 
 The panel is two screens: home is the list of saved proxies, and one of them
-opens for its settings and its log. The state is one small line above
-`Start`/`Stop` and a word on each card, not a block at the top, so the list
-and the form get the room; `Back` (or the button in the header) returns to the
-list.
+opens for its settings and its log. That page is split into three segments —
+`Listener` (the port, the credentials, the SSID and the two listener boxes),
+`Service` (auto-start, wireless debugging, and what the phone says about each)
+and `Log` (this run's counters and that proxy's events) — so nothing has to be
+scrolled past to reach the next thing. `Back` (or the arrow in the header)
+returns to the list.
 
 The title bar is gone. Its only content was the app's own name, so the layout
-carries a header row instead: the name of the list (or of the open proxy with a
-back arrow), a warning mark that appears exactly while a reboot restart cannot
-work (tapping it opens the battery request, from either screen), `Info`, and a
-menu — `New proxy`, `Save`, `Save as…`, `Delete` for the open one, and
-`All events`. The open proxy carries a plain `Save` next to `Revert`, and
-`Save as…`/`Delete` stay in the menu so the form is not crowded.
+carries a header row of icons instead: the name of the list (or of the open
+proxy with a back arrow), a warning mark that appears exactly while a reboot
+restart cannot work (tapping it opens the battery request, from either screen),
+an `i` for the app's own Info, and the burger. The menu holds `New proxy`,
+`Save`, `Save as…`, `Rename`, `Delete` for the open one, `All events`, and
+`About this app` — the same Info the header's `i` opens. The open proxy carries
+a plain `Save` next to `Revert`, and `Save as…`/`Rename`/`Delete` stay in the
+menu so the form is not crowded.
+
+Every control explains itself: the small `i` next to a field, a box, `Save`,
+`Revert`, the one button under the segments, `New proxy` and the log's `Clear`
+opens a dialog with what that control is for. The marks are the same
+information the Info dialog carries, one control at a time, so a first run does
+not need the whole contract.
 
 The list is the app: one card per saved proxy with its name, its state —
 `Running` in green, `Waiting` while the service is up but the network does not
@@ -228,9 +256,13 @@ run more than one at a time: a card's state is already that proxy's own state,
 and the list is rebuilt from the store. Today exactly one can be running, and
 the card of the one that is says so.
 
-`Start` on an open proxy stores the form into that proxy first and then starts
-it, so the proxy that runs is the one that was saved and the list marks the
-right card; from the list, `Start` starts the proxy that was last in use.
+There is one button instead of two: it says `Start` while that proxy is not the
+one running and `Stop` while it is, on the card and on the open proxy alike. On
+the card it starts or stops that proxy without opening it and without asking
+for the battery exemption; on the open page it stores the form into the proxy
+first and then starts it, so the proxy that runs is the one that was saved and
+the list marks the right card. A name is only a label, so `Rename` moves the
+settings, the two switches and the mark of which proxy is in use with it.
 
 Each proxy keeps its own log: the last 200 things that happened to it, newest
 first with a time — the state changes (`listening on 0.0.0.0:1081 · 0
@@ -263,9 +295,10 @@ setup, which only takes effect on `Save` or `Start`: the same page exposes the
 `anonymous` extra as "Listen without authentication". Start is the filled
 button because it is the one that does something.
 
-The panel also explains itself: `Info` in the header opens a dialog
-with what the app is, when the port opens, what every control does and the
-whole adb contract. The same text is the service's own `dumpsys` dump,
+The panel also explains itself: the `i` in the header — and `About this app` in
+the menu — opens a dialog with what the app is, when the port opens, what every
+control does and the whole adb contract, and each control's own `i` explains
+that one control. The same text is the service's own `dumpsys` dump,
 followed by what it is doing right now, so an agent reads the contract and the
 facts on stdout without a screen:
 

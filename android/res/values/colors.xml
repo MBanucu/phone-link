@@ -7,6 +7,9 @@
     <!-- A proxy that is up: the only green in the panel, and the one thing
          the list should be readable at a glance. -->
     <color name="running">#ff2e7d32</color>
+    <!-- The service is up but the port is closed: waiting for the network, or
+         for wireless debugging to come back. -->
+    <color name="waiting">#ffef6c00</color>
     <!-- The two directions on the sparkline. -->
     <color name="traffic_down">#ff1e88e5</color>
     <color name="traffic_up">#ff43a047</color>
