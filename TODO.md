@@ -95,37 +95,6 @@ list is empty.
       (mandatory), and both claiming the SSID is fine, since that is a predicate
       rather than a binding.
 
-## Tests that run on the phone instead of over adb
-
-- [ ] Evaluate on-device testing and use it where it wins. Every check today
-      costs a round trip and, worse, a *capture*: the harness asks the phone what
-      is on screen, decides on the laptop, and taps over a broadcast. Android
-      has frameworks that run inside the device: instrumentation tests
-      (`androidx.test` with Espresso for the app's own views, UiAutomator for
-      the shade and other apps) launched with `am instrument`, the platform's
-      own (deprecated) `InstrumentationTestRunner`, `cmd uiautomator runtest`
-      with a jar built against the platform's `uiautomator.jar`, and
-      `uiautomator2`-style servers driven from the host. What has to be answered
-      first: which of them exist on *this* phone and at this API level, and what
-      each costs to build without Gradle and without dependencies — the repo
-      builds APKs with `aapt2`, `javac`, `d8` and `apksigner` by hand, and an
-      instrumentation APK needs a runner class on the device (either the
-      platform runner or a vendored `androidx.test` jar) plus a
-      `testInstrumentationRunner` in its manifest, which is more manifest than
-      a dependency-free build has ever had to carry. What would actually move:
-      assertions about the app itself (this view says that, this switch is off,
-      this page is showing), which is most of what the harness checks, and
-      waiting for a view instead of for a captured hierarchy — UiAutomator has
-      `UiDevice.wait(Until.hasObject(...))` and Espresso synchronises on the UI
-      thread by itself. What cannot move: the tunnel tests (a request from the
-      laptop through the phone's SOCKS5 port), `dumpsys`, `logcat`, the video and
-      the clock fit, and anything about the phone's network — the phone cannot
-      test the thing the phone is. A middle path worth costing: keep the harness
-      as the driver and the record, but let it call a small on-device test APK
-      for the checks that are pure UI (`am instrument` for one test class,
-      result read from its output), so the phone decides what it saw and the
-      laptop still decides what that means.
-
 ## A failure that points at itself
 
 - [ ] Make a failed check say where it failed without a person reading the run.
@@ -147,3 +116,20 @@ list is empty.
       timeline assembled at the end of a step rather than a hunt after a run.
       Worth doing before the frames wish, because the frames then hang off the
       instants this produces instead of being guessed.
+
+## Files too big to work in
+
+- [ ] Split the files that have outgrown being read. `MainActivity.java` and
+      `ProxyService.java` carry nearly two thousand lines between them, and each
+      now holds several jobs — the panel's screens and their rendering, the
+      service's lifecycle, the listeners, the profile store's front door — so a
+      change to one has to be made with the whole file in view.
+      `tests/live/proxy-app.sh` is close to that too: taps, captures, the clock
+      fit, the recording and the twenty steps in one script, where a helper
+      added for one step is read by every other. What a split should keep: one
+      place that knows how to *look* at the phone (captures, actions, sequences)
+      and one that knows what to *claim* (the steps), and on the Java side the
+      activity asked for a screen rather than building it, and the service asked
+      for a listener rather than holding its sockets itself. Not a rewrite:
+      move code, keep the checks green, and commit by the seam, so a run that
+      breaks points at one move.
