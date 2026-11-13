@@ -130,6 +130,23 @@ deleted the app's stored configuration.
   steps that open dialogs (`Save`, the info marks, `new proxy`) each 5–11 s
   cheaper. `PHONE_LIVE_DUMPS=uiautomator` falls back to sleeping a second.
 
+  A step that is a straight line — open a page, type a name, press its button,
+  wait for the page behind — is one `SEQUENCE` broadcast instead of one per tap,
+  key and wait (`android/capture/.../Sequence.java` has the grammar):
+  `--es script 'wait class=android.widget.EditText 2000; text harness-new;
+  tap-id button1 3000; wait id=back 3000'`. The phone runs it on a thread of
+  its own, stamps every instruction in `actions.csv`, and answers with the
+  instruction that stopped it, which the harness prints when that step fails.
+  Instructions are `tap`, `tap-id`, `tap-text` (waits for the place to hold
+  still, so a sliding menu is not tapped where it was), `swipe`, `text` (into
+  the focused field, replacing it — no clearing first), `keyboard-off` (Back,
+  only if a keyboard window is really up), `back`, `home`, `wait`, `wait-gone`,
+  `wait-change`, `wait-quiet` and `expect`/`expect-gone`; matchers are `text=`,
+  `contains=`, `id=`, `desc=`, `class=` and `xml=`. Measured: the new-proxy
+  dialog — open, type, press, land on the page — is 0.9 s in one message, and
+  the harness steps that use it (`rename`, `info marks`, `new proxy`, the
+  battery dialog on every toggle) lost 3–7 s each.
+
   Everything the phone writes down is on one clock
   (`SystemClock.elapsedRealtimeNanos()`, which counts through deep sleep):
   `ui-index.csv` gives each capture the instant it was read, `actions.csv`

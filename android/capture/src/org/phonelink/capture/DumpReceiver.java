@@ -16,6 +16,8 @@ import android.util.Log;
  * adb shell am broadcast -a org.phonelink.capture.WAIT --es has X --ez gone true
  * adb shell am broadcast -a org.phonelink.capture.WAIT --ez change true
  * adb shell am broadcast -a org.phonelink.capture.WAIT --ei quiet 250
+ * adb shell am broadcast -a org.phonelink.capture.SEQUENCE \
+ *     --es script 'tap-id save; wait text=Saved 3000'
  * adb shell am broadcast -a org.phonelink.capture.TAP --ei x 540 --ei y 1200
  * adb shell am broadcast -a org.phonelink.capture.SWIPE \
  *     --ei x1 540 --ei y1 2200 --ei x2 540 --ei y2 1200 --ei ms 200
@@ -36,6 +38,11 @@ import android.util.Log;
  * {@code result=0} when the screen answered, {@code 1} when time ran out and
  * {@code 2} when nothing was listening. It goes async, because the answer comes
  * from the main thread this receiver runs on.
+ *
+ * <p>{@code SEQUENCE} is several such steps in one message, run on a thread of
+ * their own — a form filled in and its button pressed costs one round trip
+ * instead of one per tap, key and wait. See {@link Sequence} for the script and
+ * for what the result says when an instruction fails.
  */
 public final class DumpReceiver extends BroadcastReceiver {
 
@@ -77,6 +84,11 @@ public final class DumpReceiver extends BroadcastReceiver {
                         intent.getBooleanExtra("change", false),
                         Math.max(0, intent.getIntExtra("quiet", 0)),
                         intent.getIntExtra("timeout", 3000), pending);
+                break;
+            }
+            case "org.phonelink.capture.SEQUENCE": {
+                PendingResult pending = goAsync();
+                service.runSequence(intent.getStringExtra("script"), pending);
                 break;
             }
             case "org.phonelink.capture.BACK":

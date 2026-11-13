@@ -46,32 +46,6 @@ list is empty.
       to happen on the host, or the harness has to read the file out to the host
       while the run goes on.
 
-## Sequences that run on the phone, not one command at a time
-
-- [ ] Let the service run a short sequence of actions itself. Every step of the
-      harness is still a conversation: one `am broadcast` per tap or swipe
-      (~0.1 s of adb round trip), one per wait, one or two per capture, so a
-      step with five actions pays most of a second before the phone does
-      anything; measured, the run makes ~120 gestures and ~400 captures, and the
-      overhead is tens of seconds of the total. The service already has the
-      pieces to do more per message — gestures with the instant they landed,
-      Back and Home, waits on the screen (`has`/`gone`/`change`/`quiet`), and the
-      XML it writes, which is what turns a control's `resource-id` or text into
-      a point on the screen. A sequence would be a small script carried in one
-      broadcast and run off the main thread: `tap-id save`, `wait text="Saved"
-      2000`, `tap-id port`, `text 18099`, `back`, `settle 250`, `expect
-      text="Saved"` — each instruction timed with the phone's clock and written
-      to `actions.csv`, the result reported as the broadcast's data (which
-      instruction failed, if any). The design question is where the line goes:
-      waiting, resolving a control and typing are the phone's business, while
-      assertions about `dumpsys`, ports and bytes need the host and must stay
-      steps. Sequences would be used where a step is a known straight line — the
-      dialog dances, the card toggle, the ten-proxy loop — and the harness would
-      keep branching between them on what the host can see. The risk is
-      debugging: a script that fails half way has to say exactly where, which is
-      why every instruction reports its own outcome rather than a single
-      yes/no.
-
 ## The proxy app, a project of its own
 
 - [ ] Move `android/` out into its own repository, with its own build and its

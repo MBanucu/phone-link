@@ -382,6 +382,32 @@ settle() { # settle [QUIET_MS]
   wait_phone --ei quiet "${1:-250}" --ei timeout 2500
 }
 
+# --- straight lines, run on the phone ------------------------------------
+# One broadcast per tap, key and wait is a round trip each — a tenth of a
+# second before the phone does anything — which for "type a name, press OK,
+# wait for the page" is most of a second. A sequence is that whole straight
+# line in one message: the phone runs it on a thread of its own and answers
+# when it is over, saying which instruction stopped it. Instructions, matchers
+# and the result: android/capture/src/org/phonelink/capture/Sequence.java.
+#
+# Used where a step is a known line from here to there; anything that depends
+# on an answer — a port that serves, a profile in dumpsys — stays on the host.
+sequence_stopped=""
+sequence() { # sequence 'SCRIPT' -> 0 when every instruction ran
+  [ "$capture_dumps" = 1 ] || return 1
+  local out
+  out=$(shell am broadcast -a "$CAPTURE_PKG.SEQUENCE" --es script "$(phone_arg "$1")" \
+    -n "$CAPTURE_PKG/.DumpReceiver" 2>/dev/null)
+  case $out in
+    *'result=0'*) sequence_stopped=""; return 0 ;;
+  esac
+  # The instruction that stopped it, for the step's own diagnostics: the
+  # record in actions.csv has the same line with its instant.
+  sequence_stopped=$(printf '%s' "$out" |
+    sed -n 's/.*data="\([^"]*\)".*/\1/p')
+  return 1
+}
+
 # The panel, up and still, whatever it was showing before.
 open_panel() {
   shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
@@ -695,19 +721,21 @@ panel_where() {
   printf '  activity records: %s\n' "$(shell dumpsys activity activities 2>/dev/null |
     grep -c "$PKG/.MainActivity")"
   printf '  app nodes: %s\n' "$(ui_dump | grep -o "$PKG:id/[a-z_]*" | wc -l)"
+  if [ -n "$sequence_stopped" ]; then
+    printf '  last sequence stopped at: %s\n' "$sequence_stopped"
+  fi
 }
 
 # Start can open the battery request when auto-start promises a restart the
 # phone will not deliver; it is a window of its own and would swallow the taps
 # of the next step, so answer it and carry on.
 dismiss_battery() {
-  # It is waited for rather than looked at once and slept past: if Start opened
-  # it, it arrives within a moment, and if it did not, the wait is the cost of
-  # asking.
-  if wait_for 'Let the proxy restart by itself' 700; then
-    ui_tap_id button2 2>/dev/null || back >/dev/null 2>&1
-    settle
-  fi
+  # One message: wait a moment for the request, answer it if it came, and wait
+  # for the dialog to be gone. If it did not come the sequence stops at its
+  # first instruction after that moment, which is the cost of asking — and
+  # that is no failure of the step that called this.
+  sequence 'wait contains="Let the proxy restart by itself" 700; tap-id button2 1000; wait-gone id=button2 2000'
+  return 0
 }
 
 # The one button on a proxy's own page starts it, and stops it while it runs.
@@ -716,39 +744,12 @@ panel_toggle() {
   dismiss_battery
 }
 
-ui_tap_text() { # ui_tap_text TEXT -> taps the one node carrying that text
-  # The position has to hold still for two captures first: a menu that is still
-  # animating in is in the dump, but at a place it is about to leave, and a tap
-  # there lands on the item that is moving into it.
-  local x y px py attempt
-  px=""
-  py=""
-  for attempt in 1 2 3 4 5 6; do
-    x=""
-    y=""
-    read -r x y <<EOF
-$(ui_dump | tr '>' '\n' | grep "text=\"$1\"" | head -1 |
-  sed -n 's/.*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/p' |
-  awk '{ if (NF == 4) print int(($1 + $3) / 2), int(($2 + $4) / 2) }')
-EOF
-    if [ -n "$x" ] && [ "$x" = "$px" ] && [ "$y" = "$py" ]; then
-      tap "$x" "$y"
-      settle
-      return 0
-    fi
-    px=$x
-    py=$y
-    wait_change 600
-  done
-  return 1
-}
-
-# The menu is a popup over the header, opened by the burger.
+# The menu is a popup over the header, opened by the burger, and picking an
+# item is a straight line: the burger, then the item once it has stopped
+# sliding — a tap at where a sliding item was a moment ago lands on whatever
+# moved into its place, which the phone checks for by looking twice.
 menu_pick() { # menu_pick TEXT
-  ui_tap_id menu || return 1
-  # The menu slides in; its items are waited for rather than slept past.
-  wait_for "text=\"$1\"" 2000 || true
-  ui_tap_text "$1"
+  sequence "tap-id menu 3000; tap-text \"$1\" 3000; wait-quiet 250"
 }
 
 # One card's node, found by the name in the same card: the list is a column of
@@ -836,21 +837,6 @@ EOF
     settle
   done
   return 1
-}
-
-# The keyboard covers the lower half of a form and would take a tap meant for a
-# button, so close it before looking for one. Keycode 4 is Back only while no
-# keyboard is up — with one, it puts the keyboard away.
-close_keyboard() {
-  local attempt
-  for attempt in 1 2 3; do
-    if ! shell dumpsys input_method 2>/dev/null | grep -q 'mInputShown=true'; then
-      return 0
-    fi
-    back >/dev/null 2>&1
-    settle
-  done
-  return 0
 }
 
 ui_tap_id() { # ui_tap_id ID -> taps that node where it is, without scrolling
@@ -1307,10 +1293,15 @@ else
 fi
 panel_tab listener
 panel_tap port
-input_action keyevent KEYCODE_MOVE_END 67 67 67 67 67 67
-input_action text 18099
-close_keyboard
-panel_tab listener
+# Typing here replaces the field in place rather than clearing it with a dozen
+# Backspaces and an `input text` of its own: the field already has the focus,
+# and a sequence takes it from there. Tapping the field raised the keyboard,
+# which covers the Save row, so the phone puts it away before anything looks
+# for that button — and only if one is really up.
+if ! sequence 'text 18099; wait-quiet 250; keyboard-off; wait-quiet 300'; then
+  bad 'the port field takes a number'
+  panel_where
+fi
 panel_tap save
 settle
 if shell dumpsys activity service "$SERVICE" | grep -q 'harness-save.*port 18099'; then
@@ -1414,38 +1405,33 @@ else
   panel_where
 fi
 if menu_pick Rename; then
-  # The dialog opens on its name field with the keyboard up, so the field does
-  # not have to be found among the page's own edit fields behind it.
-  if wait_for 'class="android.widget.EditText"' 2000; then
-    input_action keyevent KEYCODE_MOVE_END
-    input_action keyevent 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67
-    input_action text harness-renamed
-    close_keyboard
-    if ui_tap_id button1; then
-      settle
-      if shell dumpsys activity service "$SERVICE" | grep 'saved' |
-        grep -q '"harness-renamed"'; then
-        ok 'the menu renames a proxy'
-      else
-        bad 'the menu renames a proxy'
-        panel_where
-      fi
-      if shell dumpsys activity service "$SERVICE" | grep 'saved' |
-        grep -q '"harness-old"'; then
-        bad 'and the old name is gone'
-      else
-        ok 'and the old name is gone'
-      fi
-      if [ "$(ui_text header_title)" = harness-renamed ]; then
-        ok 'the page follows the new name'
-      else
-        bad "the page follows the new name ($(ui_text header_title))"
-      fi
+  # The dialog opens on its name field, so the new name goes straight into the
+  # focused field and the button follows it — one straight line, one message.
+  # The dialog's buttons leaving the screen is what says it closed: the page
+  # behind has edit fields of its own and would answer any question about
+  # "no EditText on screen" wrongly.
+  if sequence 'wait class=android.widget.EditText 2000; text harness-renamed; tap-id button1 3000; wait-gone id=button1 3000'; then
+    if shell dumpsys activity service "$SERVICE" | grep 'saved' |
+      grep -q '"harness-renamed"'; then
+      ok 'the menu renames a proxy'
     else
-      bad 'the rename dialog can be answered'
+      bad 'the menu renames a proxy'
+      panel_where
+    fi
+    if shell dumpsys activity service "$SERVICE" | grep 'saved' |
+      grep -q '"harness-old"'; then
+      bad 'and the old name is gone'
+    else
+      ok 'and the old name is gone'
+    fi
+    if [ "$(ui_text header_title)" = harness-renamed ]; then
+      ok 'the page follows the new name'
+    else
+      bad "the page follows the new name ($(ui_text header_title))"
     fi
   else
-    bad 'the rename dialog has a name field'
+    bad 'the rename dialog can be answered'
+    panel_where
   fi
 else
   bad "the menu offers Rename"
@@ -1480,8 +1466,7 @@ else
   bad 'a proxy opens for its info marks'
   panel_where
 fi
-if panel_tab listener && ui_tap_id info_port &&
-  wait_for 'id/alertTitle"' 2000; then
+if panel_tab listener && sequence 'tap-id info_port 5000; wait id=alertTitle 2000'; then
   if ui_text alertTitle | grep -q 'Port'; then
     ok 'the i next to a field explains that field'
   else
@@ -1493,8 +1478,7 @@ if panel_tab listener && ui_tap_id info_port &&
 else
   bad 'the field carries an i'
 fi
-if panel_tab log && ui_tap_id info_log &&
-  wait_for 'id/alertTitle"' 2000; then
+if panel_tab log && sequence 'tap-id info_log 5000; wait id=alertTitle 2000'; then
   if ui_dump | grep -q 'id/alertTitle"'; then
     ok 'the log page carries one too'
   else
@@ -1522,28 +1506,22 @@ step 'new proxy'
 # The list's way in: name it, and the proxy that was created opens itself.
 panel_home
 if panel_tap new_profile &&
-  wait_for 'class="android.widget.EditText"' 2000; then
-  input_action text harness-new
-  close_keyboard
-  if ui_tap_id button1; then
-    settle
-    if shell dumpsys activity service "$SERVICE" | grep 'saved' |
-      grep -q '"harness-new"'; then
-      ok 'New proxy is saved under its name'
-    else
-      bad 'New proxy is saved under its name'
-      panel_where
-    fi
-    if ui_dump | grep -q 'id/back"'; then
-      ok 'and it opens for its settings'
-    else
-      bad 'and it opens for its settings'
-    fi
+  sequence 'wait class=android.widget.EditText 2000; text harness-new; tap-id button1 3000; wait id=back 3000; wait-quiet 250'; then
+  if shell dumpsys activity service "$SERVICE" | grep 'saved' |
+    grep -q '"harness-new"'; then
+    ok 'New proxy is saved under its name'
   else
-    bad 'the name dialog can be answered'
+    bad 'New proxy is saved under its name'
+    panel_where
+  fi
+  if ui_dump | grep -q 'id/back"'; then
+    ok 'and it opens for its settings'
+  else
+    bad 'and it opens for its settings'
   fi
 else
   bad 'the list has a New proxy button'
+  panel_where
 fi
 delete_profile_by_adb harness-new
 
@@ -1583,23 +1561,17 @@ done
 if [ "$scrolled" = yes ]; then
   ok 'New proxy is still reachable under ten cards'
   if ui_tap_id new_profile &&
-    wait_for 'class="android.widget.EditText"' 2000; then
-    input_action text harness-eleven
-    close_keyboard
-    if ui_tap_id button1; then
-      settle
-      if shell dumpsys activity service "$SERVICE" | sed -n '/  saved/,$p' |
-        grep -q '"harness-eleven"'; then
-        ok 'and it saves an eleventh proxy'
-      else
-        bad 'and it saves an eleventh proxy'
-        panel_where
-      fi
+    sequence 'wait class=android.widget.EditText 2000; text harness-eleven; tap-id button1 3000; wait id=back 3000; wait-quiet 250'; then
+    if shell dumpsys activity service "$SERVICE" | sed -n '/  saved/,$p' |
+      grep -q '"harness-eleven"'; then
+      ok 'and it saves an eleventh proxy'
     else
-      bad 'the name dialog can be answered'
+      bad 'and it saves an eleventh proxy'
+      panel_where
     fi
   else
     bad 'New proxy can be tapped'
+    panel_where
   fi
 else
   bad 'New proxy is still reachable under ten cards'

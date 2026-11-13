@@ -303,6 +303,16 @@ this took 324 s against 377 s of fixed sleeps, and the steps that wait for a
 dialog gained the most (the info marks, `Save` and `new proxy` steps each lost
 5–11 s).
 
+A step that is a known straight line goes to the phone in one message: filling
+a form and pressing its button used to be a broadcast per tap, per key and per
+wait — a tenth of a second of adb each — and is now one script the service runs
+on a thread of its own, answering with the instruction that stopped it. With
+those in place the run is 264 s, the whole new-proxy dialog (open, type, press,
+land on the page) is 0.9 s, and `rename`, `info marks` and `new proxy` lost
+another 3–8 s each. What the host decides — whether the port serves, whether
+dumpsys lists the profile — stays a step; the phone only does what it can see
+on its own screen.
+
 ```sh
 tests/live/proxy-app.sh
 ```

@@ -6,7 +6,9 @@ import android.content.BroadcastReceiver;
 import android.graphics.Color;
 import android.graphics.Path;
 import android.graphics.PixelFormat;
+import android.os.Bundle;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.util.DisplayMetrics;
@@ -90,6 +92,18 @@ public final class DumpService extends AccessibilityService {
     private View flash;
     /** The one broadcast parked until the screen says what it is waiting for. */
     private Waiter waiter;
+    /**
+     * What a sequence waits on: the count of events and when the last one came.
+     * Guarded by itself, so a wait can sleep until the screen says something
+     * instead of asking it again and again.
+     */
+    private final Object screenLock = new Object();
+    private long screenEvents;
+    private long lastScreenEventMs = SystemClock.uptimeMillis();
+    /** One sequence at a time: two would tap over each other. */
+    private final java.util.concurrent.atomic.AtomicBoolean sequencing =
+            new java.util.concurrent.atomic.AtomicBoolean();
+    private HandlerThread sequenceThread;
 
     /** The enabled service, or null while accessibility is not handing it work. */
     static DumpService running() {
@@ -136,11 +150,18 @@ public final class DumpService extends AccessibilityService {
         finish(2);
         handler.removeCallbacksAndMessages(null);
         removeFlash();
+        if (sequenceThread != null) {
+            sequenceThread.quitSafely();
+            sequenceThread = null;
+        }
         super.onDestroy();
     }
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
+        // Before anything else: a sequence waiting on the screen is woken by
+        // this, whether or not the screen is being recorded.
+        noteScreenEvent();
         // A waiter watches even when the record is off: it is waiting for the
         // screen to say something, and the screen is the only thing that can.
         Waiter parked = waiter;
@@ -177,6 +198,165 @@ public final class DumpService extends AccessibilityService {
     boolean requestCapture(String why) {
         handler.removeCallbacks(pending);
         return capture(why);
+    }
+
+    //
+    // --- the screen a sequence reads and waits on -------------------------
+
+    /**
+     * The screen as the same XML a capture writes, without writing it: a
+     * sequence that has to look at the screen looks many times a second, and
+     * the record of it is the captures, not the looks.
+     */
+    String screen() {
+        List<AccessibilityNodeInfo> roots = windows();
+        if (roots.isEmpty()) {
+            return null;
+        }
+        DisplayMetrics metrics = getResources().getDisplayMetrics();
+        return Hierarchy.of(roots, metrics.widthPixels, metrics.heightPixels);
+    }
+
+    private void noteScreenEvent() {
+        synchronized (screenLock) {
+            screenEvents++;
+            lastScreenEventMs = SystemClock.uptimeMillis();
+            screenLock.notifyAll();
+        }
+    }
+
+    long screenEvents() {
+        synchronized (screenLock) {
+            return screenEvents;
+        }
+    }
+
+    /** How long the screen has said nothing at all. */
+    long stillForMs() {
+        synchronized (screenLock) {
+            return SystemClock.uptimeMillis() - lastScreenEventMs;
+        }
+    }
+
+    /**
+     * Sleep until the screen says something, or {@code ms} runs out; true when
+     * it did. The cap matters as much as the wake-up: an event this service
+     * never saw — a still screen, an event swallowed by the system — must not
+     * turn into a wait that outlives its timeout.
+     */
+    boolean awaitScreenEvent(long ms) {
+        synchronized (screenLock) {
+            long seen = screenEvents;
+            long deadline = SystemClock.uptimeMillis() + Math.max(1, ms);
+            try {
+                while (screenEvents == seen) {
+                    long left = deadline - SystemClock.uptimeMillis();
+                    if (left <= 0) {
+                        return false;
+                    }
+                    screenLock.wait(left);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+            return true;
+        }
+    }
+
+    /**
+     * Whether a keyboard is on screen. It is a window of its own, of another
+     * app, so it is not in the captures — but it covers the bottom half of the
+     * page, and a button under it cannot be tapped until it goes.
+     */
+    boolean keyboardUp() {
+        List<AccessibilityWindowInfo> all = getWindows();
+        if (all == null) {
+            return false;
+        }
+        for (AccessibilityWindowInfo window : all) {
+            if (window.getType() == AccessibilityWindowInfo.TYPE_INPUT_METHOD) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Put the keyboard away, if one is up. Back means exactly that while a
+     * keyboard is showing and something quite different when none is — it
+     * leaves the page — which is why the phone asks before pressing it.
+     */
+    boolean hideKeyboard() {
+        if (!keyboardUp()) {
+            return true;
+        }
+        return back();
+    }
+
+    /**
+     * Text into the field that has the input focus, the way a keyboard would:
+     * an accessibility action replaces the whole value, so there is nothing to
+     * clear first — which is most of what typing a field used to cost.
+     */
+    boolean type(String value) {
+        Bundle args = new Bundle();
+        args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value);
+        // The focus can be a moment behind the dialog that was just tapped.
+        for (int attempt = 0; attempt < 6; attempt++) {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            AccessibilityNodeInfo field = root == null ? null
+                    : root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
+            if (field != null && field.isEditable()
+                    && field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+                return true;
+            }
+            SystemClock.sleep(80);
+        }
+        Log.w(TAG, "no field with the input focus to put text in");
+        return false;
+    }
+
+    //
+    // --- sequences --------------------------------------------------------
+
+    /**
+     * Run a script of steps on a thread of its own and answer the broadcast
+     * when it is over. A sequence blocks — it waits on the screen — and the
+     * main thread is where the events it waits for arrive.
+     */
+    void runSequence(String script, BroadcastReceiver.PendingResult pending) {
+        Sequence sequence;
+        try {
+            sequence = Sequence.parse(script, this, pending);
+        } catch (IllegalArgumentException e) {
+            Log.w(TAG, "cannot run this sequence: " + e.getMessage());
+            pending.setResultCode(2);
+            pending.setResultData("script: " + e.getMessage());
+            pending.finish();
+            return;
+        }
+        if (!sequencing.compareAndSet(false, true)) {
+            Log.w(TAG, "a sequence is already running");
+            pending.setResultCode(2);
+            pending.setResultData("busy");
+            pending.finish();
+            return;
+        }
+        sequenceThread().post(sequence);
+    }
+
+    private Handler sequenceThread() {
+        if (sequenceThread == null) {
+            sequenceThread = new HandlerThread("sequence");
+            sequenceThread.start();
+        }
+        return new Handler(sequenceThread.getLooper());
+    }
+
+    /** Called by the sequence however it ended, so the next one may start. */
+    void sequenceFinished() {
+        sequencing.set(false);
     }
 
     //
@@ -325,7 +505,7 @@ public final class DumpService extends AccessibilityService {
         return true;
     }
 
-    private synchronized void action(String kind, String detail, long start, long end) {
+    synchronized void action(String kind, String detail, long start, long end) {
         if (dir == null) {
             return;
         }

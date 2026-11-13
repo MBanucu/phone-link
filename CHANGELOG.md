@@ -73,6 +73,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Steps that are a straight line run on the phone in one message. The capture
+  service takes a `SEQUENCE` broadcast — `tap`, `tap-id`, `tap-text`, `swipe`,
+  `text`, `keyboard-off`, `back`, `home`, `wait`, `wait-gone`, `wait-change`,
+  `wait-quiet`, `expect` — runs it on a thread of its own, stamps each
+  instruction in `actions.csv` and answers with the instruction that failed. The
+  harness uses it for the dialog dances (the name prompt, the rename, the menu,
+  the battery request on every start, the port field), which removes the
+  round trip per tap and per key and with it the Backspace dance that clearing a
+  field used to cost. Measured: the new-proxy dialog is 0.9 s in one message, and
+  a full run went from 324 s to 264 s with the same 72 checks — the steps that
+  open dialogs (`rename`, `info marks`, `new proxy`, `Save`) 3–8 s cheaper each.
+  Typing replaces the field instead of clearing it, so the two helpers it
+  replaced, `ui_tap_text` and `close_keyboard`, are gone.
 - The live harness waits on the phone instead of on the clock. The capture
   service answers a `WAIT` broadcast when the screen holds a piece of XML, stops
   holding it, changes at all, or has stood still for a moment, and the broadcast
