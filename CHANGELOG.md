@@ -41,6 +41,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A listener is asked for instead of held in the service. `ProxyService` (689
+  lines) kept the sockets, the `Running` records that answered for them and the
+  store's front door in one class; a listener is now `Port` (174) — the socket
+  it binds, the network it waits for, the traffic it moved and the state the
+  panel, the tile and the notification read — and the listeners themselves are
+  `Ports` (140), keyed by port because a port is what a listener is: a start on
+  a taken port replaces that one and leaves every other port listening, a stop
+  is a name, a number or all of them, and the order is the order they were
+  started in. What is left in the service (547 lines) is what a port cannot
+  answer for itself — the foreground notification, the shared cellular egress,
+  the wake lock that follows the total clients, the saved configurations and
+  the actions adb sends — through a `Port.Host` of six methods. Behaviour is
+  unchanged: the live run makes the same claims.
 - The panel is three files instead of one. `MainActivity` keeps what a press
   means — Start, Save, Rename, Delete, the dialogs, and the header both screens
   sit under — and asks two screens for the rest: `HomeScreen` draws the list of

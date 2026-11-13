@@ -105,16 +105,6 @@ list is empty.
       it already names, and belongs in the run's folder next to the frame
       (wish "A failure brings its own pictures") rather than only in a log line.
 
-## Files too big to work in
-
-- [ ] The panel and the harness have been split; what is left is the service.
-      `ProxyService.java` (689 lines) is still the lifecycle, the profile store's
-      front door, the listeners and the network request in one class — the same
-      seam the activity just lost: a service asked for a listener rather than
-      holding its sockets and its `Running` records itself, so a change to how a
-      listener binds cannot reach into how the tile, the boot receiver or the
-      notification behave. Move code, keep the checks green, commit by the seam.
-
 ## Checks that are slow, and knowing which
 
 - [ ] `nix build .#checks.x86_64-linux.script` is slow enough to be felt before a
