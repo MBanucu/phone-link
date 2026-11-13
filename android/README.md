@@ -147,6 +147,25 @@ deleted the app's stored configuration.
   the harness steps that use it (`rename`, `info marks`, `new proxy`, the
   battery dialog on every toggle) lost 3–7 s each.
 
+  A selector is several matchers that have to sit on the same node, so one card
+  can be told from the card beside it: `id=card_name text=hotel`. The whole
+  selector is one argument, quoted in the script, and a term's value cannot
+  hold a space. With selectors and four more instructions, the loops that were
+  the harness's — scroll about until it is on screen, then tap it or read it —
+  are one message: `scroll-top` (four drags, sized from the phone's own screen,
+  ending still), `scroll-to SELECTOR 8000` (top, then down until a node
+  matches), `tap-scroll SELECTOR 8000` (the same, then tap what it found) and
+  `read SELECTOR 3000`, which answers with the node's text: the result code is
+  `0` and the result data is the value, empty when the node has no text. So
+  `panel_open` is `tap-scroll "id=card_name text=harness-two" 12000; wait
+  id=back 4000`, `ui_text_seek` is `scroll-to id=adb_state 8000; read
+  id=adb_state 2000`, and the ten-card list finds `New proxy` under the cards
+  with `scroll-to id=new_profile 10000`. Measured on the phone: `tap-scroll` is
+  1.0–1.4 s from the broadcast to the tap it took, scrolling included, and
+  `scroll-to` 0.9 s — one message where the harness sent 8–12 — but the run is
+  not faster for it (249.7 s against 239.7 s with one check more): what those
+  loops cost was the waiting for the page, not the round trips.
+
   Everything the phone writes down is on one clock
   (`SystemClock.elapsedRealtimeNanos()`, which counts through deep sleep):
   `ui-index.csv` gives each capture the instant it was read, `actions.csv`
@@ -154,7 +173,11 @@ deleted the app's stored configuration.
   dispatched it, and `input.csv` the typing, which has to go through `input`
   and so carries the two readings that bracket it — the interval the instant is
   inside. Taps go through the service because `input tap` is a fresh JVM per
-  call: it costs a third of a second and nobody can say when it landed.
+  call: it costs a third of a second and nobody can say when it landed. The
+  service waits for each gesture to finish before dispatching the next one: two
+  strokes in flight at once are one multi-touch gesture, and four drags fired a
+  millisecond apart moved the page not at all, so the tap after them landed on
+  a screen that had gone somewhere else.
 
   That clock is tied to `screen.mp4` by flashing: the service paints the whole
   screen the one magenta nothing else here is, at instants it records

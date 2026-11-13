@@ -33,9 +33,14 @@ import java.util.regex.Pattern;
  * home
  * wait text=Running 3000       until the screen holds it
  * wait-gone text=Saved 3000    until it stops holding it
- * wait-change 2000             until the screen says anything at all     * wait-quiet 250               until it has been still that long (from now)
+ * wait-change 2000             until the screen says anything at all
+ * wait-quiet 250               until it has been still that long (from now)
  * expect text=Stopped          now, or the sequence fails
  * expect-gone text=Saving
+ * scroll-top                   back to the top of the page
+ * scroll-to SELECTOR 8000      from the top, drag the page down until it shows
+ * tap-scroll SELECTOR 8000     the same, then tap what it found
+ * read SELECTOR 3000           the text it found, answered in the result
  * </pre>
  *
  * <p>A matcher is {@code text=} (exactly that text), {@code contains=} (any
@@ -43,15 +48,22 @@ import java.util.regex.Pattern;
  * (content description), {@code class=} or {@code xml=} (the raw dump as
  * written, quotes and all — {@code xml=class="android.widget.EditText"}). A
  * value with spaces is quoted: {@code wait contains="saved configuration"}.
- * Arguments in {@code [...]} are optional and default to five seconds for a
- * tap and three for a wait.
+ *
+ * <p>A selector is several matchers that have to be on the same node, which is
+ * how a card is told from the card next to it:
+ * {@code tap-scroll "id=card_name text=hotel" 8000}. The whole selector is one
+ * argument — quoted — and a term's value cannot hold a space.
+ *
+ * <p>Arguments in {@code [...]} are optional and default to five seconds for a
+ * tap or a scroll and three for a wait.
  *
  * <p>Everything is stamped with the phone's own clock and written to
  * {@code actions.csv}, waits included, so a step that ran here looks the same
  * in the record as one the host drove. The broadcast's result says how it
- * went: {@code 0} for the end of the script, {@code 1} for a step that failed
- * (its number and text are the result data), {@code 2} for a script that could
- * not be read or a sequence already running.
+ * went: {@code 0} for the end of the script — with the text of the last
+ * {@code read} as the result data, empty when nothing was read — {@code 1} for
+ * a step that failed (its number and text are the result data), {@code 2} for a
+ * script that could not be read or a sequence already running.
  */
 final class Sequence implements Runnable {
 
@@ -68,6 +80,7 @@ final class Sequence implements Runnable {
 
     private static final Pattern BOUNDS =
             Pattern.compile("bounds=\"\\[(-?\\d+),(-?\\d+)\\]\\[(-?\\d+),(-?\\d+)\\]\"");
+    private static final Pattern TEXT = Pattern.compile("text=\"([^\"]*)\"");
 
     /** One instruction: what it says and where it is in the script. */
     private static final class Step {
@@ -101,6 +114,8 @@ final class Sequence implements Runnable {
     private final DumpService service;
     private final List<Step> steps;
     private final BroadcastReceiver.PendingResult pending;
+    /** What the last {@code read} found; the result says so when the script ends. */
+    private String value = "";
     /** Guards the answer: a sequence must be finished once, whatever happens. */
     private final Object answer = new Object();
     private boolean answered;
@@ -198,6 +213,18 @@ final class Sequence implements Runnable {
                     number(number, verb, args[1]);
                 }
                 return;
+            case "scroll-to":
+            case "tap-scroll":
+            case "read":
+                arity(number, verb, args, 1, 2);
+                fragments(number, args[0]);
+                if (args.length > 1) {
+                    number(number, verb, args[1]);
+                }
+                return;
+            case "scroll-top":
+                arity(number, verb, args, 0, 0);
+                return;
             case "text":
                 arity(number, verb, args, 1, 1);
                 return;
@@ -274,6 +301,20 @@ final class Sequence implements Runnable {
         }
     }
 
+    /**
+     * A selector as the XML fragments every one of its terms must be on the
+     * same node line with, so "this card's name" is one node and not the name
+     * anywhere on the screen.
+     */
+    static String[] fragments(int number, String spec) {
+        String[] terms = spec.trim().split("\\s+");
+        String[] fragments = new String[terms.length];
+        for (int i = 0; i < terms.length; i++) {
+            fragments[i] = needle(number, terms[i]);
+        }
+        return fragments;
+    }
+
     //
     // --- running it -------------------------------------------------------
 
@@ -286,7 +327,7 @@ final class Sequence implements Runnable {
                     return;
                 }
             }
-            answer(0, "");
+            answer(0, value);
         } catch (RuntimeException e) {
             Log.w(TAG, "the sequence fell over", e);
             answer(1, e.getClass().getSimpleName() + ": " + e.getMessage());
@@ -350,17 +391,41 @@ final class Sequence implements Runnable {
                 return service.type(a[0]);
             case "tap-id":
                 // An id, as the harness writes it: the last part of a resource id.
-                return tapOn("id/" + a[0] + "\"",
+                return tapOn(new String[] {"id/" + a[0] + "\""},
                         a.length > 1 ? Integer.parseInt(a[1]) : DEFAULT_TAP_MS, false);
             case "tap-text":
-                return tapOn("text=\"" + a[0] + "\"",
+                return tapOn(new String[] {"text=\"" + a[0] + "\""},
                         a.length > 1 ? Integer.parseInt(a[1]) : DEFAULT_TAP_MS, true);
             case "wait":
                 return waitFor(needle(step.number, a[0]),
-                        a.length > 1 ? Integer.parseInt(a[1]) : DEFAULT_WAIT_MS);
+                        a.length > 1 ? Integer.parseInt(a[1]) : DEFAULT_WAIT_MS) != null;
             case "wait-gone":
                 return waitGone(needle(step.number, a[0]),
                         a.length > 1 ? Integer.parseInt(a[1]) : DEFAULT_WAIT_MS);
+            case "scroll-top":
+                return scrollTop();
+            case "scroll-to":
+                return scrollTo(fragments(step.number, a[0]),
+                        a.length > 1 ? Integer.parseInt(a[1]) : DEFAULT_TAP_MS) != null;
+            case "tap-scroll": {
+                String[] fragments = fragments(step.number, a[0]);
+                int timeout = a.length > 1 ? Integer.parseInt(a[1]) : DEFAULT_TAP_MS;
+                if (scrollTo(fragments, timeout) == null) {
+                    return false;
+                }
+                // A page that is still gliding has moved the control by the
+                // time the tap lands, so its place has to hold still first.
+                return tapOn(fragments, Math.max(1000, timeout), true);
+            }
+            case "read": {
+                String found = waitFor(fragments(step.number, a[0]),
+                        a.length > 1 ? Integer.parseInt(a[1]) : DEFAULT_WAIT_MS);
+                if (found == null) {
+                    return false;
+                }
+                value = text(found);
+                return true;
+            }
             case "wait-change":
                 return waitChange(a.length > 0 ? Integer.parseInt(a[0]) : DEFAULT_WAIT_MS);
             case "wait-quiet":
@@ -382,23 +447,36 @@ final class Sequence implements Runnable {
         return service.screen();
     }
 
-    private boolean holds(String needle) {
-        String xml = screen();
-        return xml != null && xml.contains(needle);
-    }
-
-    /** The centre of the node the needle names, or null while it is not there. */
-    private int[] centre(String needle) {
+    /** The first node line that carries every fragment the selector names. */
+    private String line(String[] fragments) {
         String xml = screen();
         if (xml == null) {
             return null;
         }
-        int at = xml.indexOf(needle);
-        if (at < 0) {
-            return null;
+        for (String line : xml.split("\n")) {
+            if (carries(line, fragments)) {
+                return line;
+            }
         }
-        int lineEnd = xml.indexOf('\n', at);
-        Matcher bounds = BOUNDS.matcher(lineEnd < 0 ? xml.substring(at) : xml.substring(at, lineEnd));
+        return null;
+    }
+
+    private static boolean carries(String line, String[] fragments) {
+        for (String fragment : fragments) {
+            if (!line.contains(fragment)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean holds(String needle) {
+        return line(new String[] {needle}) != null;
+    }
+
+    /** The centre of the node on that line, or null when its bounds are odd. */
+    private static int[] centre(String line) {
+        Matcher bounds = BOUNDS.matcher(line);
         if (!bounds.find()) {
             return null;
         }
@@ -412,17 +490,24 @@ final class Sequence implements Runnable {
         return new int[] {(left + right) / 2, (top + bottom) / 2};
     }
 
+    /** What the node on that line says, which is what a read answers with. */
+    private static String text(String line) {
+        Matcher text = TEXT.matcher(line);
+        return text.find() ? text.group(1) : "";
+    }
+
     /**
-     * Tap what a needle names, waiting for it to turn up. A text can be on a
+     * Tap what a selector names, waiting for it to turn up. A text can be on a
      * menu that is still sliding in, so its place has to hold still for two
      * looks first — a tap at where the item was a moment ago lands on whatever
      * moved into it.
      */
-    private boolean tapOn(String needle, int timeoutMs, boolean steady) {
+    private boolean tapOn(String[] fragments, int timeoutMs, boolean steady) {
         long deadline = SystemClock.uptimeMillis() + Math.max(1, timeoutMs);
         int[] seen = null;
         while (true) {
-            int[] at = centre(needle);
+            String found = line(fragments);
+            int[] at = found == null ? null : centre(found);
             if (at != null) {
                 if (!steady || (seen != null && seen[0] == at[0] && seen[1] == at[1])) {
                     return service.tap(at[0], at[1]);
@@ -433,23 +518,42 @@ final class Sequence implements Runnable {
             }
             long left = deadline - SystemClock.uptimeMillis();
             if (left <= 0) {
-                Log.w(TAG, "no " + needle + " to tap after " + timeoutMs + " ms");
+                Log.w(TAG, "nothing matched " + String.join(" ", fragments)
+                        + " to tap after " + timeoutMs + " ms");
                 return false;
             }
             service.awaitScreenEvent(Math.min(left, LOOK_MS));
         }
     }
 
-    private boolean waitFor(String needle, int timeoutMs) {
+    /** The line that matches, as soon as the screen holds it; null on timeout. */
+    private String waitFor(String needle, int timeoutMs) {
         long deadline = SystemClock.uptimeMillis() + Math.max(1, timeoutMs);
         while (true) {
-            if (holds(needle)) {
-                return true;
+            String found = line(new String[] {needle});
+            if (found != null) {
+                return found;
             }
             long left = deadline - SystemClock.uptimeMillis();
             if (left <= 0) {
                 Log.w(TAG, "the screen never held " + needle);
-                return false;
+                return null;
+            }
+            service.awaitScreenEvent(Math.min(left, LOOK_MS));
+        }
+    }
+
+    private String waitFor(String[] fragments, int timeoutMs) {
+        long deadline = SystemClock.uptimeMillis() + Math.max(1, timeoutMs);
+        while (true) {
+            String found = line(fragments);
+            if (found != null) {
+                return found;
+            }
+            long left = deadline - SystemClock.uptimeMillis();
+            if (left <= 0) {
+                Log.w(TAG, "the screen never held " + String.join(" ", fragments));
+                return null;
             }
             service.awaitScreenEvent(Math.min(left, LOOK_MS));
         }
@@ -467,6 +571,58 @@ final class Sequence implements Runnable {
                 return false;
             }
             service.awaitScreenEvent(Math.min(left, LOOK_MS));
+        }
+    }
+
+    /**
+     * One drag on the page area. The page is the tall part of the screen under
+     * the header, and the drag starts at the right edge so it belongs to the
+     * page's own scroller rather than to one of its fields.
+     */
+    private boolean drag(boolean contentDown) {
+        android.util.DisplayMetrics metrics = service.getResources().getDisplayMetrics();
+        int x = metrics.widthPixels - 140;
+        int top = (int) (metrics.heightPixels * 0.375);
+        int bottom = (int) (metrics.heightPixels * 0.6875);
+        return contentDown
+                ? service.swipe(x, bottom, x, top, 200)
+                : service.swipe(x, top, x, bottom, 150);
+    }
+
+    /** Back to the top of the page, the way a hand would go. */
+    private boolean scrollTop() {
+        for (int i = 0; i < 4; i++) {
+            if (!drag(false)) {
+                return false;
+            }
+        }
+        return waitQuiet(250, 1500);
+    }
+
+    /**
+     * From the top, drag the page down until a node matches; the line it
+     * matched, or null when the page ran out before the timeout did.
+     */
+    private String scrollTo(String[] fragments, int timeoutMs) {
+        String selector = String.join(" ", fragments);
+        if (!scrollTop()) {
+            return null;
+        }
+        long deadline = SystemClock.uptimeMillis() + Math.max(1, timeoutMs);
+        while (true) {
+            String found = line(fragments);
+            if (found != null) {
+                return found;
+            }
+            long left = deadline - SystemClock.uptimeMillis();
+            if (left <= 0) {
+                Log.w(TAG, "nothing matched " + selector + " after scrolling");
+                return null;
+            }
+            if (!drag(true)) {
+                return null;
+            }
+            waitQuiet(200, (int) Math.min(1500, left));
         }
     }
 

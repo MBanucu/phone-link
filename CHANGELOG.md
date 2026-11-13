@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A touch or a drag no longer runs on top of the one before it. The capture
+  service dispatched gestures and returned, so four drags 1 ms apart went down
+  as one three-fingered gesture that moved nothing, and the tap after them was
+  swallowed — two harness checks failed on it (`the mark opens the battery
+  request`, `Clear empties the log`) before every gesture was waited out. A
+  control that has to be tapped after a scroll now also has to hold still for
+  two looks, because a page gliding under a tap has moved it by then.
 - The APK is signed with one key tracked in `android/debug.keystore` instead of
   one generated inside each build. Every `nix build` used a fresh key, so
   `adb install -r` failed with `INSTALL_FAILED_UPDATE_INCOMPATIBLE` and the only
@@ -72,6 +79,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `true` after they had been set to `false`.
 
 ### Added
+
+- The harness's scrolling loops run on the phone. A selector is several matchers
+  that must sit on the same node (`id=card_name text=hotel`), and with it four
+  instructions — `scroll-top`, `scroll-to`, `tap-scroll` and `read`, which
+  answers the node's text in the broadcast's result data — so `panel_open`,
+  `panel_tap`, `panel_checked` and `ui_text_seek` are one message each instead
+  of 8–12. Measured: `tap-scroll` is 1.0–1.4 s from the broadcast to the tap,
+  scrolling included, and `scroll-to` 0.9 s; the run is not faster (249.7 s
+  against 239.7 s with one check more), because those loops were waiting for the
+  page rather than for the round trips.
 
 - Several proxies listen at once. The service holds a listener per port instead
   of one: `START` adds, a start on a port that is already taken replaces what

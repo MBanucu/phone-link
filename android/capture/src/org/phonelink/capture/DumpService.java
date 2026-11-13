@@ -2,6 +2,7 @@ package org.phonelink.capture;
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
+import android.accessibilityservice.AccessibilityService.GestureResultCallback;
 import android.content.BroadcastReceiver;
 import android.graphics.Color;
 import android.graphics.Path;
@@ -77,6 +78,11 @@ public final class DumpService extends AccessibilityService {
 
     /** Long enough to be a tap, short enough not to be a press. */
     private static final int TAP_MS = 50;
+    /** How long past a gesture's own length to wait for the phone's word back. */
+    private static final int GESTURE_SLACK_MS = 500;
+    /** Guards whether the gesture the phone took is over; see stroke(). */
+    private final Object gestureLock = new Object();
+    private boolean gestureOver;
 
     /** The flash colour: nothing else on this phone is a full screen of it. */
     private static final int FLASH_COLOUR = 0xFFFF00FF;
@@ -454,9 +460,9 @@ public final class DumpService extends AccessibilityService {
 
     /**
      * A tap at a point, dispatched from here so the instant it lands is known.
-     * The dispatch is refused while another gesture is in flight, which is
-     * waited out: the harness taps, looks at the screen and taps again, but a
-     * gesture it no longer needs must not swallow the next one.
+     * A gesture is waited out before the next one is dispatched: the harness
+     * taps, looks at the screen and taps again, and a gesture still running
+     * would turn the next one into a second finger rather than a touch.
      */
     boolean tap(int x, int y) {
         Path path = new Path();
@@ -477,14 +483,58 @@ public final class DumpService extends AccessibilityService {
                 .build();
         for (int attempt = 0; attempt < 10; attempt++) {
             long start = SystemClock.elapsedRealtimeNanos();
-            if (dispatchGesture(description, null, null)) {
-                action(kind, detail, start, start + ms * 1_000_000L);
-                return true;
+            synchronized (gestureLock) {
+                gestureOver = false;
             }
-            SystemClock.sleep(20);
+            boolean taken = dispatchGesture(description, new GestureResultCallback() {
+                @Override
+                public void onCompleted(GestureDescription done) {
+                    gestureFinished();
+                }
+
+                @Override
+                public void onCancelled(GestureDescription done) {
+                    gestureFinished();
+                }
+            }, null);
+            if (!taken) {
+                SystemClock.sleep(20);
+                continue;
+            }
+            action(kind, detail, start, start + ms * 1_000_000L);
+            // A gesture the phone has taken starts at once, and one that is
+            // still running makes the next stroke part of it: four drags fired
+            // in the same millisecond are one three-fingered gesture, and the
+            // page does not move at all. So the next one waits for this one.
+            long until = SystemClock.uptimeMillis() + ms + GESTURE_SLACK_MS;
+            synchronized (gestureLock) {
+                while (!gestureOver) {
+                    long left = until - SystemClock.uptimeMillis();
+                    if (left <= 0) {
+                        // No word back: the gesture has been its time and more,
+                        // and waiting longer only makes the step slow.
+                        Log.w(TAG, "no word back about the " + kind + " at " + detail);
+                        return true;
+                    }
+                    try {
+                        gestureLock.wait(left);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return true;
+                    }
+                }
+            }
+            return true;
         }
         Log.w(TAG, "the phone would not take a " + kind + " at " + detail);
         return false;
+    }
+
+    private void gestureFinished() {
+        synchronized (gestureLock) {
+            gestureOver = true;
+            gestureLock.notifyAll();
+        }
     }
 
     boolean back() {

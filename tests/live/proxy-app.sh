@@ -396,10 +396,15 @@ sequence_stopped=""
 sequence() { # sequence 'SCRIPT' -> 0 when every instruction ran
   [ "$capture_dumps" = 1 ] || return 1
   local out
+  sequence_value=""
+  sequence_stopped=""
   out=$(shell am broadcast -a "$CAPTURE_PKG.SEQUENCE" --es script "$(phone_arg "$1")" \
     -n "$CAPTURE_PKG/.DumpReceiver" 2>/dev/null)
   case $out in
-    *'result=0'*) sequence_stopped=""; return 0 ;;
+    *'result=0'*)
+      # A script that read a field answers with what it found.
+      sequence_value=$(printf '%s' "$out" | sed -n 's/.*data="\([^"]*\)".*/\1/p')
+      return 0 ;;
   esac
   # The instruction that stopped it, for the step's own diagnostics: the
   # record in actions.csv has the same line with its instant.
@@ -605,20 +610,13 @@ panel_opens() {
 # Whether a checkbox is ticked, scrolling down until it is on screen.
 panel_checked() { # panel_checked ID -> yes|no
   local id=$1 node
-  panel_top
-  for _ in 1 2 3 4 5 6; do
-    node=$(ui_dump | tr '>' '\n' | grep "id/$id\"")
-    if [ -n "$node" ]; then
-      case $node in
-        *'checked="true"'*) printf 'yes\n' ;;
-        *) printf 'no\n' ;;
-      esac
-      return 0
-    fi
-    swipe 1300 2200 1300 1200 200
-    settle
-  done
-  return 1
+  sequence "scroll-to id=$id 8000" || return 1
+  node=$(ui_dump | tr '>' '\n' | grep "id/$id\"")
+  [ -n "$node" ] || return 1
+  case $node in
+    *'checked="true"'*) printf 'yes\n' ;;
+    *) printf 'no\n' ;;
+  esac
 }
 
 # The profile page is split into segments now, so a control is looked for on
@@ -702,10 +700,9 @@ ui_bounds() { # ui_bounds ID -> "x y" of the node's centre
 }
 
 panel_top() {
-  # Both ends stay inside the page area: a drag that leaves it belongs to
-  # whatever is underneath instead of the page.
-  for _ in 1 2 3 4; do swipe 1300 1200 1300 2200 150; done
-  settle
+  # The page area is the phone's business: it knows how tall the screen is and
+  # where the page's own scroller begins.
+  sequence 'scroll-top'
 }
 
 # A configuration under a name, and the same back off the phone again.
@@ -823,27 +820,11 @@ panel_home() {
 
 panel_open() { # panel_open NAME -> taps that proxy's card
   panel_home || return 1
-  local x y
   # A card below the fold is not in a dump, and a long list can put any card
-  # there, so the list is scrolled down until the name shows up.
-  for _ in 1 2 3 4 5 6 7 8; do
-    x=""
-    y=""
-    read -r x y <<EOF
-$(ui_dump | tr '>' '\n' | grep "id/card_name\"" | grep "text=\"$1\"" | head -1 |
-  sed -n 's/.*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/p' |
-  awk '{ if (NF == 4) print int(($1 + $3) / 2), int(($2 + $4) / 2) }')
-EOF
-    if [ -n "$x" ]; then
-      tap "$x" "$y"
-      settle
-      ui_dump | grep -q "id/back\""
-      return $?
-    fi
-    swipe 1300 2200 1300 1200 200
-    settle
-  done
-  return 1
+  # there: the phone scrolls the list down to that name, taps that card and
+  # waits for the page to come up, all in one go. The selector names the card's
+  # own name node, so it cannot be another card's.
+  sequence "tap-scroll \"id=card_name text=$1\" 12000; wait id=back 4000"
 }
 
 ui_tap_id() { # ui_tap_id ID -> taps that node where it is, without scrolling
@@ -868,39 +849,16 @@ EOF
 }
 
 ui_text_seek() { # ui_text_seek ID, scrolling down until the line is on screen
-  local id=$1 value
-  panel_top
-  for _ in 1 2 3 4 5 6; do
-    value=$(ui_text "$id")
-    if [ -n "$value" ]; then
-      printf '%s\n' "$value"
-      return 0
-    fi
-    swipe 1300 2200 1300 1200 200
-    settle
-  done
-  return 1
+  local id=$1
+  sequence "scroll-to id=$id 8000; read id=$id 2000" || return 1
+  [ -n "$sequence_value" ] || return 1
+  printf '%s\n' "$sequence_value"
 }
 
 panel_tap() { # panel_tap ID, scrolling down until the control is on screen
-  local id=$1 x y
-  panel_top
-  # The Log page is the tall one: its Clear button sits under a long log.
-  for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
-    x=""
-    y=""
-    read -r x y <<EOF
-$(ui_bounds "$id")
-EOF
-    if [ -n "$x" ]; then
-      tap "$x" "$y"
-      settle
-      return 0
-    fi
-    swipe 1300 2200 1300 1200 200
-    settle
-  done
-  return 1
+  # The Log page is the tall one: its Clear button sits under a long log, and
+  # the phone scrolls after it for as long as that takes.
+  sequence "tap-scroll id=$1 12000; wait-quiet 250"
 }
 
 # Tile clicks are ignored while the keyguard is up, and uiautomator cannot
@@ -1559,17 +1517,8 @@ else
   bad "ten proxies are saved ($total in the dump)"
 fi
 # A dump holds only what is on screen, so the button is reached the way a hand
-# would reach it: by scrolling the list to its end.
-scrolled=no
-for _ in 1 2 3 4 5 6 7 8; do
-  if ui_dump | grep -q 'id/new_profile"'; then
-    scrolled=yes
-    break
-  fi
-  swipe 1300 2200 1300 1200 200
-  settle
-done
-if [ "$scrolled" = yes ]; then
+# would reach it: the phone scrolls the list until it is there.
+if sequence 'scroll-to id=new_profile 10000'; then
   ok 'New proxy is still reachable under ten cards'
   if ui_tap_id new_profile &&
     sequence 'wait class=android.widget.EditText 2000; text harness-eleven; tap-id button1 3000; wait id=back 3000; wait-quiet 250'; then
