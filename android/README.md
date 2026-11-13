@@ -91,7 +91,10 @@ installed by a test run and removed by it.
   why the code has a `Logger` seam, an `Upstream` interface and a config/state
   split instead of `Log.i`, `Egress` and string building inside the service —
   and why the `script` check carries a JDK.
-- `tests/live/proxy-app.sh` — needs a phone with a Wi-Fi client link and the
+- `tests/live/proxy-app.sh` — the steps and the claims, with
+  `tests/live/phone.sh` beside it holding how to look at and drive the phone
+  (captures, gestures, sequences, the panel's navigation, unlock and settings),
+  so a step reads as a claim. It needs a phone with a Wi-Fi client link and the
   built APK (by default `android/build/phone-link-proxy.apk`, or the file named
   by `PROXY_APP_APK`). It unlocks the phone through `bin/phone-unlock` when
   `sudo -n` allows it (the shade ignores tile clicks and uiautomator cannot dump

@@ -99,7 +99,7 @@ public final class PanelTests extends Instrumentation {
 
         View a = card(first);
         View b = card(second);
-        check("the list shows both saved proxies, both stopped",
+        check("the list shows both saved proxies, both stopped and offering Start",
                 a != null && b != null && stopped(a) && stopped(b),
                 outline(first) + " / " + outline(second));
         if (abandoned()) {
@@ -140,7 +140,7 @@ public final class PanelTests extends Instrumentation {
         }
 
         click(id("back"));
-        check("the list marks both running, and both in use",
+        check("the list marks both running, both in use, each offering Stop",
                 await(() -> running(card(first)) && running(card(second))),
                 outline(first) + " / " + outline(second));
         if (abandoned()) {
@@ -156,7 +156,7 @@ public final class PanelTests extends Instrumentation {
                         && beside.equals(footer())),
                 "footer=" + footer() + " button=" + toggleText());
         click(id("back"));
-        check("and the other one is still running, with its mark",
+        check("and the other one still runs with its mark, the second back to Start",
                 running(card(first)) && stopped(card(second)),
                 outline(first) + " / " + outline(second));
         if (abandoned()) {
@@ -164,7 +164,7 @@ public final class PanelTests extends Instrumentation {
         }
 
         click(card(first).findViewById(id("card_toggle")));
-        check("the card stops the last one and drops the mark",
+        check("the card stops the last one, which goes back to Start without the mark",
                 await(() -> stopped(card(first))),
                 outline(first));
     }
@@ -207,15 +207,23 @@ public final class PanelTests extends Instrumentation {
         }
     }
 
+    /** Stopped, and its button offering the one thing a stopped proxy can do. */
     private boolean stopped(View card) {
-        return card != null && badge(card).equals(string("state_stopped"));
+        return card != null
+                && badge(card).equals(string("state_stopped"))
+                && button(card).equals(string("action_start"));
     }
 
-    /** Running and wearing the mark that says the tile and a reboot start it. */
+    /** Running, wearing the in-use mark, and its button offering Stop. */
     private boolean running(View card) {
         return card != null
                 && badge(card).equals(string("state_running"))
-                && summary(card).startsWith(string("card_in_use", "").trim());
+                && summary(card).startsWith(string("card_in_use", "").trim())
+                && button(card).equals(string("action_stop"));
+    }
+
+    private String button(View card) {
+        return ((Button) card.findViewById(id("card_toggle"))).getText().toString();
     }
 
     private String badge(View card) {
@@ -232,7 +240,7 @@ public final class PanelTests extends Instrumentation {
             return name + ": no card";
         }
         return name + ": " + badge(card) + " · \"" + summary(card) + "\" · "
-                + ((Button) card.findViewById(id("card_toggle"))).getText();
+                + button(card);
     }
 
     private String footer() {

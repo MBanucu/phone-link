@@ -30,7 +30,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and 4.3 s (28.1 s → 23.8 s); the run as a whole went 249 s → 282 s for eight
   more checks, 91 passed and 0 failed.
 
+### Changed
+
+- The panel is three files instead of one. `MainActivity` keeps what a press
+  means — Start, Save, Rename, Delete, the dialogs, and the header both screens
+  sit under — and asks two screens for the rest: `HomeScreen` draws the list of
+  cards, `ProxyScreen` the open proxy's page, each told which proxy it is
+  showing. 1111 lines became 740 + 460 + 113, and the page owns the name it is
+  showing, so a card and a page cannot disagree about which proxy a press is
+  about. Behaviour is unchanged: the live run makes the same claims.
+- The live harness is two files: `tests/live/proxy-app.sh` — the run, its
+  verdicts, its evidence and the steps that make claims — and
+  `tests/live/phone.sh` beside it, which is how to look at and drive the phone:
+  captures, gestures, sequences, the panel's navigation, unlock and settings.
+  1833 lines in one script became 1192 + 647, so a step reads as a claim instead
+  of as adb.
+- The card's own Start/Stop is now checked by the phone. The `card toggle` step
+  kept eight claims, five of which were only the words on a card
+  (Stopped/Start, Running/Stop, the in-use mark); those moved into the on-device
+  suite, which already presses the card, and the step keeps what only the laptop
+  can see — the listener up after the press, serving this proxy's credentials,
+  and gone after the second one. The run went from 91 checks to 86, still green.
+
 ### Fixed
+
+- A run's verdict is printed after its last check. The summary line came before
+  the exit trap that fits the recording to the phone's clock, so it counted one
+  check fewer than the run made and — worse — a clock fit worse than 10 ms
+  printed its `FAIL` after the script had already decided the exit status, which
+  meant a failing run still exited 0. The last steps are over, cleanup decides,
+  and an interrupted run keeps the status it already had.
 
 - A page's Start and Stop mean that page's proxy, and the line under them says
   what Start will do. `Stop` sent a bare `STOP`, which stops *every* listener, so
