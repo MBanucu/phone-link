@@ -264,27 +264,30 @@ public final class ProxyAppTest {
         });
 
         test("the traffic counters and the window the sparkline draws", () -> {
-            Traffic.reset();
-            Traffic.add(100, 1000);
-            Traffic.add(50, 500);
-            long[] totals = Traffic.totals();
+            Traffic counts = new Traffic();
+            counts.add(100, 1000);
+            counts.add(50, 500);
+            long[] totals = counts.totals();
             assertEqual(150, (int) totals[0], "uploaded");
             assertEqual(1500, (int) totals[1], "downloaded");
-            long[] rates = Traffic.sample();
+            long[] rates = counts.sample();
             assertEqual(150, (int) rates[0], "upload rate");
             assertEqual(1500, (int) rates[1], "download rate");
             // A sample closes the interval that just ended, so the next one is
             // quiet unless more bytes arrived in between.
-            Traffic.add(10, 750);
-            Traffic.sample();
-            long[][] history = Traffic.history();
+            counts.add(10, 750);
+            counts.sample();
+            long[][] history = counts.history();
             assertEqual(2, history[0].length, "two intervals");
             assertEqual(750, (int) history[1][1], "newest download interval");
             assertEqual(10, (int) history[0][1], "newest upload interval");
             assertEqual(1500, (int) history[1][0], "the interval before it");
-            Traffic.reset();
-            assertEqual(0, Traffic.history()[0].length, "reset empties the window");
-            assertEqual(0, (int) Traffic.totals()[1], "reset zeroes the totals");
+            counts.reset();
+            assertEqual(0, counts.history()[0].length, "reset empties the window");
+            assertEqual(0, (int) counts.totals()[1], "reset zeroes the totals");
+            // Counters belong to a listener, so a second one starts at zero
+            // however busy the first is.
+            assertEqual(0, (int) new Traffic().totals()[1], "a new listener starts empty");
             assertEqual("512 B", Traffic.human(512), "bytes");
             assertEqual("1.5 kB", Traffic.human(1500), "kilobytes");
             assertEqual("2.0 MB", Traffic.human(2_000_000), "megabytes");
@@ -350,6 +353,32 @@ public final class ProxyAppTest {
                     ProxyState.waiting().describe(), "waiting");
         });
 
+        test("state text names the proxy it is about", () -> {
+            // The line under a proxy is about the proxy on the page, so it does
+            // not repeat its name; the notification, which may hold several,
+            // names the one it is talking about.
+            assertEqual("listening on 0.0.0.0:1081 \u00b7 2 clients",
+                    ProxyState.listening("laptop", 1081, 2).describe(), "named listener");
+            assertEqual("not listening: on \"FRITZ\"",
+                    ProxyState.paused("laptop", "on \"FRITZ\"").describe(), "named pause");
+            assertEqual("\"laptop\" on 1081", ProxyState.listening("laptop", 1081, 0).label(),
+                    "label of a listener");
+            assertEqual("port 1081", ProxyState.listening(1081, 0).label(),
+                    "label of an unnamed one");
+            assertEqual("\"b\" paused", ProxyState.paused("b", "on another network").label(),
+                    "label of a paused one");
+            // One proxy in the notification says everything about itself, and
+            // several are counted and named.
+            assertEqual("\"a\" listening on 0.0.0.0:1080 \u00b7 0 clients",
+                    ProxyState.summary(Arrays.asList(
+                            ProxyState.listening("a", 1080, 0))), "one proxy");
+            assertEqual("2 proxies: \"a\" on 1080, \"b\" paused",
+                    ProxyState.summary(Arrays.asList(
+                            ProxyState.listening("a", 1080, 0),
+                            ProxyState.paused("b", "on another network"))), "two proxies");
+            assertEqual("not listening", ProxyState.summary(new ArrayList<>()), "none");
+        });
+
         test("running separates a paused service from a stopped one", () -> {
             assertTrue(!ProxyState.stopped().running, "stopped is not running");
             assertTrue(ProxyState.waiting().running, "waiting is running");
@@ -361,17 +390,46 @@ public final class ProxyAppTest {
         // --- runtime -------------------------------------------------------
 
         test("the runtime forwards state to listeners until they leave", () -> {
-            ProxyRuntime.publish(ProxyState.stopped());
-            List<ProxyState> seen = new ArrayList<>();
+            ProxyRuntime.publish(new ArrayList<>());
+            List<List<ProxyState>> seen = new ArrayList<>();
             ProxyRuntime.Listener listener = seen::add;
             ProxyRuntime.addListener(listener);
-            ProxyRuntime.publish(ProxyState.listening(1080, 0));
+            ProxyRuntime.publish(Arrays.asList(
+                    new ProxyRuntime.Proxy(ProxyState.listening("one", 1080, 0), new Traffic())));
             assertEqual(1, seen.size(), "updates seen");
-            assertTrue(seen.get(0).listening, "the state is forwarded");
+            assertTrue(seen.get(0).get(0).listening, "the state is forwarded");
             ProxyRuntime.removeListener(listener);
-            ProxyRuntime.publish(ProxyState.stopped());
+            ProxyRuntime.publish(new ArrayList<>());
             assertEqual(1, seen.size(), "updates after removal");
             assertTrue(!ProxyRuntime.state().listening, "the runtime keeps the latest state");
+        });
+
+        test("the runtime keeps every running proxy, each with its own counters", () -> {
+            Traffic first = new Traffic();
+            Traffic second = new Traffic();
+            first.add(0, 1000);
+            second.add(0, 2000);
+            ProxyRuntime.publish(Arrays.asList(
+                    new ProxyRuntime.Proxy(ProxyState.listening("one", 1080, 1), first),
+                    new ProxyRuntime.Proxy(ProxyState.paused("two", "on another network"), second)));
+            assertEqual(2, ProxyRuntime.running().size(), "two running");
+            assertEqual(2, ProxyRuntime.states().size(), "two states");
+            assertTrue(ProxyRuntime.forName("one") != null, "the first is found by name");
+            assertTrue(ProxyRuntime.forName("two").state.running, "a paused one is still running");
+            assertTrue(ProxyRuntime.forName("three") == null, "a stranger is not running");
+            assertEqual(1000, (int) ProxyRuntime.forName("one").traffic.totals()[1],
+                    "the first's bytes");
+            assertEqual(2000, (int) ProxyRuntime.forName("two").traffic.totals()[1],
+                    "the second's bytes");
+            // The tile speaks for all of them: on while anything listens, with
+            // the clients of everything put together.
+            ProxyState all = ProxyRuntime.state();
+            assertTrue(all.running, "something runs");
+            assertTrue(all.listening, "something listens");
+            assertEqual(1080, all.port, "the port that listens");
+            assertEqual(1, all.clients, "the clients of both");
+            ProxyRuntime.publish(new ArrayList<>());
+            assertTrue(ProxyRuntime.running().isEmpty(), "publishing nothing empties it");
         });
 
         System.out.printf("%n%d passed, %d failed%n", passed, failed);
@@ -531,6 +589,7 @@ public final class ProxyAppTest {
         private final Socks5Server server;
         private final FakeUpstream upstream;
         private final AtomicInteger clients = new AtomicInteger();
+        private final Traffic traffic = new Traffic();
         private final int port;
 
         Fixture() throws IOException {
@@ -544,6 +603,7 @@ public final class ProxyAppTest {
                     user,
                     password,
                     custom == null ? upstream : custom,
+                    traffic,
                     clients::set,
                     message -> { });
             server.start();

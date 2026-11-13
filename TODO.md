@@ -4,21 +4,6 @@ Ideas taken from the user's messages, in the order they are being built.
 Delete an item once it is implemented and committed; delete the file when the
 list is empty.
 
-## Several proxies at once
-
-- [ ] Run several proxies on different ports at the same time, which is what the
-      list was shaped for: every saved proxy already carries its own port,
-      credentials, SSID, switches, log tag and card. Today the service holds one
-      `Socks5Server`, one `Uplink` and one `ProxyState` (`ProxyRuntime.state` is
-      a single static), so starting a second proxy replaces the first and the
-      panel says so. The work is a runtime table instead of that static: a
-      listener and its state per proxy, `START --es profile` adding rather than
-      replacing, `STOP --es profile` stopping one and `STOP` stopping all,
-      `dumpsys` listing every running proxy with its port and bytes (the traffic
-      counters are one total per run today), a notification that names them,
-      and the tile deciding whether it toggles all or the last one. The SOCKS5
-      side needs nothing: a server binds a port and knows nothing of the others.
-
 ## A failure brings its own pictures
 
 - [ ] When a check fails, pull the frames that explain it out of the recording
@@ -75,3 +60,26 @@ list is empty.
       the same APK with more paperwork. GitHub Releases plus Obtainium needs
       none of it — a signed APK on a release is installable and updatable from
       the phone — and is worth having from the first tag whatever else happens.
+
+## More of the test on the phone, not over adb
+
+- [ ] Ask how far this goes: a step that is a straight line already runs as one
+      message (the sequences above), but the step's *shape* — open this card,
+      read that field, decide, go on — is still written in bash. Every decision
+      costs a round trip to the host, and every look at the screen costs another
+      (about 0.1 s each; the run makes several hundred of them). What could move
+      is anything the phone can answer about itself: resolving a control and
+      tapping it (done), waiting for it (done), reading a field's text, deciding
+      which page or dialog is showing, and the branches that follow from those —
+      "if the list is not showing, go back once and look again". What cannot
+      move is anything about the rest of the world: a request through the
+      tunnel, dumpsys, logcat, the artifacts pulled to the host, the clock
+      fit — the phone cannot test the thing the phone is. The shape of the
+      answer is probably a second instruction set on top of the sequences — a
+      small conditional or a named routine the host can call — plus the harness
+      becoming a list of routines with its assertions still in bash, so a
+      failure still says which claim was wrong rather than "the script failed".
+      Worth doing where a step is long and branchy (`panel_open`, the scroll
+      loops, the rename dance); not worth it for a step that is one tap and one
+      request. The trap to avoid: a self-reported verdict. The phone may say
+      what it saw; the host decides what that means.

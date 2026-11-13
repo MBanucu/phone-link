@@ -197,7 +197,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         });
         watchForEdits();
 
-        render(ProxyRuntime.state());
+        render();
         String open = savedInstanceState == null
                 ? null
                 : savedInstanceState.getString(STATE_PROFILE);
@@ -326,21 +326,22 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     }
 
     /**
-     * A card's state is that proxy's own state: the in-use one follows the
-     * service, everything else is stopped. Only the parts that change are
-     * touched, so the list is not rebuilt for every connection.
+     * A card's state is that proxy's own state: every saved proxy with a
+     * listener behind it follows the service, the rest are stopped — and more
+     * than one can be running, which is what the list is for. Only the parts
+     * that change are touched, so the list is not rebuilt for every connection.
      */
     private void refreshCards() {
-        ProxyState state = ProxyRuntime.state();
-        String inUse = ConfigStore.inUse(this);
         for (int index = 0; index < profileList.getChildCount(); index++) {
             View card = profileList.getChildAt(index);
             Object tag = card.getTag();
             String name = tag == null ? null : tag.toString();
-            boolean mine = name != null && name.equals(inUse);
+            ProxyRuntime.Proxy live = ProxyRuntime.forName(name);
+            ProxyState state = live == null ? ProxyState.stopped(name) : live.state;
+            boolean mine = live != null;
             int label;
             int color;
-            if (mine && state.listening) {
+            if (state.listening) {
                 label = R.string.state_running;
                 color = R.color.running;
             } else if (mine && state.running) {
@@ -587,10 +588,16 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
             return;
         }
         EventLog.addTo(to, "renamed \"" + from + "\" to \"" + to + "\"");
-        // The running proxy, if this was the one, keeps logging under the new
-        // name instead of one that no longer exists.
-        if (ProxyRuntime.state().running && to.equals(ConfigStore.inUse(this))) {
+        // A listener that was running under the old name keeps its port but has
+        // to be listed under the new one, or the panel would show a card that
+        // is not the one listening. The service adopts the new name; the store
+        // was renamed here, so it only moves the listener.
+        if (isRunning(from)) {
             EventLog.setActiveTag(to);
+            startService(new Intent(this, ProxyService.class)
+                    .setAction(ProxyService.ACTION_RENAME_PROFILE)
+                    .putExtra(ConfigStore.EXTRA_PROFILE, from)
+                    .putExtra(ConfigStore.EXTRA_TO, to));
         }
         Toast.makeText(this, getString(R.string.profile_renamed, from, to),
                 Toast.LENGTH_SHORT).show();
@@ -607,11 +614,19 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
                 .setTitle(getString(R.string.profile_delete_title, name))
                 .setMessage(R.string.profile_delete_message)
                 .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    boolean wasRunning = isRunning(name);
                     ConfigStore.deleteProfile(this, name);
                     EventLog.addTo(name, "deleted \"" + name + "\"");
                     ConfigStore.setSelectedProfile(this, null);
                     if (name.equals(ConfigStore.inUse(this))) {
                         ConfigStore.setInUse(this, null);
+                    }
+                    if (wasRunning) {
+                        // A listener whose proxy is gone would keep a port open
+                        // under a name the list no longer has.
+                        startService(new Intent(this, ProxyService.class)
+                                .setAction(ProxyService.ACTION_STOP)
+                                .putExtra(ConfigStore.EXTRA_PROFILE, name));
                     }
                     showHome();
                 })
@@ -700,15 +715,13 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         return value.data;
     }
 
-    /** Whether this proxy is the one the service is running right now. */
+    /** Whether this proxy has a listener of its own right now. */
     private boolean isRunning(String name) {
-        ProxyState state = ProxyRuntime.state();
-        return state.running && name != null && name.equals(ConfigStore.inUse(this));
+        return name != null && ProxyRuntime.forName(name) != null;
     }
 
     /** The one button under an open proxy: Start, or Stop when it is running. */
     private void renderToggle() {
-        ProxyState state = ProxyRuntime.state();
         boolean running = isRunning(editing);
         toggle.setText(running ? R.string.action_stop : R.string.action_start);
         toggle.setBackgroundTintList(ColorStateList.valueOf(
@@ -717,22 +730,35 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         if (editing == null) {
             return;
         }
-        if (!state.running) {
-            footerState.setText(R.string.footer_stopped);
-        } else if (!editing.equals(ConfigStore.inUse(this))) {
+        ProxyRuntime.Proxy live = ProxyRuntime.forName(editing);
+        if (live != null) {
+            // This proxy's own line, whether or not others are running too.
+            footerState.setText(live.state.describe());
+        } else if (!ProxyRuntime.running().isEmpty()) {
             footerState.setText(R.string.footer_not_this);
         } else {
-            footerState.setText(state.describe());
+            footerState.setText(R.string.footer_stopped);
         }
         renderBattery();
     }
 
-    /** The totals line above the sparkline; the graph reads Traffic itself. */
+    /** This proxy's counters, or zeros while it is not running. */
+    private Traffic traffic() {
+        ProxyRuntime.Proxy live = ProxyRuntime.forName(editing);
+        return live == null ? null : live.traffic;
+    }
+
+    /** The totals line above the sparkline; the graph reads the same counters. */
     private void renderTraffic() {
-        long[] totals = Traffic.totals();
-        long[] rates = Traffic.history()[0].length == 0
+        Traffic counts = traffic();
+        if (counts == null) {
+            counts = new Traffic();
+        }
+        long[] totals = counts.totals();
+        long[] rates = counts.history()[0].length == 0
                 ? new long[] {0, 0}
-                : lastSample();
+                : lastSample(counts);
+        trafficGraph.setTraffic(traffic());
         // A graph with no line in it is a hole in the page; the sentence says
         // the same thing in less room.
         boolean idle = totals[0] == 0 && totals[1] == 0;
@@ -748,8 +774,8 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     }
 
     /** The newest interval's {up, down} rates. */
-    private long[] lastSample() {
-        long[][] history = Traffic.history();
+    private long[] lastSample(Traffic counts) {
+        long[][] history = counts.history();
         long[] rates = history[0];
         return new long[] {rates[rates.length - 1], history[1][history[1].length - 1]};
     }
@@ -777,7 +803,11 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     private final Runnable ticker = new Runnable() {
         @Override
         public void run() {
-            Traffic.sample();
+            // Every running proxy is sampled, so its graph has no hole in it
+            // when it is opened; the page shows the one being looked at.
+            for (ProxyRuntime.Proxy live : ProxyRuntime.running()) {
+                live.traffic.sample();
+            }
             if (editing != null) {
                 renderTraffic();
             }
@@ -804,7 +834,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         ConfigStore.shared(this).registerOnSharedPreferenceChangeListener(preferences);
         getContentResolver().registerContentObserver(
                 Settings.Global.getUriFor(AdbWireless.SETTING), false, adbSetting);
-        render(ProxyRuntime.state());
+        render();
         renderAdbState();
     }
 
@@ -829,13 +859,14 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
 
     /** May arrive on a connection thread; the render hop is deliberate. */
     @Override
-    public void onStateChanged(ProxyState state) {
-        runOnUiThread(() -> render(state));
+    public void onStatesChanged(List<ProxyState> states) {
+        runOnUiThread(this::render);
     }
 
-    private void render(ProxyState state) {
+    private void render() {
         refreshCards();
         renderToggle();
+        renderTraffic();
     }
 
     // -- Android's promises ----------------------------------------------

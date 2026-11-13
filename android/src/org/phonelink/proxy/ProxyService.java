@@ -16,29 +16,37 @@ import android.util.Log;
 import java.io.FileDescriptor;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.Map;
 
 /**
- * Keeps a SOCKS5 listener alive while the uplink makes sense, and reports it in
- * the notification shade.
+ * Keeps the SOCKS5 listeners alive while the uplink makes sense, and reports
+ * them in the notification shade.
+ *
+ * <p>More than one proxy can listen at a time: every saved proxy carries its
+ * own port, credentials, SSID and switches, so the list is a list of listeners
+ * and this service holds one of each. They are kept by port, because a port is
+ * what a listener is: a start on a port makes room by stopping whatever held
+ * it, and the other ports are left alone.
  *
  * <p>Two ways in, one implementation: adb drives it with
  * {@code am start-foreground-service} through a {@code DUMP}-guarded service,
  * and {@link MainActivity} calls the same actions from the panel. Both write
- * through {@link ConfigStore}, so neither can configure the listener
- * differently from the other.
+ * through {@link ConfigStore}, so neither can configure a listener differently
+ * from the other.
  *
- * <p>The listener is only open while {@link Uplink} says the phone is on the
- * configured Wi-Fi; otherwise the service stays up, reports why, and binds
+ * <p>A listener is only open while its {@link Uplink} says the phone is on the
+ * Wi-Fi it was configured for; otherwise it stays up, reports why, and binds
  * nothing.
  */
-public final class ProxyService extends Service
-        implements Socks5Server.Listener, Uplink.Listener {
+public final class ProxyService extends Service {
 
     static final String TAG = "phone-link-proxy";
 
     static final String ACTION_START = "org.phonelink.proxy.action.START";
+    /** Stop everything, or with --es profile/--ei port just that one. */
     static final String ACTION_STOP = "org.phonelink.proxy.action.STOP";
     /** Keep the configuration the service has under a name, and stop. */
     static final String ACTION_SAVE_PROFILE = "org.phonelink.proxy.action.SAVE_PROFILE";
@@ -51,18 +59,40 @@ public final class ProxyService extends Service
     private static final int ERROR_NOTIFICATION_ID = 2;
     private static final String CHANNEL = "proxy";
 
+    /**
+     * One running listener: the configuration it came from, the network it
+     * waits for, the port it bound and the bytes it moved.
+     */
+    private static final class Running {
+        /** Not final: a rename moves the listener to its new name in place. */
+        String name;
+        final ProxyConfig config;
+        final Traffic traffic = new Traffic();
+        Uplink uplink;
+        Socks5Server server;
+        /** Waiting, paused or listening; the clients count is kept current. */
+        ProxyState state;
+        int clients;
+
+        Running(String name, ProxyConfig config) {
+            this.name = name;
+            this.config = config;
+            this.state = ProxyState.waiting(name);
+        }
+    }
+
     private final Object lock = new Object();
-    private final AtomicInteger clients = new AtomicInteger();
+    /** By port, in the order they were started. */
+    private final Map<Integer, Running> running = new LinkedHashMap<>();
 
     private PowerManager.WakeLock wakeLock;
     private NotificationManager notifications;
     private Egress egress;
-    private Socks5Server server;
-    private Uplink uplink;
     private ProxyConfig config;
-    private ProxyState state = ProxyState.stopped();
     /** Whether this instance has already been asked to do something. */
     private boolean startedBefore;
+    /** Wireless debugging is a switch of the whole app, and one start is enough. */
+    private boolean adbTouched;
 
     @Override
     public void onCreate() {
@@ -103,7 +133,7 @@ public final class ProxyService extends Service
                 : deleting ? "deleting"
                 : renaming ? "renaming" : "starting");
         if (stopping) {
-            stopSelf();
+            stopRequested(intent);
             return START_NOT_STICKY;
         }
         if (saving) {
@@ -140,9 +170,7 @@ public final class ProxyService extends Service
         profile = profile == null || profile.trim().isEmpty()
                 ? ConfigStore.profileMatching(this, config)
                 : profile.trim();
-        ConfigStore.setInUse(this, profile);
-        EventLog.setActiveTag(profile);
-        startWatching();
+        start(profile, config);
         return START_STICKY;
     }
 
@@ -172,14 +200,17 @@ public final class ProxyService extends Service
 
     @Override
     public void onDestroy() {
-        if (uplink != null) {
-            uplink.close();
-            uplink = null;
+        List<Running> all = new ArrayList<>(running.values());
+        synchronized (lock) {
+            running.clear();
         }
-        stopListening();
-        // Nothing that happens after this is about the proxy that just went.
+        for (Running each : all) {
+            close(each);
+        }
+        closeEgress();
+        // Nothing that happens after this is about the listeners that just went.
         EventLog.setActiveTag(null);
-        ProxyRuntime.publish(ProxyState.stopped());
+        publishAll();
         stopForeground(STOP_FOREGROUND_REMOVE);
         notifications.cancel(NOTIFICATION_ID);
         super.onDestroy();
@@ -202,12 +233,27 @@ public final class ProxyService extends Service
         writer.println(Help.text());
         writer.println();
         writer.println("Right now");
-        writer.println("  state       " + state.describe());
+        List<Running> all = new ArrayList<>(running.values());
+        writer.println("  state       " + ProxyState.summary(states(all)));
+        // The saved configuration asked for by the last start, which is what the
+        // list marks and what an agent means by "the proxy in use".
         String inUse = ConfigStore.inUse(this);
         writer.println("  profile     " + (inUse == null ? "none" : "\"" + inUse + "\""));
-        long[] traffic = Traffic.totals();
-        writer.println("  traffic     \u2193 " + Traffic.human(traffic[1])
-                + " \u00b7 \u2191 " + Traffic.human(traffic[0]) + " in this run");
+        long up = 0;
+        long down = 0;
+        for (Running each : all) {
+            long[] totals = each.traffic.totals();
+            up += totals[0];
+            down += totals[1];
+            writer.println("  running     " + label(each)
+                    // An unnamed one is already known by its port.
+                    + (each.name == null ? "" : " \u00b7 port " + each.config.port)
+                    + " \u00b7 \u2193 " + Traffic.human(totals[1])
+                    + " · \u2191 " + Traffic.human(totals[0])
+                    + " · " + each.clients + (each.clients == 1 ? " client" : " clients"));
+        }
+        writer.println("  traffic     \u2193 " + Traffic.human(down)
+                + " \u00b7 \u2191 " + Traffic.human(up) + " in this run");
         if (config != null) {
             writer.println("  using       " + config.summary());
         }
@@ -230,54 +276,210 @@ public final class ProxyService extends Service
         writer.flush();
     }
 
-    /** Called from connection threads. */
-    @Override
-    public void onClientsChanged(int connected) {
+    private static String label(Running each) {
+        return each.name == null ? "port " + each.config.port : "\"" + each.name + "\"";
+    }
+
+    // -- starting and stopping -------------------------------------------
+
+    /**
+     * Start the configuration as the proxy called {@code name}. A start on a
+     * port that is already taken is a restart of that port; every other port
+     * keeps listening, which is the whole point of the list.
+     */
+    private void start(String name, ProxyConfig config) {
+        Running existing = running.get(config.port);
+        if (existing != null) {
+            synchronized (lock) {
+                running.remove(config.port);
+            }
+            close(existing);
+            EventLog.addTo(existing.name,
+                    "replaced on port " + config.port + " by a new start");
+        }
+        Running listener = new Running(name, config);
         synchronized (lock) {
-            if (connected > 0) {
-                if (!wakeLock.isHeld()) {
-                    // Only while somebody is actually using the tunnel: a lock
-                    // held for the lifetime of the service is the battery cost
-                    // this app exists to avoid.
-                    wakeLock.acquire();
+            running.put(config.port, listener);
+        }
+        if (name != null) {
+            // An ad-hoc start under a name no profile holds is not "the proxy in
+            // use": it would erase the mark the list draws on a card.
+            ConfigStore.setInUse(this, name);
+        }
+        EventLog.setActiveTag(name);
+        Log.i(TAG, "starting " + label(listener) + " on port " + config.port);
+        EventLog.addTo(name, "starting on port " + config.port);
+        publishAll();
+        listener.uplink = new Uplink(this, config.ssid, config.anyNetwork,
+                (allowed, why) -> onUplink(listener, allowed, why));
+        listener.uplink.start();
+    }
+
+    /** {@code STOP}: everything, or the one the intent names. */
+    private void stopRequested(Intent intent) {
+        String name = intent == null ? null : intent.getStringExtra(ConfigStore.EXTRA_PROFILE);
+        name = name == null ? null : name.trim();
+        boolean byPort = intent != null && intent.hasExtra(ConfigStore.EXTRA_PORT);
+        int port = intent == null ? 0 : intent.getIntExtra(ConfigStore.EXTRA_PORT, 0);
+        List<Running> going = new ArrayList<>();
+        synchronized (lock) {
+            if (name != null && !name.isEmpty()) {
+                for (Running each : running.values()) {
+                    if (name.equals(each.name)) {
+                        going.add(each);
+                    }
                 }
-            } else if (wakeLock.isHeld()) {
-                wakeLock.release();
+            } else if (byPort) {
+                Running each = running.get(port);
+                if (each != null) {
+                    going.add(each);
+                }
+            } else {
+                going.addAll(running.values());
+            }
+            for (Running each : going) {
+                running.remove(each.config.port);
             }
         }
-        if (server != null) {
-            publish(ProxyState.listening(server.port(), connected));
+        for (Running each : going) {
+            close(each);
+            Log.i(TAG, "stopped " + label(each) + " on port " + each.config.port);
+            EventLog.addTo(each.name, "stopped listening on port " + each.config.port);
+        }
+        if (running.isEmpty()) {
+            closeEgress();
+            stopSelf();
+        } else {
+            publishAll();
         }
     }
 
-    /** Called on the main thread by {@link Uplink}. */
-    @Override
-    public void onUplinkChanged(boolean allowed, String why) {
-        Log.i(TAG, "uplink " + (allowed ? "allowed" : "paused") + ": " + why);
+    /**
+     * Called on the main thread by a listener's {@link Uplink}.
+     */
+    private void onUplink(Running listener, boolean allowed, String why) {
+        Log.i(TAG, label(listener) + " uplink " + (allowed ? "allowed" : "paused") + ": " + why);
         if (allowed) {
             // The port adb uses lives only while wireless debugging is on, and
             // a reboot can switch it off; this is the one moment that matters
             // for the host, because the SSID just matched.
-            if (ConfigStore.adbWireless(this)) {
+            if (!adbTouched && ConfigStore.adbWireless(this)) {
+                adbTouched = true;
                 boolean wasOff = !AdbWireless.on(this);
                 AdbWireless.enable(this);
                 if (wasOff && AdbWireless.on(this)) {
-                    EventLog.add("wireless debugging turned back on");
+                    EventLog.addTo(listener.name, "wireless debugging turned back on");
                 }
-            } else {
+            } else if (!ConfigStore.adbWireless(this)) {
                 Log.i(TAG, "wireless debugging left alone: the panel switch is off");
             }
-            startListening();
-            if (server == null) {
-                // startListening() failed and already stopped the service.
+            if (!startListening(listener)) {
+                // startListening() failed and took this listener away.
                 return;
             }
-            publish(ProxyState.listening(server.port(), clients.get()));
         } else {
-            stopListening();
-            publish(ProxyState.paused(why));
+            stopListening(listener);
+            listener.state = ProxyState.paused(listener.name, why);
+            publishAll();
         }
     }
+
+    private boolean startListening(Running listener) {
+        if (listener.server != null) {
+            return true;
+        }
+        if (egress == null) {
+            egress = new Egress(this);
+            egress.start();
+        }
+        Socks5Server candidate = new Socks5Server(
+                listener.config.port, listener.config.user, listener.config.password, egress,
+                listener.traffic, count -> onClients(listener, count),
+                message -> Log.i(TAG, message));
+        try {
+            candidate.start();
+        } catch (IOException e) {
+            failOne(listener, "cannot listen on 0.0.0.0:" + listener.config.port + ": "
+                    + e.getMessage());
+            return false;
+        }
+        listener.server = candidate;
+        listener.state = ProxyState.listening(listener.name, listener.config.port,
+                listener.clients);
+        Log.i(TAG, label(listener) + " listening on 0.0.0.0:" + listener.config.port
+                + (listener.config.user.isEmpty()
+                        ? " without authentication" : " with authentication"));
+        publishAll();
+        return true;
+    }
+
+    private void stopListening(Running listener) {
+        if (listener.server != null) {
+            listener.server.close();
+            listener.server = null;
+        }
+        listener.clients = 0;
+        holdWakeLock(totalClients() > 0);
+    }
+
+    /** Everything a listener owns, gone: its port, its network gate, its wake. */
+    private void close(Running listener) {
+        if (listener.uplink != null) {
+            listener.uplink.close();
+            listener.uplink = null;
+        }
+        if (listener.server != null) {
+            listener.server.close();
+            listener.server = null;
+        }
+        listener.clients = 0;
+        if (running.isEmpty()) {
+            closeEgress();
+            holdWakeLock(false);
+        }
+    }
+
+    private void closeEgress() {
+        if (egress != null) {
+            // No client can arrive while nothing is bound, so the cellular
+            // request would only keep the radio busy.
+            egress.close();
+            egress = null;
+        }
+    }
+
+    /** Called from connection threads, once per listener. */
+    private void onClients(Running listener, int connected) {
+        listener.clients = connected;
+        if (connected > 0) {
+            listener.state = ProxyState.listening(listener.name, listener.config.port, connected);
+        }
+        holdWakeLock(totalClients() > 0);
+        publishAll();
+    }
+
+    private int totalClients() {
+        int total = 0;
+        for (Running each : new ArrayList<>(running.values())) {
+            total += each.clients;
+        }
+        return total;
+    }
+
+    private void holdWakeLock(boolean held) {
+        synchronized (lock) {
+            if (held && !wakeLock.isHeld()) {
+                // Only while somebody is actually using a tunnel: a lock held
+                // for the lifetime of the service is the battery cost this app
+                // exists to avoid.
+                wakeLock.acquire();
+            } else if (!held && wakeLock.isHeld()) {
+                wakeLock.release();
+            }
+        }
+    }
+
+    // -- saved configurations --------------------------------------------
 
     /**
      * {@code SAVE_PROFILE} keeps the configuration the service has under a name,
@@ -297,12 +499,10 @@ public final class ProxyService extends Service
                 ConfigStore.autoStart(this), ConfigStore.adbWireless(this));
         EventLog.addTo(name, "saved configuration \"" + name + "\"");
         Log.i(TAG, "saved configuration \"" + name + "\"");
-        if (first) {
+        if (first && running.isEmpty()) {
             stopSelf();
         } else {
-            // Saving a name is not a restart: a running proxy keeps running and
-            // just gets its notification text back.
-            publish(state);
+            publishAll();
         }
     }
 
@@ -325,12 +525,26 @@ public final class ProxyService extends Service
             // The list must not keep pointing at a proxy that no longer exists.
             ConfigStore.setInUse(this, null);
         }
+        // A listener running under that name keeps its port but loses the name
+        // it is listed under, or the panel would show a card that is not there.
+        Running named = null;
+        synchronized (lock) {
+            for (Running each : running.values()) {
+                if (name.equals(each.name)) {
+                    named = each;
+                }
+            }
+        }
+        if (named != null) {
+            EventLog.addTo(name, "deleted \"" + name + "\" while it was running");
+            publishAll();
+        }
         EventLog.addTo(name, "deleted \"" + name + "\"");
         Log.i(TAG, "deleted configuration \"" + name + "\"");
-        if (first) {
+        if (first && running.isEmpty()) {
             stopSelf();
         } else {
-            publish(state);
+            publishAll();
         }
     }
 
@@ -346,96 +560,101 @@ public final class ProxyService extends Service
             fail(getString(R.string.error_profile_name));
             return;
         }
-        if (ConfigStore.profile(this, name) == null) {
-            fail(getString(R.string.error_profile_missing, name));
-            return;
-        }
         if (!ConfigStore.renameProfile(this, name, to)) {
-            fail(getString(R.string.error_profile_exists, to));
-            return;
+            // The panel renames in the store itself and then tells the service,
+            // so the old name is already gone there and only the listener that
+            // was running under it is left to move. Anything else is an error.
+            if (ConfigStore.profile(this, name) != null || ConfigStore.profile(this, to) == null) {
+                fail(getString(R.string.error_profile_exists, to));
+                return;
+            }
         }
         EventLog.addTo(to, "renamed \"" + name + "\" to \"" + to + "\"");
         // A proxy that is running under the old name keeps logging under the
-        // new one instead of a name that no longer exists.
-        if (state.running && to.equals(ConfigStore.inUse(this))) {
+        // new one instead of a name that no longer exists. The entry is the
+        // same one — the listening port, its counters and its clients are not
+        // affected — so only the name it is filed under moves.
+        synchronized (lock) {
+            for (Running each : running.values()) {
+                if (name.equals(each.name)) {
+                    each.name = to;
+                    each.state = each.state.listening
+                            ? ProxyState.listening(to, each.config.port, each.clients)
+                            : ProxyState.paused(to, each.state.reason);
+                }
+            }
+        }
+        if (to.equals(ConfigStore.inUse(this))) {
             EventLog.setActiveTag(to);
         }
         Log.i(TAG, "renamed configuration \"" + name + "\" to \"" + to + "\"");
-        if (first) {
+        if (first && running.isEmpty()) {
             stopSelf();
         } else {
-            publish(state);
+            publishAll();
         }
     }
 
-    private void startWatching() {
-        if (uplink != null) {
-            uplink.close();
-            uplink = null;
+    // -- the notifications ------------------------------------------------
+
+    private List<ProxyState> states(List<Running> all) {
+        List<ProxyState> states = new ArrayList<>();
+        for (Running each : all) {
+            states.add(each.server == null
+                    ? each.state
+                    : ProxyState.listening(each.name, each.config.port, each.clients));
         }
-        stopListening();
-        // The counters answer "what has this run moved", so a new start begins
-        // at zero.
-        Traffic.reset();
-        publish(ProxyState.waiting());
-        uplink = new Uplink(this, config.ssid, config.anyNetwork, this::onUplinkChanged);
-        uplink.start();
+        return states;
     }
 
-    private void startListening() {
-        if (server != null) {
-            return;
-        }
-        if (egress == null) {
-            egress = new Egress(this);
-            egress.start();
-        }
-        Socks5Server candidate = new Socks5Server(
-                config.port, config.user, config.password, egress, this,
-                message -> Log.i(TAG, message));
-        try {
-            candidate.start();
-        } catch (IOException e) {
-            fail("cannot listen on 0.0.0.0:" + config.port + ": " + e.getMessage());
-            return;
-        }
-        server = candidate;
-        Log.i(TAG, "listening on 0.0.0.0:" + config.port
-                + (config.user.isEmpty() ? " without authentication" : " with authentication"));
-    }
-
-    private void stopListening() {
-        if (server != null) {
-            server.close();
-            server = null;
-        }
-        if (egress != null) {
-            // No client can arrive while nothing is bound, so the cellular
-            // request would only keep the radio busy.
-            egress.close();
-            egress = null;
-        }
-        clients.set(0);
+    /** Share every listener's state with the panel, the shade and the Log page. */
+    private void publishAll() {
+        List<Running> all;
         synchronized (lock) {
-            if (wakeLock.isHeld()) {
-                wakeLock.release();
-            }
+            all = new ArrayList<>(running.values());
         }
-    }
-
-    /** Share a state with the panel, the shade and the panel's Log page. */
-    private void publish(ProxyState next) {
-        if (!next.describe().equals(state.describe())) {
-            EventLog.add(next.describe());
+        List<ProxyRuntime.Proxy> view = new ArrayList<>();
+        for (Running each : all) {
+            ProxyState state = each.server == null
+                    ? each.state
+                    : ProxyState.listening(each.name, each.config.port, each.clients);
+            each.state = state;
+            view.add(new ProxyRuntime.Proxy(state, each.traffic));
         }
-        state = next;
-        ProxyRuntime.publish(next);
-        notifications.notify(NOTIFICATION_ID, buildNotification(next.describe()));
+        ProxyRuntime.publish(view);
+        if (startedBefore) {
+            notifications.notify(NOTIFICATION_ID,
+                    buildNotification(ProxyState.summary(states(all))));
+        }
     }
 
     private void fail(String message) {
         Log.e(TAG, message);
         EventLog.add("failed: " + message);
+        notifyError(message);
+        stopSelf();
+    }
+
+    /**
+     * One listener could not do its job. The others are not its business, so
+     * this takes that listener out of the list and leaves the rest listening.
+     */
+    private void failOne(Running listener, String message) {
+        Log.e(TAG, message);
+        EventLog.addTo(listener.name, "failed: " + message);
+        notifyError(message);
+        synchronized (lock) {
+            running.remove(listener.config.port);
+        }
+        close(listener);
+        if (running.isEmpty()) {
+            stopSelf();
+        } else {
+            publishAll();
+        }
+    }
+
+    private void notifyError(String message) {
         Notification notification = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(R.drawable.ic_stat_proxy)
                 .setContentTitle(getString(R.string.app_name))
@@ -443,7 +662,6 @@ public final class ProxyService extends Service
                 .setStyle(new Notification.BigTextStyle().bigText(message))
                 .build();
         notifications.notify(ERROR_NOTIFICATION_ID, notification);
-        stopSelf();
     }
 
     private Notification buildNotification(String text) {
@@ -456,6 +674,7 @@ public final class ProxyService extends Service
                 .setSmallIcon(R.drawable.ic_stat_proxy)
                 .setContentTitle(getString(R.string.notification_title))
                 .setContentText(text)
+                .setStyle(new Notification.BigTextStyle().bigText(text))
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setContentIntent(open)

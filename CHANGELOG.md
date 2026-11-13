@@ -36,10 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   copies the configuration in use, takes the next free port and opens the
   result, so the opened proxy is the wizard. `Start` on an open proxy stores the
   form into it first, so the proxy that runs is the one that was saved and the
-  list marks the right card. The card shape is where several proxies will
-  report into once the service can run more than one; measured on the phone:
-  starting a proxy turns its card green and says `in use · port 18080`, and
-  `dumpsys` reports `profile "harness-save"`.
+  list marks the right card. Measured on the phone: starting a proxy turns its
+  card green and says `in use · port 18080`, and `dumpsys` reports
+  `profile "harness-save"`. Every card that has a listener of its own is green
+  now that several can run at once.
 - One proxy is three segments, not one long page: `Listener` holds the four
   fields and the two listener boxes, `Service` the auto-start and
   wireless-debugging switches with what the phone says about each, `Log` this
@@ -72,6 +72,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `true` after they had been set to `false`.
 
 ### Added
+
+- Several proxies listen at once. The service holds a listener per port instead
+  of one: `START` adds, a start on a port that is already taken replaces what
+  held it, `STOP --es profile NAME` (or `--ei port N`) stops just that one and
+  `STOP` alone stops them all. Each listener has its own uplink and its own
+  byte counters, so a proxy's page says what that proxy moved; `dumpsys` lists
+  every running one with its port, bytes and clients, the notification names
+  them, the list marks every card that runs and the Quick Settings tile speaks
+  for all of them. Starting a proxy on a port that a proxy already holds still
+  replaces it, which is what the single-proxy scripts expect.
 
 - Steps that are a straight line run on the phone in one message. The capture
   service takes a `SEQUENCE` broadcast — `tap`, `tap-id`, `tap-text`, `swipe`,

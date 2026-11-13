@@ -553,12 +553,19 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
+# A start that replaces everything: a step about one configuration must not
+# inherit a listener another step left behind, since several may run at once.
 start_app() {
-  # anonymous is pinned: a configuration a previous run left in the store must
-  # not turn the test's listener into an open relay.
-  shell am start-foreground-service -n "$SERVICE" -a "$START" \
-    --ei port "$PORT" --es user "$USER_NAME" --es password "$PASSWORD" \
-    --ez anonymous false "$@" >/dev/null 2>&1
+  shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
+  start_proxy --ei port "$PORT" --es user "$USER_NAME" --es password "$PASSWORD" \
+    --ez anonymous false "$@"
+}
+
+# A start that adds: this configuration's listener, and whatever else runs.
+# anonymous is pinned: a configuration a previous run left in the store must
+# not turn the test's listener into an open relay.
+start_proxy() {
+  shell am start-foreground-service -n "$SERVICE" -a "$START" "$@" >/dev/null 2>&1
 }
 
 # The listener is rebuilt asynchronously after Start, so poll for the state
@@ -968,23 +975,27 @@ wait_foreground() {
   return 1
 }
 
-# Succeeds when a request through the tunnel reaches the internet.
-through_proxy() {
+# Succeeds when a request through a tunnel reaches the internet.
+through() { # through PORT USER PASSWORD
   local code
   code=$(curl -sS -m 15 -o /dev/null -w '%{http_code}' \
-    --socks5-hostname "$USER_NAME:$PASSWORD@$ADDRESS:$PORT" https://example.com 2>/dev/null) \
+    --socks5-hostname "$2:$3@$ADDRESS:$1" https://example.com 2>/dev/null) \
     || return 1
   [ "$code" = "200" ]
 }
 
-# Succeeds when the port refuses connections.
-port_closed() {
+through_proxy() { through "$PORT" "$USER_NAME" "$PASSWORD"; }
+
+# Succeeds when a port refuses connections.
+closed() { # closed PORT
   local status
-  curl -sS -m 5 -o /dev/null --socks5-hostname "$USER_NAME:$PASSWORD@$ADDRESS:$PORT" \
+  curl -sS -m 5 -o /dev/null --socks5-hostname "$ADDRESS:$1" \
     https://example.com >/dev/null 2>&1
   status=$?
   [ "$status" -eq 7 ]
 }
+
+port_closed() { closed "$PORT"; }
 
 ADDRESS=$(shell ip -4 addr show wlan0 2>/dev/null |
   awk '/inet / { sub(/\/.*/, "", $2); print $2; exit }')
@@ -1594,6 +1605,91 @@ if [ "${report:-1}" -eq 0 ]; then
 else
   bad "the ten are gone again ($report left)"
 fi
+
+step 'several at once'
+# The list is a list of listeners: two saved proxies, on two ports, with their
+# own credentials, both serving at the same time.
+PORT2=$((PORT + 1))
+USER2=phonelink-second
+PASSWORD2=phonelink-second-password
+start_app --es ssid "$SSID" --ez any_network false
+wait_foreground || true
+save_profile harness-a
+start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT2" \
+  --es user "$USER2" --es password "$PASSWORD2"
+wait_foreground || true
+save_profile harness-b
+shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
+sleep 2
+shell am start-foreground-service -n "$SERVICE" -a "$START" \
+  --es profile harness-a >/dev/null 2>&1
+sleep 2
+shell am start-foreground-service -n "$SERVICE" -a "$START" \
+  --es profile harness-b >/dev/null 2>&1
+sleep 3
+if through "$PORT" "$USER_NAME" "$PASSWORD" &&
+  through "$PORT2" "$USER2" "$PASSWORD2"; then
+  ok 'two proxies serve at once'
+else
+  bad 'two proxies serve at once'
+  shell dumpsys activity service "$SERVICE" | sed -n '/Right now/,/  saved/p'
+fi
+# Each one's own credentials, not the other's: the ports are not just both open.
+if through "$PORT" "$USER2" "$PASSWORD2"; then
+  bad 'each proxy keeps its own credentials'
+else
+  ok 'each proxy keeps its own credentials'
+fi
+# dumpsys indents a service's own lines by four spaces, so the block is taken
+# out first and the lines are matched without an anchor on the left.
+now=$(shell dumpsys activity service "$SERVICE" | sed -n '/Right now/,/  saved/p')
+running=$(printf '%s\n' "$now" | grep -c '^ *running')
+if [ "$running" -eq 2 ] &&
+  printf '%s\n' "$now" | grep -q "\"harness-a\" · port $PORT " &&
+  printf '%s\n' "$now" | grep -q "\"harness-b\" · port $PORT2 "; then
+  ok 'dumpsys lists both, with their ports'
+else
+  bad "dumpsys lists both, with their ports ($running listed)"
+  shell dumpsys activity service "$SERVICE" | sed -n '/Right now/,/  saved/p'
+fi
+open_panel
+if panel_home; then
+  if [ "$(card_state harness-a)" = Running ] &&
+    [ "$(card_state harness-b)" = Running ]; then
+    ok 'the list marks both of them running'
+  else
+    bad "the list marks both of them running ($(card_state harness-a)/$(card_state harness-b))"
+    panel_where
+  fi
+else
+  bad 'the list is showing'
+fi
+# One by name, and the other is left alone.
+shell am start-foreground-service -n "$SERVICE" -a "$STOP" \
+  --es profile harness-b >/dev/null 2>&1
+sleep 2
+if closed "$PORT2" && through "$PORT" "$USER_NAME" "$PASSWORD"; then
+  ok 'a stop by name closes one port and leaves the other'
+else
+  bad 'a stop by name closes one port and leaves the other'
+fi
+now=$(shell dumpsys activity service "$SERVICE" | sed -n '/Right now/,/  saved/p')
+remaining=$(printf '%s\n' "$now" | grep -c '^ *running')
+if [ "${remaining:-0}" -eq 1 ] &&
+  printf '%s\n' "$now" | grep '^ *running' | grep -q "harness-a"; then
+  ok 'and the one left is the one that was not named'
+else
+  bad "and the one left is the one that was not named ($remaining listed)"
+fi
+shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
+sleep 2
+if closed "$PORT" && closed "$PORT2" && ! foreground; then
+  ok 'stop stops them all'
+else
+  bad 'stop stops them all'
+fi
+delete_profile_by_adb harness-a
+delete_profile_by_adb harness-b
 
 step 'proxy log'
 # Start the saved proxy by name so its events carry its name, and move some

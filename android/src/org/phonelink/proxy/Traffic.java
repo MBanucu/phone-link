@@ -3,49 +3,47 @@ package org.phonelink.proxy;
 import java.util.Locale;
 
 /**
- * Byte counters and a minute of one-second rate samples, for the panel's Log
- * page.
+ * Byte counters and a minute of one-second rate samples, for one listener's
+ * page in the panel.
  *
  * <p>Plain Java, no Android types: the relay threads add bytes here, the panel
  * samples it once a second while it is in front, and the tests drive it
- * directly. The counters are per run — {@link ProxyService} resets them when it
- * is asked to start again — because the question the page answers is "what has
- * this run moved", not "what has this phone ever moved".
+ * directly. One instance belongs to one running proxy, so the page under it
+ * answers "what has this proxy moved", not "what has this phone ever moved";
+ * a listener that is started again gets fresh counters, because that is a new
+ * run of that proxy.
  */
 final class Traffic {
 
     /** One per second; a minute of history fits a sparkline comfortably. */
     static final int SAMPLES = 60;
 
-    private static final long[] down = new long[SAMPLES];
-    private static final long[] up = new long[SAMPLES];
-    private static long totalDown;
-    private static long totalUp;
-    private static long lastDown;
-    private static long lastUp;
-    private static int next;
-    private static int filled;
-
-    private Traffic() {
-    }
+    private final long[] down = new long[SAMPLES];
+    private final long[] up = new long[SAMPLES];
+    private long totalDown;
+    private long totalUp;
+    private long lastDown;
+    private long lastUp;
+    private int next;
+    private int filled;
 
     /** Called from the relay threads: bytes moved in each direction. */
-    static void add(long uploaded, long downloaded) {
-        synchronized (Traffic.class) {
+    void add(long uploaded, long downloaded) {
+        synchronized (this) {
             totalUp += uploaded;
             totalDown += downloaded;
         }
     }
 
-    /** {uploaded, downloaded} since the last {@link #reset()}. */
-    static long[] totals() {
-        synchronized (Traffic.class) {
+    /** {uploaded, downloaded} since this listener started. */
+    long[] totals() {
+        synchronized (this) {
             return new long[] {totalUp, totalDown};
         }
     }
 
-    static void reset() {
-        synchronized (Traffic.class) {
+    void reset() {
+        synchronized (this) {
             totalDown = 0;
             totalUp = 0;
             lastDown = 0;
@@ -60,8 +58,8 @@ final class Traffic {
     }
 
     /** Close one interval; returns {uploaded, downloaded} bytes per second. */
-    static long[] sample() {
-        synchronized (Traffic.class) {
+    long[] sample() {
+        synchronized (this) {
             long downRate = totalDown - lastDown;
             long upRate = totalUp - lastUp;
             lastDown = totalDown;
@@ -77,8 +75,8 @@ final class Traffic {
     }
 
     /** {uploaded, downloaded} per interval, oldest first, for a sparkline. */
-    static long[][] history() {
-        synchronized (Traffic.class) {
+    long[][] history() {
+        synchronized (this) {
             long[] upRates = new long[filled];
             long[] downRates = new long[filled];
             int start = (next - filled + SAMPLES) % SAMPLES;

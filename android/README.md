@@ -422,6 +422,34 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 `adb logcat -s phone-link-proxy` reports the bound port, refused credentials and
 every CONNECT that had no cellular network to use.
 
+## Several at once
+
+Every saved proxy carries its own port, credentials and SSID, and the service
+holds a listener per port rather than one listener: `START` adds, and a start
+on a port that is already taken replaces what held it. So two proxies can serve
+at the same time, each with its own gate on its own network and its own
+counters:
+
+```sh
+adb shell am start-foreground-service -n org.phonelink.proxy/.ProxyService \
+    -a org.phonelink.proxy.action.START --es profile laptop
+adb shell am start-foreground-service -n org.phonelink.proxy/.ProxyService \
+    -a org.phonelink.proxy.action.START --es profile hotel
+```
+
+`STOP` alone stops them all; `STOP --es profile NAME` stops that one and leaves
+the rest listening, and `STOP --ei port N` stops whatever holds that port.
+`dumpsys` lists every running listener with its port, its bytes and its clients,
+then the counters of all of them; the notification names them (`2 proxies:
+"laptop" on 1081, "hotel" on 1082`), and the panel's list marks every card that
+is running rather than only the last one started. The tile speaks for all of
+them: a click while anything listens stops everything, and a click while nothing
+does starts the proxy at the top of the list.
+
+The counters are per listener, so a proxy's Log page answers "what has *this*
+proxy moved" and a start begins at zero. The wake lock is held while any of them
+has a client.
+
 ## Settings
 
 Read from the intent on start and kept in the app's private preferences, so a

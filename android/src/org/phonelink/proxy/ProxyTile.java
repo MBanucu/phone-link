@@ -9,11 +9,19 @@ import android.service.quicksettings.TileService;
 import android.util.Log;
 import android.widget.Toast;
 
+import java.util.List;
+
 /**
  * Start and stop from the Quick Settings shade.
  *
  * <p>Same actions as the panel and adb; the subtitle distinguishes "off" from
  * "paused", which is the state the SSID predicate leaves the service in.
+ *
+ * <p>Several proxies can be listening at once, and the shade has one tile, so
+ * the tile speaks for all of them: it is on while anything listens, a click
+ * stops everything, and a click while nothing runs starts the configuration
+ * that was last in use. Which one that is, is the panel's business — it is the
+ * proxy at the top of the list.
  *
  * <p>A tile click is user interaction, which is what makes starting the
  * location-typed foreground service from here allowed. If a build disagrees,
@@ -53,8 +61,8 @@ public final class ProxyTile extends TileService implements ProxyRuntime.Listene
     }
 
     @Override
-    public void onStateChanged(ProxyState state) {
-        main.post(() -> update(state));
+    public void onStatesChanged(List<ProxyState> states) {
+        main.post(() -> update(ProxyRuntime.state()));
     }
 
     private void update(ProxyState state) {

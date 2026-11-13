@@ -12,10 +12,12 @@ import android.view.View;
  * sample in the window, so a quiet minute is flat and a burst is visible.
  *
  * <p>No dependencies and no animation: the panel re-samples once a second while
- * it is in front, which is also the resolution of the integer counters.
+ * it is in front, which is also the resolution of the integer counters. The
+ * counters are one proxy's, handed in by the page that is showing it.
  */
 public final class TrafficView extends View {
 
+    private Traffic counts;
     private final Paint up = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint down = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint base = new Paint();
@@ -33,6 +35,11 @@ public final class TrafficView extends View {
         base.setStrokeWidth(1f);
     }
 
+    /** Whose bytes to draw; null draws nothing. */
+    void setTraffic(Traffic traffic) {
+        counts = traffic;
+    }
+
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
@@ -40,7 +47,10 @@ public final class TrafficView extends View {
         float height = getHeight();
         canvas.drawLine(0, height - 1, width, height - 1, base);
 
-        long[][] history = Traffic.history();
+        if (counts == null) {
+            return;
+        }
+        long[][] history = counts.history();
         long[] upRates = history[0];
         long[] downRates = history[1];
         long peak = 0;

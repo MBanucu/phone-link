@@ -78,6 +78,8 @@ final class Socks5Server implements Closeable {
     private final int port;
     private final String user;
     private final String password;
+    /** This listener's counters: one instance per running proxy. */
+    private final Traffic traffic;
     private final Upstream upstream;
     private final Listener listener;
     private final Logger logger;
@@ -98,12 +100,14 @@ final class Socks5Server implements Closeable {
             String user,
             String password,
             Upstream upstream,
+            Traffic traffic,
             Listener listener,
             Logger logger) {
         this.port = port;
         this.user = user;
         this.password = password;
         this.upstream = upstream;
+        this.traffic = traffic == null ? new Traffic() : traffic;
         this.listener = listener;
         this.logger = logger;
     }
@@ -291,7 +295,7 @@ final class Socks5Server implements Closeable {
     }
 
     /** Shovel bytes both ways until both directions are done, then close. */
-    private static void relay(Socket client, Socket upstream) {
+    private void relay(Socket client, Socket upstream) {
         CountDownLatch done = new CountDownLatch(2);
         pump(client, upstream, done, true);
         pump(upstream, client, done, false);
@@ -310,7 +314,7 @@ final class Socks5Server implements Closeable {
      * @param uploaded whether this half moves client bytes upstream, which is
      *     only needed for the counters the panel graphs
      */
-    private static void pump(Socket from, Socket to, CountDownLatch done, boolean uploaded) {
+    private void pump(Socket from, Socket to, CountDownLatch done, boolean uploaded) {
         Thread thread = new Thread(() -> {
             byte[] buffer = new byte[32 * 1024];
             try {
@@ -320,9 +324,9 @@ final class Socks5Server implements Closeable {
                 while ((read = in.read(buffer)) != -1) {
                     out.write(buffer, 0, read);
                     if (uploaded) {
-                        Traffic.add(read, 0);
+                        traffic.add(read, 0);
                     } else {
-                        Traffic.add(0, read);
+                        traffic.add(0, read);
                     }
                 }
                 // Half close: the other direction may still have data to deliver.
