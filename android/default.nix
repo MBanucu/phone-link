@@ -63,7 +63,9 @@ in
         ./app/build.sh
         install -Dm644 app/build/phone-link-proxy.apk $out/phone-link-proxy.apk
         # The test-only accessibility service the live harness takes its dumps
-        # from; nothing installs it but a test run.
+        # from, and the test-only instrumentation that runs the panel's checks
+        # inside the proxy's process; nothing installs them but a test run.
         install -Dm644 app/build/capture.apk $out/capture.apk
+        install -Dm644 app/build/devicetest.apk $out/devicetest.apk
       '';
 }

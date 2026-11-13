@@ -71,7 +71,11 @@ this app with it. `build/` stays ignored. Before the key was tracked, each
 deleted the app's stored configuration.
 
 `nix flake check` builds the same APK in the sandbox (`proxy-apk`), and
-`nix build .#proxy-apk` gives the artifact without a phone.
+`nix build .#proxy-apk` gives the artifact without a phone. Three APKs come out:
+the app, `capture.apk` (the accessibility dumper the live harness reads the
+screen from) and `devicetest.apk` (the instrumentation that runs the panel's own
+checks inside the app's process). Only the first is the proxy; the other two are
+installed by a test run and removed by it.
 
 ## Tests
 
@@ -212,6 +216,28 @@ deleted the app's stored configuration.
   centre of one taps something else), and only the windows of the app in front
   plus its own dialogs, so the status bar and the launcher behind it stay out
   of the way.
+
+- `android/devicetest/` — the panel's checks that do not need a picture, run by
+  the phone itself. `am instrument -w -e first inside-a -e second inside-b
+  org.phonelink.proxytest/.PanelTests` loads one `Instrumentation` into the
+  proxy's process, starts the activity and reads the views: the badge on a card,
+  the word on its button, the summary that carries the *in use* mark, the line
+  under the page's button and the port it names. No JUnit and no androidx — no
+  runner jar to vendor and no repository to resolve — so it builds with the same
+  `aapt2`, `javac`, `d8` and `apksigner` as everything else, and the expected
+  strings come from the app's own resource table, so wording is asserted where
+  the wording is the claim and nowhere else. It sends one `sendStatus` per claim
+  (`check`, `verdict`, and `detail`, which is what it actually saw), and the
+  harness's step `the page from the inside` turns every status into a check of
+  its own: a run that says nothing is a failure, and a run that stopped at a bad
+  claim reports how many of its nine it made instead of looking like a shorter
+  green one. What it cannot decide it does not claim — that a port serves is the
+  laptop's socket, the screen is the capture service's, `dumpsys` and `logcat`
+  are adb's — and because `am instrument` starts the app's process again (a
+  listener running before it is gone after), the step stands alone with nothing
+  listening when it starts and starts what it needs from the card and the page.
+  Measured: ten claims in 13.0 s, eight of them spent saving the two profiles
+  over adb; `several at once` gave up its three page checks and 4.3 s to it.
 
 ## Run
 

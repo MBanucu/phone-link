@@ -9,6 +9,9 @@
 #   build/capture.apk           the test-only accessibility service that writes
 #                               the screen as XML for the live harness
 #                               (sources in capture/)
+#   build/devicetest.apk        the test-only instrumentation that runs the
+#                               panel's own checks inside the proxy's process
+#                               (sources in devicetest/)
 set -eu
 
 here=$(cd -- "$(dirname -- "$0")" && pwd -P)
@@ -106,3 +109,4 @@ build_apk() {
 
 build_apk phone-link-proxy "$here/src" "$here/res" "$here/AndroidManifest.xml"
 build_apk capture "$here/capture/src" "$here/capture/res" "$here/capture/AndroidManifest.xml"
+build_apk devicetest "$here/devicetest/src" "$here/devicetest/res" "$here/devicetest/AndroidManifest.xml"

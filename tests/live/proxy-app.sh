@@ -31,6 +31,10 @@
 #      and to save an eleventh,
 #  10b. require the open proxy's own log to show the traffic counters, the
 #      events it caused and their port, and Clear to empty the list,
+#  10d. the page's own checks, run by an instrumentation inside the proxy's
+#      process (tests/live/../android/devicetest): two saved proxies, one
+#      started from its card, the other's page saying Start adds it beside,
+#      that page starting and stopping it, and the marks on both cards,
 #  11. stop it,
 #  12. start and stop it from the Quick Settings tile, which needs the phone
 #      unlocked: the shade ignores clicks on a locked screen, so that step is
@@ -72,6 +76,11 @@ PASSWORD=phonelink-test-password
 CAPTURE_APK=${PROXY_CAPTURE_APK:-$ROOT/android/build/capture.apk}
 CAPTURE_PKG=${PROXY_CAPTURE_PKG:-org.phonelink.capture}
 CAPTURE_DIR=/sdcard/Android/data/$CAPTURE_PKG/files
+# The on-device panel checks: an instrumentation that runs inside the proxy's
+# process and reads the page's own views (devicetest/ in the app). Same deal —
+# installed for the run, removed afterwards.
+DEVICETEST_APK=${PROXY_DEVICETEST_APK:-$ROOT/android/build/devicetest.apk}
+DEVICETEST_PKG=${PROXY_DEVICETEST_PKG:-org.phonelink.proxytest}
 # The flashes that tie the phone's clock to the recording, and the tool that
 # fits them: eight edges held 200 ms each, at the start of the run and again
 # just before the recorder stops.
@@ -518,6 +527,7 @@ cleanup() {
   # package is uninstalled, so nothing of this run is left behind.
   capture_stop
   phone uninstall "$CAPTURE_PKG" >/dev/null 2>&1
+  phone uninstall "$DEVICETEST_PKG" >/dev/null 2>&1
   restore_autofill
   restore_play_protect
   shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
@@ -525,7 +535,8 @@ cleanup() {
   # Whatever this run saved: a crash halfway through must not leave the phone
   # with test proxies in its list.
   local leftover
-  for leftover in harness-panel harness-save harness-one harness-new; do
+  for leftover in harness-panel harness-save harness-one harness-new \
+    inside-a inside-b; do
     shell am start-foreground-service -n "$SERVICE" \
       -a org.phonelink.proxy.action.DELETE_PROFILE --es profile "$leftover" \
       >/dev/null 2>&1
@@ -721,6 +732,48 @@ delete_profile_by_adb() {
   shell am start-foreground-service -n "$SERVICE" \
     -a org.phonelink.proxy.action.DELETE_PROFILE --es profile "$1" >/dev/null 2>&1
   sleep 2
+}
+
+# The panel's checks, run by the phone instead of looked at from a capture: one
+# `am instrument` returns a status per claim, and every status becomes a check
+# here, so the record of the run reads the same either way. A status without a
+# verdict, or an instrumentation that never started, fails the step — silence
+# is never a pass.
+device_checks() { # device_checks FIRST SECOND
+  local first=$1 second=$2 output line body key value
+  local claim="" verdict="" detail="" seen=0
+  output=$(phone shell am instrument -w -e first "$first" -e second "$second" \
+    "$DEVICETEST_PKG/.PanelTests" 2>&1)
+  while IFS= read -r line; do
+    line=${line#"${line%%[![:space:]]*}"}
+    case $line in
+      INSTRUMENTATION_STATUS:\ *)
+        body=${line#INSTRUMENTATION_STATUS: }
+        key=${body%%=*}
+        value=${body#*=}
+        case $key in
+          check) claim=$value ;;
+          verdict) verdict=$value ;;
+          detail) detail=$value ;;
+        esac
+        ;;
+      INSTRUMENTATION_STATUS_CODE:*)
+        if [ -n "$claim" ]; then
+          if [ "$verdict" = pass ]; then
+            ok "$claim"
+          else
+            bad "$claim" "$detail"
+          fi
+          seen=$((seen + 1))
+        fi
+        claim="" verdict="" detail=""
+        ;;
+    esac
+  done <<<"$output"
+  if [ "$seen" -eq 0 ]; then
+    bad 'the phone runs the page checks' \
+      "$(printf '%s\n' "$output" | head -2 | tr '\n' ' ')"
+  fi
 }
 
 # What the phone is showing, for a step that failed to find the panel.
@@ -1001,6 +1054,11 @@ else
   bad 'installs'
   printf '\n%d passed, %d failed\n' "$pass" "$fail"
   exit 1
+fi
+if phone install -r "$DEVICETEST_APK" >/dev/null 2>&1; then
+  ok 'the on-device checks install'
+else
+  bad 'the on-device checks install'
 fi
 # A run that was killed leaves its own harness-* profiles behind, and a pile of
 # them pushes the next run's cards off the screen. They belong to this harness,
@@ -1635,38 +1693,6 @@ if [ "${remaining:-0}" -eq 1 ] &&
 else
   bad "and the one left is the one that was not named ($remaining listed)"
 fi
-# A page's button is about the proxy on it, and its line says what Start would
-# do with the others up: this one joins them rather than replacing them.
-if panel_open harness-b; then
-  if wait_for 'Start adds this one beside the others' 3000; then
-    ok 'the page says Start adds it beside the other one'
-  else
-    bad 'the page says Start adds it beside the other one'
-    panel_where
-  fi
-  panel_tap toggle
-  if wait_for "listening on 0.0.0.0:$PORT2" 5000 &&
-    through "$PORT" "$USER_NAME" "$PASSWORD" && through "$PORT2" "$USER2" "$PASSWORD2"; then
-    ok 'the page starts it beside the other one'
-  else
-    bad 'the page starts it beside the other one'
-    panel_where
-  fi
-  panel_tap toggle
-  if wait_gone "listening on 0.0.0.0:$PORT2" 5000; then
-    if closed "$PORT2" && through "$PORT" "$USER_NAME" "$PASSWORD"; then
-      ok 'the page stops that one and leaves the other'
-    else
-      bad 'the page stops that one and leaves the other'
-    fi
-  else
-    bad 'the page stops that one and leaves the other'
-    panel_where
-  fi
-else
-  bad "the page of the one that is stopped opens"
-  panel_where
-fi
 shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
 sleep 2
 if closed "$PORT" && closed "$PORT2" && ! foreground; then
@@ -1676,6 +1702,27 @@ else
 fi
 delete_profile_by_adb harness-a
 delete_profile_by_adb harness-b
+
+step 'the page from the inside'
+# The same claims about the page and the cards, decided where the views are.
+# An instrumentation starts the app's process again, so this runs with nothing
+# listening and starts what it needs from the page itself; the port stays the
+# laptop's business, and the step before this one is where it is proven.
+PORT3=$((PORT + 2))
+PORT4=$((PORT + 3))
+start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT3" \
+  --es user "$USER_NAME" --es password "$PASSWORD"
+wait_foreground || true
+save_profile inside-a
+start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT4" \
+  --es user "$USER2" --es password "$PASSWORD2"
+wait_foreground || true
+save_profile inside-b
+shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
+sleep 2
+device_checks inside-a inside-b
+delete_profile_by_adb inside-a
+delete_profile_by_adb inside-b
 
 step 'proxy log'
 # Start the saved proxy by name so its events carry its name, and move some

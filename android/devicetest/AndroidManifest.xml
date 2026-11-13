@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A test-only app: an instrumentation that runs inside the proxy's process and
+  checks the panel from the inside, during a live run.
+
+  No runner from androidx and no JUnit: this is one Instrumentation subclass
+  whose onStart() walks the app's own views, so the build stays what the rest of
+  the APKs are — aapt2, javac, d8, apksigner, no repository to resolve. It is a
+  second package on purpose, the way the capture service is: nothing installs it
+  but a test run, and the proxy the phone actually runs carries no test code.
+
+  The signature is the repository's debug key, the same one the proxy is signed
+  with, which is what lets it instrument that app.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="org.phonelink.proxytest"
+    android:versionCode="1"
+    android:versionName="0.1.0">
+
+    <uses-sdk
+        android:minSdkVersion="29"
+        android:targetSdkVersion="35" />
+
+    <application
+        android:allowBackup="false"
+        android:label="@string/app_name" />
+
+    <instrumentation
+        android:name="org.phonelink.proxytest.PanelTests"
+        android:label="@string/runner_label"
+        android:targetPackage="org.phonelink.proxy" />
+</manifest>

@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The panel's own checks can run on the phone, inside the proxy's process.
+  `android/devicetest/` is an instrumentation with no JUnit and no androidx — one
+  `Instrumentation` subclass, loaded by `am instrument`, that starts the
+  activity and reads its views — and the harness's new step `the page from the
+  inside` drives it: two saved proxies, one started from its card, the other's
+  page saying `Start adds this one beside the others`, that page starting it and
+  saying which port it listens on, both cards marked *in use*, the page's `Stop`
+  stopping only that one, and the card stopping the last. A check is now a
+  claim about a view instead of a claim about a captured hierarchy: the badge,
+  the word on the button, the line under it, and the expected strings come from
+  the app's own resource table. What it cannot decide is anything outside the
+  process — that a port serves, what the screen looks like, `dumpsys`, `logcat`
+  — so those stay where they were, and the harness still decides what a verdict
+  means, recording every status the phone sends as its own check. `am instrument`
+  starts the app's process again, which is why this is a step of its own with
+  nothing listening when it starts. Measured: 10 claims (nine checks and one
+  that says all nine ran) in 13.0 s, of which about eight is the two profiles
+  being saved over adb, against `several at once` losing its three page checks
+  and 4.3 s (28.1 s → 23.8 s); the run as a whole went 249 s → 282 s for eight
+  more checks, 91 passed and 0 failed.
+
 ### Fixed
 
 - A page's Start and Stop mean that page's proxy, and the line under them says
