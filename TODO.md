@@ -119,17 +119,40 @@ list is empty.
 
 ## Files too big to work in
 
-- [ ] Split the files that have outgrown being read. `MainActivity.java` and
-      `ProxyService.java` carry nearly two thousand lines between them, and each
-      now holds several jobs — the panel's screens and their rendering, the
-      service's lifecycle, the listeners, the profile store's front door — so a
-      change to one has to be made with the whole file in view.
-      `tests/live/proxy-app.sh` is close to that too: taps, captures, the clock
-      fit, the recording and the twenty steps in one script, where a helper
-      added for one step is read by every other. What a split should keep: one
-      place that knows how to *look* at the phone (captures, actions, sequences)
-      and one that knows what to *claim* (the steps), and on the Java side the
-      activity asked for a screen rather than building it, and the service asked
-      for a listener rather than holding its sockets itself. Not a rewrite:
-      move code, keep the checks green, and commit by the seam, so a run that
-      breaks points at one move.
+- [ ] The panel and the harness have been split; what is left is the service.
+      `ProxyService.java` (689 lines) is still the lifecycle, the profile store's
+      front door, the listeners and the network request in one class — the same
+      seam the activity just lost: a service asked for a listener rather than
+      holding its sockets and its `Running` records itself, so a change to how a
+      listener binds cannot reach into how the tile, the boot receiver or the
+      notification behave. Move code, keep the checks green, commit by the seam.
+
+## Checks that are slow, and knowing which
+
+- [ ] `nix build .#checks.x86_64-linux.script` is slow enough to be felt before a
+      commit, and nothing says where the time goes. Measure each check — the
+      flake's `checks.*` and the cases inside `tests/proxy-app.test.sh` — and
+      keep the numbers where a run can be compared against the last one, the way
+      `result-live/timings.csv` does for the live steps. Then widen what the
+      numbers point at: a `javac` per test case, a JVM started per case, the
+      sandbox composing the Android SDK again for every check that names it, or
+      simply a check that reaches the network because it was never taught not
+      to. The point is not to make it fast once, but to know which part got
+      slower when it does — a check with no timing is a check nobody can watch.
+
+## Deleting a proxy while it runs
+
+- [ ] No step deletes a saved proxy while its listener is up, and the two ways of
+      doing it disagree. The panel's Delete (`confirmDeleteProfile`) sends a
+      `STOP` for the name when that proxy was running, so its port closes; the
+      adb `DELETE_PROFILE` (`ProxyService.deleteSaved`) drops the configuration
+      and leaves the listener running — its comment says the listener "keeps its
+      port but loses the name it is listed under", and nothing does that, so the
+      service holds a listener under a name the store no longer has, `dumpsys`
+      shows it, the list has no card for it, and no panel page can stop it
+      because the page went with the profile. What to write: two proxies
+      running, delete one — from the menu, and over adb — and require the same
+      outcome both ways (the port closes or the listener gets a name the panel
+      can still show, the other proxy keeps serving, the card is gone and
+      `dumpsys` lists only what the list shows). The menu's Delete is not
+      exercised by any step today, running or stopped.
