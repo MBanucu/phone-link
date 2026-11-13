@@ -230,13 +230,18 @@ capture_start() {
   shell settings put secure enabled_accessibility_services "$services" >/dev/null 2>&1
   shell settings put secure accessibility_enabled 1 >/dev/null 2>&1
   shell rm -rf "$CAPTURE_DIR" >/dev/null 2>&1
-  sleep 3
   # Only believe it when a capture comes back: a service that could not bind
-  # looks exactly like one that was never enabled.
-  if capture_dump | grep -q '<hierarchy'; then
-    capture_dumps=1
-    return 0
-  fi
+  # looks exactly like one that was never enabled. This phone's own startup
+  # policy can hold a freshly installed app's service for a while, so the answer
+  # is waited for — thirty seconds, then the run goes on without captures.
+  local attempt
+  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+    sleep 2
+    if capture_dump | grep -q '<hierarchy'; then
+      capture_dumps=1
+      return 0
+    fi
+  done
   capture_stop
   return 1
 }
@@ -1629,6 +1634,38 @@ if [ "${remaining:-0}" -eq 1 ] &&
   ok 'and the one left is the one that was not named'
 else
   bad "and the one left is the one that was not named ($remaining listed)"
+fi
+# A page's button is about the proxy on it, and its line says what Start would
+# do with the others up: this one joins them rather than replacing them.
+if panel_open harness-b; then
+  if wait_for 'Start adds this one beside the others' 3000; then
+    ok 'the page says Start adds it beside the other one'
+  else
+    bad 'the page says Start adds it beside the other one'
+    panel_where
+  fi
+  panel_tap toggle
+  if wait_for "listening on 0.0.0.0:$PORT2" 5000 &&
+    through "$PORT" "$USER_NAME" "$PASSWORD" && through "$PORT2" "$USER2" "$PASSWORD2"; then
+    ok 'the page starts it beside the other one'
+  else
+    bad 'the page starts it beside the other one'
+    panel_where
+  fi
+  panel_tap toggle
+  if wait_gone "listening on 0.0.0.0:$PORT2" 5000; then
+    if closed "$PORT2" && through "$PORT" "$USER_NAME" "$PASSWORD"; then
+      ok 'the page stops that one and leaves the other'
+    else
+      bad 'the page stops that one and leaves the other'
+    fi
+  else
+    bad 'the page stops that one and leaves the other'
+    panel_where
+  fi
+else
+  bad "the page of the one that is stopped opens"
+  panel_where
 fi
 shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
 sleep 2
