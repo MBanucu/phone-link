@@ -118,16 +118,15 @@ list is empty.
       to. The point is not to make it fast once, but to know which part got
       slower when it does — a check with no timing is a check nobody can watch.
 
-## One step, not the whole run
+## The scroll that sometimes cannot find Save
 
-- [ ] A run costs four to five minutes, and changing one step means running all
-      twenty. A `PHONE_LIVE_ONLY` (comma-separated step names) would cut that:
-      run the steps asked for and say, in the log and in `timings.csv`, that the
-      run was partial so it can never be mistaken for a green one. The steps are
-      not independent — most assume the app is installed and a proxy saved — so
-      the filter needs a small preamble (install, unlock, a proxy) marked as
-      such, and a partial run should not write the `TOTAL` row that the history
-      is compared by.
+- [ ] `plain Save` failed once while the one-step runs were being built, and
+      once at 02:46 before that, on `tap-scroll id=save_service 12000`: after
+      the port was typed and the keyboard put away, the scroll for the service
+      switch row timed out, and the check that saves the switches failed with
+      it. Nothing about the app was wrong; the step's own navigation was. It is
+      a minute's run now, with `PHONE_LIVE_ONLY="plain Save"`, which is what
+      makes it worth chasing.
 
 ## The rest of the menu
 
