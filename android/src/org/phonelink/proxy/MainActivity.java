@@ -133,6 +133,11 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
             }
 
             @Override
+            public void tileChanged(boolean on) {
+                MainActivity.this.tileChanged(on);
+            }
+
+            @Override
             public void batteryHelp() {
                 askForExemption();
             }
@@ -225,6 +230,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         info(R.id.info_any_network, R.string.info_any_network_title, R.string.info_any_network);
         info(R.id.info_auto_start, R.string.info_auto_start_title, R.string.info_auto_start);
         info(R.id.info_adb_wifi, R.string.info_adb_wifi_title, R.string.info_adb_wifi);
+        info(R.id.info_tile, R.string.info_tile_title, R.string.info_tile);
         info(R.id.info_save, R.string.info_save_title, R.string.info_save);
         info(R.id.info_save_service, R.string.info_save_title, R.string.info_save);
         info(R.id.info_revert, R.string.info_revert_title, R.string.info_revert);
@@ -493,7 +499,8 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         items.add(0, 4, 3, R.string.action_rename).setEnabled(open);
         items.add(0, 5, 4, R.string.action_delete).setEnabled(open);
         items.add(0, 6, 5, R.string.menu_all_events);
-        items.add(0, 7, 6, R.string.menu_info);
+        items.add(0, 7, 6, R.string.menu_tile);
+        items.add(0, 8, 7, R.string.menu_info);
         menu.setOnMenuItemClickListener(item -> {
             switch (item.getItemId()) {
                 case 1:
@@ -515,6 +522,13 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
                     showAllEvents();
                     return true;
                 case 7:
+                    // The tile's own page: what a click starts, what it stops,
+                    // and which proxies are on it. Long-pressing the tile keeps
+                    // Android's answer, App info, which is where a user looks
+                    // for the app itself.
+                    TileSettingsDialog.show(this, page::renderTileState);
+                    return true;
+                case 8:
                     showHelp();
                     return true;
                 default:
@@ -673,6 +687,23 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         if (on && !AdbWireless.granted(this)) {
             Toast.makeText(this, R.string.adb_wifi_ungranted, Toast.LENGTH_LONG).show();
         }
+    }
+
+    /**
+     * Which proxies the tile switches is a preference about the tile, not part
+     * of what a listener is, so it stores as it is ticked instead of waiting for
+     * Save — and Save does not write it back.
+     */
+    private void tileChanged(boolean on) {
+        String name = page.name();
+        if (name == null) {
+            return;
+        }
+        ConfigStore.setProfileTile(this, name, on);
+        EventLog.addTo(name, on
+                ? "bound to the Quick Settings tile"
+                : "no longer bound to the tile");
+        page.renderTileState();
     }
 
     // -- what a press means ----------------------------------------------

@@ -235,6 +235,13 @@ public final class ProxyService extends Service implements Port.Host {
         writer.println("  auto-start  " + ConfigStore.autoStart(this));
         writer.println("  adb_wifi    " + ConfigStore.adbWireless(this)
                 + " (Android's switch is " + (AdbWireless.on(this) ? "on" : "off") + ")");
+        // What the Quick Settings tile switches: the saved proxies whose switch
+        // is on, and how far a click reaches in each direction.
+        List<String> bound = ConfigStore.tileProfiles(this);
+        writer.println("  tile        "
+                + (bound.isEmpty() ? "nothing bound" : String.join(", ", bound)));
+        writer.println("  tile_start  " + ConfigStore.tileStart(this).name().toLowerCase());
+        writer.println("  tile_stop   " + ConfigStore.tileStop(this).name().toLowerCase());
         List<String> saved = ConfigStore.profileNames(this);
         if (saved.isEmpty()) {
             writer.println("  saved       none");

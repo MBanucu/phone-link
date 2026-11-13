@@ -39,6 +39,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and 4.3 s (28.1 s → 23.8 s); the run as a whole went 249 s → 282 s for eight
   more checks, 91 passed and 0 failed.
 
+- The Quick Settings tile has settings of its own, on a page in the app's menu
+  (`The tile`). Which proxies the tile switches is now something the phone says:
+  every proxy has a switch on its Service page, and the menu's page lists them
+  all, so the tile is a switch for a set instead of "whatever was started last".
+  A click starts that set while none of it is up and stops it while any is; a
+  proxy the tile does not name is left as it is, and with nothing named the tile
+  is what it was. What a click starts and what it stops are set separately — the
+  proxies on the tile, the proxy in use, or every saved proxy — so "start them
+  all, stop only mine" is expressible without a second tile. Long-pressing the
+  tile keeps Android's answer (App info): the page is in the app, where the rest
+  of its settings live, and reachable without opening the shade. The rules are
+  `TilePlan` in plain Java, covered by the JVM suite; the panel, the shade and
+  `dumpsys` all read the same `TileScope`.
+
 ### Changed
 
 - A run can be asked for one of its steps. `PHONE_LIVE_ONLY="card toggle,rename"`

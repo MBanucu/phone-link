@@ -282,10 +282,23 @@ password; the panel's Start also re-reads the fields, so changing them and
 pressing Start restarts the listener with the new settings.
 
 The same two actions are on a Quick Settings tile: tapping "Phone link proxy"
-starts the service, tapping it again stops it, and the subtitle says what is
+starts and stops the proxies the tile is for, and the subtitle says what is
 happening — `listening`, `paused` (the service is up but the SSID did not
 match) or `off`. The tile follows the panel, adb and the boot receiver because
 all of them publish into the same `ProxyRuntime`.
+
+Which proxies the tile is for, and how far a click reaches, is the tile's own
+page — `The tile` in the app's burger menu, and the `Start and stop from the
+Quick Settings tile` switch on each proxy's Service page for the per-proxy
+answer. The page has three sections: the proxies on the tile (a checkbox per
+saved proxy), what a click starts while the tile is off, and what a click stops
+while it is on. Both directions are the proxies on the tile (the default), the
+proxy in use, or every saved proxy, so "start them all, stop only mine" needs
+no second tile. A proxy the tile does not name is left as it is. With nothing
+on the tile a click starts the configuration the last start stored and stops
+everything, which is what the tile did before it had a page. Android's long
+press on a tile stays what it is — App info — because the page belongs in the
+app, not behind a gesture that a user expects to explain the app.
 
 A tile click is user interaction, so the tile may start a foreground service
 from the background, but Android still refuses the `location` service type for
@@ -502,14 +515,14 @@ a page starts that proxy and `Stop` stops that proxy — a page whose proxy is n
 running says which of the two a start would be, `Stopped — Start adds this one
 beside the others`, or `Stopped — port 18081 is another proxy's; Start replaces
 it` when a listener already holds its port. `Start` also marks that proxy *in
-use*, the mark on its card, which is the one the tile and a restart at boot
-start; the panel's `i` marks say so.
+use*, the mark on its card; a restart at boot starts that proxy, and the tile
+starts it only while the tile names nothing. The panel's `i` marks say so.
 `dumpsys` lists every running listener with its port, its bytes and its clients,
 then the counters of all of them; the notification names them (`2 proxies:
 "laptop" on 1081, "hotel" on 1082`), and the panel's list marks every card that
-is running rather than only the last one started. The tile speaks for all of
-them: a click while anything listens stops everything, and a click while nothing
-does starts the proxy at the top of the list.
+is running rather than only the last one started. The tile speaks for the ones
+its settings name: a click starts them while none of them is up and stops them
+while one is, and a proxy it does not name keeps doing what it was doing.
 
 The counters are per listener, so a proxy's Log page answers "what has *this*
 proxy moved" and a start begins at zero. The wake lock is held while any of them

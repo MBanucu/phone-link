@@ -31,6 +31,8 @@ sources=(
   "$ROOT/android/src/org/phonelink/proxy/ProxyConfig.java"
   "$ROOT/android/src/org/phonelink/proxy/ProxyState.java"
   "$ROOT/android/src/org/phonelink/proxy/ProxyRuntime.java"
+  "$ROOT/android/src/org/phonelink/proxy/TilePlan.java"
+  "$ROOT/android/src/org/phonelink/proxy/TileScope.java"
   "$ROOT/android/src/org/phonelink/proxy/Socks5Server.java"
   "$ROOT/android/src/org/phonelink/proxy/Traffic.java"
   "$ROOT/android/test/org/phonelink/proxy/ProxyAppTest.java"

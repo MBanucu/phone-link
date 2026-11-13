@@ -437,8 +437,9 @@ public final class ProxyAppTest {
                     "the first's bytes");
             assertEqual(2000, (int) ProxyRuntime.forName("two").traffic.totals()[1],
                     "the second's bytes");
-            // The tile speaks for all of them: on while anything listens, with
-            // the clients of everything put together.
+            // All of them as one state, with the clients of everything put
+            // together: what a caller with no opinion about which proxy means
+            // gets. The tile has an opinion, so it uses TilePlan below.
             ProxyState all = ProxyRuntime.state();
             assertTrue(all.running, "something runs");
             assertTrue(all.listening, "something listens");
@@ -446,6 +447,98 @@ public final class ProxyAppTest {
             assertEqual(1, all.clients, "the clients of both");
             ProxyRuntime.publish(new ArrayList<>());
             assertTrue(ProxyRuntime.running().isEmpty(), "publishing nothing empties it");
+        });
+
+        // --- what the Quick Settings tile starts and stops ------------------
+
+        test("a tile with no settings at all keeps the behaviour it had", () -> {
+            TilePlan plan = TilePlan.of(new ArrayList<>(), null, new ArrayList<>(),
+                    TileScope.TILE, TileScope.TILE,
+                    Arrays.asList(ProxyState.listening("anyone", 1081, 1)));
+            assertTrue(plan.fallback, "nothing configured");
+            assertTrue(plan.up, "the one that runs is the tile's answer");
+            assertTrue(plan.listening, "and it listens");
+            assertEqual("", String.join(",", plan.start), "nothing to name");
+            assertEqual("", String.join(",", plan.stop), "nothing to name");
+        });
+
+        test("two proxies on the tile are started together when none is up", () -> {
+            TilePlan plan = TilePlan.of(Arrays.asList("a", "b"), null,
+                    Arrays.asList("a", "b"), TileScope.TILE, TileScope.TILE,
+                    new ArrayList<>());
+            assertTrue(!plan.fallback, "configured");
+            assertTrue(!plan.up, "nothing is up");
+            assertEqual("a,b", String.join(",", plan.start), "both start");
+            assertEqual("", String.join(",", plan.stop), "nothing stops");
+        });
+
+        test("a click while one of them listens stops them all", () -> {
+            TilePlan plan = TilePlan.of(Arrays.asList("a", "b"), null,
+                    Arrays.asList("a", "b"), TileScope.TILE, TileScope.TILE,
+                    Arrays.asList(ProxyState.listening("a", 1081, 1)));
+            assertTrue(plan.up, "one is up");
+            assertTrue(plan.listening, "one listens");
+            assertEqual("a,b", String.join(",", plan.stop), "both stop");
+            assertEqual("", String.join(",", plan.start), "nothing starts");
+        });
+
+        test("a paused proxy on the tile is up, so a click turns the set off", () -> {
+            TilePlan plan = TilePlan.of(Arrays.asList("a", "b"), null,
+                    Arrays.asList("a", "b"), TileScope.TILE, TileScope.TILE,
+                    Arrays.asList(ProxyState.paused("a", "on another network")));
+            assertTrue(plan.up, "one is up");
+            assertTrue(!plan.listening, "none listens");
+            assertEqual("a,b", String.join(",", plan.stop), "both stop");
+        });
+
+        test("a proxy that is not on the tile is not the tile's business", () -> {
+            TilePlan plan = TilePlan.of(Arrays.asList("a"), null, Arrays.asList("a", "other"),
+                    TileScope.TILE, TileScope.TILE,
+                    Arrays.asList(ProxyState.listening("other", 1090, 2)));
+            assertTrue(!plan.up, "somebody else's proxy is not this switch");
+            assertTrue(!plan.listening, "so the tile is not on");
+            assertEqual("a", String.join(",", plan.start), "the one on the tile starts");
+            assertEqual("", String.join(",", plan.stop), "and the other is not stopped");
+        });
+
+        test("a stop side alone cannot make a tile that never turns on", () -> {
+            // Stop everything, bound to nothing: the tile has nothing to start
+            // from its settings, so it starts what it always did.
+            TilePlan plan = TilePlan.of(new ArrayList<>(), null, Arrays.asList("a"),
+                    TileScope.TILE, TileScope.ALL, new ArrayList<>());
+            assertTrue(plan.fallback, "the fallback is what starts something");
+            assertTrue(!plan.stopAll, "and the stop side is not an action on its own");
+        });
+
+        test("the start side can mean every saved proxy", () -> {
+            TilePlan plan = TilePlan.of(new ArrayList<>(), null, Arrays.asList("a", "b"),
+                    TileScope.ALL, TileScope.TILE, new ArrayList<>());
+            assertTrue(!plan.fallback, "every saved proxy is a setting");
+            assertEqual("a,b", String.join(",", plan.start), "all of them start");
+        });
+
+        test("the stop side can mean everything, which is a stop with no name", () -> {
+            TilePlan plan = TilePlan.of(Arrays.asList("a"), null, Arrays.asList("a", "b"),
+                    TileScope.TILE, TileScope.ALL,
+                    Arrays.asList(ProxyState.listening("a", 1081, 1)));
+            assertTrue(plan.stopAll, "one stop for all of them");
+            assertEqual("", String.join(",", plan.stop), "no names needed");
+        });
+
+        test("the proxy in use is a scope only while a saved proxy holds that name", () -> {
+            TilePlan plan = TilePlan.of(new ArrayList<>(), "gone", Arrays.asList("a"),
+                    TileScope.IN_USE, TileScope.TILE, new ArrayList<>());
+            assertTrue(plan.fallback, "the mark points at nothing, so the tile falls back");
+            TilePlan kept = TilePlan.of(new ArrayList<>(), "a", Arrays.asList("a"),
+                    TileScope.IN_USE, TileScope.TILE, new ArrayList<>());
+            assertEqual("a", String.join(",", kept.start), "the one in use starts");
+        });
+
+        test("a stored scope no build knows is the narrow one", () -> {
+            assertEqual("TILE", TileScope.named("nonsense", TileScope.TILE).name(),
+                    "unrecognised");
+            assertEqual("TILE", TileScope.named(null, TileScope.TILE).name(), "missing");
+            assertEqual("ALL", TileScope.named("ALL", TileScope.TILE).name(), "stored");
         });
 
         System.out.printf("%n%d passed, %d failed%n", passed, failed);

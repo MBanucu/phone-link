@@ -17,11 +17,14 @@ import java.util.List;
  * <p>Same actions as the panel and adb; the subtitle distinguishes "off" from
  * "paused", which is the state the SSID predicate leaves the service in.
  *
- * <p>Several proxies can be listening at once, and the shade has one tile, so
- * the tile speaks for all of them: it is on while anything listens, a click
- * stops everything, and a click while nothing runs starts the configuration
- * that was last in use. Which one that is, is the panel's business — it is the
- * proxy at the top of the list.
+ * <p>Several proxies can be listening at once and the shade has one tile, so
+ * the tile has settings of its own — the burger menu's "The tile" — saying
+ * which proxies are on it and how far a click reaches in each direction: the
+ * ones on the tile, the one in use, or all of them. A click while something it
+ * starts is up takes the stop side; a proxy it does not name is left as it is.
+ * With nothing configured the tile is what it always was: a click starts the
+ * proxy in use and stops everything. What that means is {@link TilePlan}'s
+ * decision, in plain Java, so the rules are covered without a phone.
  *
  * <p>A tile click is user interaction, which is what makes starting the
  * location-typed foreground service from here allowed. If a build disagrees,
@@ -35,7 +38,7 @@ public final class ProxyTile extends TileService implements ProxyRuntime.Listene
     public void onStartListening() {
         super.onStartListening();
         ProxyRuntime.addListener(this);
-        update(ProxyRuntime.state());
+        update();
     }
 
     @Override
@@ -47,41 +50,92 @@ public final class ProxyTile extends TileService implements ProxyRuntime.Listene
     @Override
     public void onClick() {
         super.onClick();
-        if (ProxyRuntime.state().running) {
-            startService(new Intent(this, ProxyService.class).setAction(ProxyService.ACTION_STOP));
+        TilePlan plan = plan();
+        if (plan.fallback) {
+            // Nothing configured: the tile is the switch for the proxy in use.
+            if (ProxyRuntime.state().running) {
+                stop(null);
+                return;
+            }
+            start(null);
             return;
         }
+        if (!plan.up) {
+            for (String name : plan.start) {
+                start(name);
+            }
+            return;
+        }
+        if (plan.stopAll) {
+            stop(null);
+            return;
+        }
+        for (String name : plan.stop) {
+            stop(name);
+        }
+    }
+
+    /** A start by name, or with null the configuration the last start stored. */
+    private void start(String name) {
+        Intent intent = new Intent(this, ProxyService.class).setAction(ProxyService.ACTION_START);
+        if (name != null) {
+            intent.putExtra(ConfigStore.EXTRA_PROFILE, name);
+        }
         try {
-            startForegroundService(
-                    new Intent(this, ProxyService.class).setAction(ProxyService.ACTION_START));
+            startForegroundService(intent);
         } catch (IllegalStateException e) {
+            // A build that will not allow the location-typed start from here
+            // says so instead of crashing the shade.
             Log.w(ProxyService.TAG, "the tile cannot start the service", e);
             Toast.makeText(this, R.string.tile_open_app, Toast.LENGTH_LONG).show();
         }
     }
 
-    @Override
-    public void onStatesChanged(List<ProxyState> states) {
-        main.post(() -> update(ProxyRuntime.state()));
+    /** The tile as the store and the runtime have it. */
+    private TilePlan plan() {
+        return TilePlan.of(
+                ConfigStore.tileProfiles(this),
+                ConfigStore.inUse(this),
+                ConfigStore.profileNames(this),
+                ConfigStore.tileStart(this),
+                ConfigStore.tileStop(this),
+                ProxyRuntime.states());
     }
 
-    private void update(ProxyState state) {
+    /** A stop by name, or with null all of them. */
+    private void stop(String name) {
+        Intent intent = new Intent(this, ProxyService.class).setAction(ProxyService.ACTION_STOP);
+        if (name != null) {
+            intent.putExtra(ConfigStore.EXTRA_PROFILE, name);
+        }
+        startService(intent);
+    }
+
+    @Override
+    public void onStatesChanged(List<ProxyState> states) {
+        main.post(this::update);
+    }
+
+    private void update() {
         Tile tile = getQsTile();
         if (tile == null) {
             return;
         }
+        // The tile reports what its own settings name, so a proxy started from
+        // a card it does not name cannot make the switch look on.
+        TilePlan plan = plan();
         tile.setLabel(getString(R.string.tile_label));
         tile.setIcon(Icon.createWithResource(this, R.drawable.ic_stat_proxy));
-        tile.setState(state.listening ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE);
-        tile.setSubtitle(subtitle(state));
+        tile.setState(plan.listening ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE);
+        tile.setSubtitle(subtitle(plan.listening, plan.up));
         tile.updateTile();
     }
 
-    private String subtitle(ProxyState state) {
-        if (state.listening) {
+    private String subtitle(boolean listening, boolean up) {
+        if (listening) {
             return getString(R.string.tile_listening);
         }
-        if (state.running) {
+        if (up) {
             return getString(R.string.tile_paused);
         }
         return getString(R.string.tile_off);

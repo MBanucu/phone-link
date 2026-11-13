@@ -48,6 +48,9 @@ final class ProxyScreen {
         /** The wireless-debugging switch moved; whether it may be stored is policy. */
         void adbWirelessChanged(boolean on);
 
+        /** The tile switch moved: this proxy is bound to the tile, or is not. */
+        void tileChanged(boolean on);
+
         /** The battery line was tapped: open the system's exemption screen. */
         void batteryHelp();
     }
@@ -65,6 +68,8 @@ final class ProxyScreen {
     private final CheckBox anyNetwork;
     private final CheckBox autoStart;
     private final CheckBox adbWireless;
+    private final CheckBox tile;
+    private final TextView tileState;
     private final TextView battery;
     private final TextView adbState;
     private final TextView pending;
@@ -121,6 +126,8 @@ final class ProxyScreen {
         anyNetwork = screen.findViewById(R.id.any_network);
         autoStart = screen.findViewById(R.id.auto_start);
         adbWireless = screen.findViewById(R.id.adb_wifi);
+        tile = screen.findViewById(R.id.tile);
+        tileState = screen.findViewById(R.id.tile_state);
         battery = screen.findViewById(R.id.battery);
         adbState = screen.findViewById(R.id.adb_state);
         pending = screen.findViewById(R.id.pending);
@@ -153,6 +160,13 @@ final class ProxyScreen {
             }
         });
         autoStart.setOnCheckedChangeListener((button, checked) -> actions.autoStartChanged());
+        // Which proxies the tile switches is not part of a start either, so this
+        // stores at once — the switch appears to promise the next click.
+        tile.setOnCheckedChangeListener((button, checked) -> {
+            if (!loading) {
+                actions.tileChanged(checked);
+            }
+        });
         watchForEdits();
     }
 
@@ -176,9 +190,11 @@ final class ProxyScreen {
             anyNetwork.setChecked(config.anyNetwork);
             autoStart.setChecked(ConfigStore.profileAutoStart(activity, name));
             adbWireless.setChecked(ConfigStore.profileAdbWireless(activity, name));
+            tile.setChecked(ConfigStore.profileTile(activity, name));
         } finally {
             loading = false;
         }
+        renderTileState();
         listenerPage.scrollTo(0, 0);
         servicePage.scrollTo(0, 0);
         renderAdbState();
@@ -361,6 +377,17 @@ final class ProxyScreen {
 
     boolean adbWirelessChecked() {
         return adbWireless.isChecked();
+    }
+
+    /**
+     * What the tile does now, from the proxies bound to it: the switch above is
+     * this proxy's answer, the line is the set's.
+     */
+    void renderTileState() {
+        List<String> bound = ConfigStore.tileProfiles(activity);
+        tileState.setText(bound.isEmpty()
+                ? activity.getString(R.string.tile_state_alone)
+                : activity.getString(R.string.tile_state_bound, String.join(", ", bound)));
     }
 
     /** Throw the edits away: the form is filled from the store again. */

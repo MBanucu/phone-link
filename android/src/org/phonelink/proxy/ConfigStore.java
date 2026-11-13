@@ -45,6 +45,11 @@ final class ConfigStore {
     // while it is open, through a shared-preferences listener.
     static final String KEY_AUTO_START = "auto_start";
     static final String KEY_ADB_WIFI = "adb_wifi";
+    /** Whether this proxy is one the Quick Settings tile switches. */
+    private static final String KEY_TILE = "tile";
+    /** What a click on the tile starts, and what it stops, as {@link TileScope}. */
+    private static final String KEY_TILE_START = "tile_start";
+    private static final String KEY_TILE_STOP = "tile_stop";
     static final String KEY_SELECTED_PROFILE = "selected_profile";
     static final String KEY_IN_USE = "in_use";
 
@@ -190,6 +195,48 @@ final class ConfigStore {
     }
 
     /**
+     * Whether this proxy belongs to the Quick Settings tile. Not part of
+     * {@link #saveProfile}: it says nothing about the listener, and the panel
+     * stores it the moment the switch moves instead of waiting for Save.
+     */
+    static boolean profileTile(Context context, String name) {
+        return prefs(context).getBoolean(profileKey(name, KEY_TILE), false);
+    }
+
+    static void setProfileTile(Context context, String name, boolean on) {
+        prefs(context).edit().putBoolean(profileKey(name, KEY_TILE), on).apply();
+    }
+
+    /** What a click on the tile starts while it is off. */
+    static TileScope tileStart(Context context) {
+        return TileScope.named(prefs(context).getString(KEY_TILE_START, null), TileScope.TILE);
+    }
+
+    static void setTileStart(Context context, TileScope scope) {
+        prefs(context).edit().putString(KEY_TILE_START, scope.name()).apply();
+    }
+
+    /** What a click on the tile stops while it is on. */
+    static TileScope tileStop(Context context) {
+        return TileScope.named(prefs(context).getString(KEY_TILE_STOP, null), TileScope.TILE);
+    }
+
+    static void setTileStop(Context context, TileScope scope) {
+        prefs(context).edit().putString(KEY_TILE_STOP, scope.name()).apply();
+    }
+
+    /** The proxies the tile starts and stops, by name; empty means none bound. */
+    static List<String> tileProfiles(Context context) {
+        List<String> bound = new ArrayList<>();
+        for (String name : profileNames(context)) {
+            if (profileTile(context, name)) {
+                bound.add(name);
+            }
+        }
+        return bound;
+    }
+
+    /**
      * Another name for the same configuration: settings, switches, the mark of
      * which proxy is in use and the remembered selection all move with it.
      *
@@ -205,6 +252,7 @@ final class ConfigStore {
         }
         saveProfile(context, to, saved, profileAutoStart(context, from),
                 profileAdbWireless(context, from));
+        setProfileTile(context, to, profileTile(context, from));
         deleteProfile(context, from);
         if (from.equals(inUse(context))) {
             setInUse(context, to);
@@ -231,6 +279,7 @@ final class ConfigStore {
                 .remove(profileKey(name, KEY_ANY_NETWORK))
                 .remove(profileKey(name, KEY_AUTO_START))
                 .remove(profileKey(name, KEY_ADB_WIFI))
+                .remove(profileKey(name, KEY_TILE))
                 .apply();
     }
 

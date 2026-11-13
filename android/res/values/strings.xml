@@ -18,6 +18,18 @@
     <string name="action_clear_log">Clear</string>
     <string name="menu_info">About this app</string>
     <string name="menu_all_events">All events</string>
+    <string name="menu_tile">The tile</string>
+    <string name="tile_settings_title">Quick Settings tile</string>
+    <string name="tile_start_label">A click while the tile is off starts</string>
+    <string name="tile_stop_label">A click while the tile is on stops</string>
+    <string name="tile_scope_tile">The proxies on the tile</string>
+    <string name="tile_scope_started">The ones it started</string>
+    <string name="tile_scope_in_use">The proxy in use</string>
+    <string name="tile_scope_all_saved">Every saved proxy</string>
+    <string name="tile_scope_every">Every proxy</string>
+    <string name="tile_profiles_label">On the tile</string>
+    <string name="tile_profiles_empty">No saved proxies yet: save one in the app and it appears here.</string>
+    <string name="tile_settings_footnote">A proxy the tile does not name is left as it is. With nothing on the tile, a click starts the proxy in use and stops everything — what the tile did before it had settings.</string>
     <string name="warning_description">The proxy will not restart after a reboot: tap to change that</string>
     <string name="tab_listener">Listener</string>
     <string name="tab_service">Service</string>
@@ -50,6 +62,9 @@
     <string name="label_any_network">Ignore the SSID and always listen</string>
     <string name="label_auto_start">Start automatically and keep running (also after a reboot)</string>
     <string name="label_adb_wifi">Turn wireless debugging back on when the phone joins the SSID</string>
+    <string name="label_tile">Start and stop from the Quick Settings tile</string>
+    <string name="tile_state_alone">On the tile: nothing yet, so the tile starts the proxy in use and stops everything.</string>
+    <string name="tile_state_bound">On the tile: %1$s.</string>
     <string name="label_anonymous">Listen without authentication</string>
     <string name="adb_wifi_ungranted">Wireless debugging: this build cannot change it — install with phone-proxy-install, which grants the one permission Android needs</string>
     <string name="adb_wifi_state_on">Wireless debugging: on — adb can reach the phone</string>
@@ -92,6 +107,8 @@
     <string name="info_anonymous">Accept clients without a user and password. Anyone who can reach the port can then relay through the phone, so only on a network you trust.</string>
     <string name="info_auto_start_title">Automatic start</string>
     <string name="info_auto_start">Come back by itself: at boot, and whenever the phone joins the SSID. Android only allows that with the battery exemption and background location — phone-doctor reports and phone-proxy-boot grants both.</string>
+    <string name="info_tile_title">The tile</string>
+    <string name="info_tile">The Quick Settings tile is one switch, and this binds this proxy to it. While anything is bound the tile starts them all and stops them all, and a proxy that is not bound is left as it is; with nothing bound it starts the proxy in use, and its click stops everything. The line under the switch says what the tile does now.</string>
     <string name="info_adb_wifi_title">Wireless debugging</string>
     <string name="info_adb_wifi">Switch Android\'s wireless debugging back on when the phone joins the SSID, so adb can still reach it after a reboot. That needs WRITE_SECURE_SETTINGS, which phone-proxy-install grants; without it the app says so instead of failing silently.</string>
     <string name="info_save_title">Save</string>

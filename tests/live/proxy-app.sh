@@ -262,10 +262,19 @@ cleanup() {
   shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
   shell cmd statusbar collapse >/dev/null 2>&1
   # Whatever this run saved: a crash halfway through must not leave the phone
-  # with test proxies in its list.
-  local leftover
+  # with test proxies in its list. Only the names that are really there are
+  # named, because a delete of a name that does not exist is an error the app
+  # puts in the shade — one notification per name, every run.
+  local leftover saved
+  saved=$(shell dumpsys activity service "$SERVICE" 2>/dev/null |
+    sed -n '/  saved/,$p')
   for leftover in harness-panel harness-save harness-one harness-new \
-    inside-a inside-b gone-a gone-b; do
+    inside-a inside-b gone-a gone-b harness-tile-a harness-tile-b \
+    harness-tile-c; do
+    case $saved in
+      *"\"$leftover\""*) ;;
+      *) continue ;;
+    esac
     shell am start-foreground-service -n "$SERVICE" \
       -a org.phonelink.proxy.action.DELETE_PROFILE --es profile "$leftover" \
       >/dev/null 2>&1
@@ -485,6 +494,14 @@ closed() { # closed PORT
 }
 
 port_closed() { closed "$PORT"; }
+
+# One press of the Quick Settings tile: the shade has to be open for the click
+# to land, and it stays open afterwards.
+tile_click() {
+  shell cmd statusbar expand-settings >/dev/null 2>&1
+  sleep 2
+  shell cmd statusbar click-tile "$PKG/.ProxyTile" >/dev/null 2>&1
+}
 
 ADDRESS=$(shell ip -4 addr show wlan0 2>/dev/null |
   awk '/inet / { sub(/\/.*/, "", $2); print $2; exit }')
@@ -1393,25 +1410,48 @@ step_tile() {
   if keyguard_showing; then
     printf 'SKIP the tile: the shade ignores clicks while the phone is locked\n'
   else
-    # The tile starts whatever the last start stored, so store the good settings
-    # first and stop the service the adb start created.
+    # Every question here is answered by the service's own view of the store,
+    # and the step before this one left the service stopped: a start first.
     start_app --es ssid "$SSID" --ez any_network false
+    sleep 2
+
+    # An earlier run may have left the tile's own settings changed, so they go
+    # back to the narrow default before anything is asked: this step decides
+    # what the tile is.
+    shell cmd statusbar collapse >/dev/null 2>&1
     sleep 1
+    open_panel
+    menu_pick 'The tile' &&
+      sequence 'tap-id start_tile 3000; tap-id stop_tile 3000; tap-id button1 3000'
+    sleep 1
+    if shell dumpsys activity service "$SERVICE" 2>/dev/null |
+      grep -q 'tile_start  tile' &&
+      shell dumpsys activity service "$SERVICE" 2>/dev/null |
+      grep -q 'tile_stop   tile'; then
+      ok 'the tile settings go back to their narrow default'
+    else
+      bad 'the tile settings go back to their narrow default'
+    fi
+
+    # Nothing is on the tile, so it is the switch it always was: a click starts
+    # the configuration the last start stored, and the next one stops
+    # everything.
     shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
     sleep 2
     shell cmd statusbar add-tile "$PKG/.ProxyTile" >/dev/null 2>&1
-    shell cmd statusbar expand-settings >/dev/null 2>&1
-    sleep 2
-    shell cmd statusbar click-tile "$PKG/.ProxyTile" >/dev/null 2>&1
+    tile_click
     if wait_foreground; then ok 'the tile starts the service'; else
       bad 'the tile starts the service'
     fi
     if through_proxy; then ok 'the tile start serves requests'; else
       bad 'the tile start serves requests'
     fi
-    shell cmd statusbar expand-settings >/dev/null 2>&1
-    sleep 2
-    shell cmd statusbar click-tile "$PKG/.ProxyTile" >/dev/null 2>&1
+    if shell dumpsys activity service "$SERVICE" | grep -q 'tile  *nothing bound'; then
+      ok 'with nothing on it, the tile says so'
+    else
+      bad 'with nothing on it, the tile says so'
+    fi
+    tile_click
     sleep 3
     if foreground; then bad 'the tile stops the service'; else
       ok 'the tile stops the service'
@@ -1419,9 +1459,131 @@ step_tile() {
     if port_closed; then ok 'the tile stop closes the port'; else
       bad 'the tile stop closes the port'
     fi
+
+    # Two proxies on the tile: one click starts both, the next stops both, and a
+    # proxy that is not on the tile keeps doing what it was doing.
+    PORT_T1=$((PORT + 1))
+    PORT_T2=$((PORT + 2))
+    PORT_T3=$((PORT + 3))
+    start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT_T1"
+    sleep 2
+    save_profile harness-tile-a
+    start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT_T2"
+    sleep 2
+    save_profile harness-tile-b
+    # The two proxies go on the tile from the tile's own page, which is where
+    # the start and stop sides live too: one visit, one place, and the store is
+    # what decides whether a question about the binding passed.
+    shell cmd statusbar collapse >/dev/null 2>&1
+    sleep 1
+    bound_ok=no
+    if open_panel && menu_pick 'The tile' &&
+      sequence 'tap-scroll "text=harness-tile-a" 4000; tap-scroll "text=harness-tile-b" 4000; tap-id button1 3000'; then
+      sleep 1
+      if shell dumpsys activity service "$SERVICE" |
+        grep -q 'tile  .*harness-tile-a.*harness-tile-b'; then
+        bound_ok=yes
+      fi
+    fi
+    if [ "$bound_ok" = yes ]; then
+      ok 'a proxy says it belongs on the tile'
+    else
+      bad 'a proxy says it belongs on the tile'
+      panel_where
+    fi
+    on_tile=$(shell dumpsys activity service "$SERVICE" | sed -n 's/^ *tile  *//p' | head -1)
+    case $on_tile in
+      *harness-tile-a*harness-tile-b*) ok 'dumpsys names both of them on the tile' ;;
+      *) bad "dumpsys names both of them on the tile ($on_tile)" ;;
+    esac
+    shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
+    sleep 2
+    tile_click
+    sleep 3
+    if through "$PORT_T1" "$USER_NAME" "$PASSWORD" &&
+      through "$PORT_T2" "$USER_NAME" "$PASSWORD"; then
+      ok 'one click starts both proxies on the tile'
+    else
+      bad 'one click starts both proxies on the tile'
+    fi
+    tile_click
+    sleep 3
+    if closed "$PORT_T1" && closed "$PORT_T2" && ! foreground; then
+      ok 'and the next click stops them both'
+    else
+      bad 'and the next click stops them both'
+    fi
+
+    # A third proxy that is not on the tile: the tile starts and stops its own
+    # and leaves this one where it is.
+    start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT_T3"
+    sleep 2
+    save_profile harness-tile-c
+    shell am start-foreground-service -n "$SERVICE" -a "$START" \
+      --es profile harness-tile-c >/dev/null 2>&1
+    sleep 3
+    tile_click
+    sleep 3
+    if through "$PORT_T1" "$USER_NAME" "$PASSWORD" &&
+      through "$PORT_T3" "$USER_NAME" "$PASSWORD"; then
+      ok 'a proxy that is not on the tile is left as it is'
+    else
+      bad 'a proxy that is not on the tile is left as it is'
+    fi
+    tile_click
+    sleep 3
+    if closed "$PORT_T1" && closed "$PORT_T2" &&
+      through "$PORT_T3" "$USER_NAME" "$PASSWORD"; then
+      ok 'and stopping the tile leaves it alone'
+    else
+      bad 'and stopping the tile leaves it alone'
+    fi
+
+    # The tile's page is in the menu, not behind a long press: Android's long
+    # press is App info, which is where a user looks for the app itself. What
+    # the radios store is read out of the service's own view of the store, so a
+    # start goes first — the last click left everything stopped.
+    start_app --es ssid "$SSID" --ez any_network false
+    sleep 2
+    # The shade is still down from the clicks, so it goes before the panel can
+    # be touched.
+    shell cmd statusbar collapse >/dev/null 2>&1
+    sleep 1
+    open_panel
+    if menu_pick 'The tile' && wait_for 'A click while the tile is off starts' 2000; then
+      ok "the menu offers the tile's own page"
+      if ui_dump | grep -q 'id/start_all"' && ui_dump | grep -q 'id/stop_all"'; then
+        ok 'the page has a start side and a stop side'
+      else
+        bad 'the page has a start side and a stop side'
+      fi
+      if ui_tap_id stop_all; then
+        # The radios store as they are tapped, so the service's own view of the
+        # tile says what the next click will stop.
+        sleep 1
+        stop_scope=$(shell dumpsys activity service "$SERVICE" |
+          sed -n 's/^ *tile_stop  *//p' | head -1)
+        if [ "$stop_scope" = all ]; then
+          ok 'a radio stores what a click stops'
+        else
+          bad "a radio stores what a click stops ($stop_scope)"
+        fi
+      else
+        bad 'the stop side can be chosen'
+      fi
+      back >/dev/null 2>&1
+      settle
+    else
+      bad "the menu offers the tile's page"
+      panel_where
+    fi
+
+    shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
+    delete_profile_by_adb harness-tile-a
+    delete_profile_by_adb harness-tile-b
+    delete_profile_by_adb harness-tile-c
     shell cmd statusbar collapse >/dev/null 2>&1
   fi
-
 }
 
 # --- the steps, in the order a full run takes them ------------------------

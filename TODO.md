@@ -4,6 +4,54 @@ Ideas taken from the user's messages, in the order they are being built.
 Delete an item once it is implemented and committed; delete the file when the
 list is empty.
 
+## The tile starts and stops what the phone says it does
+
+- [ ] The tile is one switch with no defined ownership: it starts whatever was
+      started last and stops everything, so a phone that is useful with two
+      proxies cannot say "the tile is these two". Let each proxy say whether it
+      belongs to the tile — a switch on its Service page — and make the click a
+      switch for that set: up when none of them is, down when one is, and a
+      proxy that is not bound left alone. With nothing bound it stays the switch
+      it is today, so a phone with one proxy needs no configuration at all.
+
+## Two instances of the app at once
+
+- [ ] The live harness drives the app's screen, so the phone is busy while a run
+      is in progress and nothing else can use it: a background end-to-end test —
+      start a proxy, push traffic through it, read its counters — has to wait for
+      the foreground UI run to finish, or fight it for the adb connection and the
+      one Activity. Run two instances of the app instead, in the same phone
+      process or in two, each with its own package/port/profile store, so one can
+      be driven over adb while the other's screens are exercised: the harness
+      already keeps its listeners on their own ports, and the store is private
+      preferences, so the seam is the package name (and a manifest placeholder
+      for it), not the code.
+
+## A tile with more than two states
+
+- [ ] A press can only choose between off and listening — the phone's third
+      state, paused, belongs to the SSID gate and not to a click — so "more
+      states" here can only mean more than one *set* to have on: the proxies on
+      the tile, the proxy in use, every saved proxy. A cycle is then a list of
+      those sets plus off, each of them toggleable so the phone can skip one:
+      press 1 the tile's set, press 2 every saved proxy, press 3 off. Two things
+      would have to be true for it to be worth it: the subtitle has to name the
+      set that is up, because a cycle nobody can read is a cycle people get lost
+      in, and a wider set may only add what is missing — starting a listener that
+      is already up replaces it on its port and drops its clients. Today's start
+      and stop sides already say "start everything, stop only my own"; the cycle
+      is for a third press that is genuinely wanted.
+
+## A build that cannot see a file that is not committed yet
+
+- [ ] `nix build` copies the git tree, so a new source file that nobody
+      `git add`ed is simply not in it: `android/build.sh` then fails with a page
+      of "cannot find symbol" about the very class the new file defines, which
+      reads as a compile error in the code just written. Nothing says "that file
+      is untracked". Either the dev shell should stage new files (`git add -N`)
+      or the failure should say what it is; one wasted build per new file is the
+      price today.
+
 ## A failure brings its own pictures
 
 - [ ] When a check fails, pull the frames that explain it out of the recording

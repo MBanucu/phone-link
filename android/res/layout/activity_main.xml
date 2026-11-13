@@ -368,6 +368,27 @@
                             android:text="@string/adb_wifi_state_off"
                             android:textAppearance="?android:attr/textAppearanceSmall" />
 
+                        <LinearLayout style="@style/FieldLabelRow">
+                            <CheckBox
+                                android:id="@+id/tile"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:paddingTop="8dp"
+                                android:text="@string/label_tile" />
+                            <ImageButton
+                                android:id="@+id/info_tile"
+                                style="@style/InfoMark" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/tile_state"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:paddingTop="2dp"
+                            android:text="@string/tile_state_alone"
+                            android:textAppearance="?android:attr/textAppearanceSmall" />
+
                         <TextView
                             android:id="@+id/pending_service"
                             android:layout_width="match_parent"
