@@ -4,16 +4,6 @@ Ideas taken from the user's messages, in the order they are being built.
 Delete an item once it is implemented and committed; delete the file when the
 list is empty.
 
-## The tile starts and stops what the phone says it does
-
-- [ ] The tile is one switch with no defined ownership: it starts whatever was
-      started last and stops everything, so a phone that is useful with two
-      proxies cannot say "the tile is these two". Let each proxy say whether it
-      belongs to the tile — a switch on its Service page — and make the click a
-      switch for that set: up when none of them is, down when one is, and a
-      proxy that is not bound left alone. With nothing bound it stays the switch
-      it is today, so a phone with one proxy needs no configuration at all.
-
 ## Two instances of the app at once
 
 - [ ] The live harness drives the app's screen, so the phone is busy while a run
