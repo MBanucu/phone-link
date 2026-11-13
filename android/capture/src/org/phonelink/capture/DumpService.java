@@ -2,6 +2,7 @@ package org.phonelink.capture;
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
+import android.content.BroadcastReceiver;
 import android.graphics.Color;
 import android.graphics.Path;
 import android.graphics.PixelFormat;
@@ -87,6 +88,8 @@ public final class DumpService extends AccessibilityService {
     private int index;
     private volatile boolean watching;
     private View flash;
+    /** The one broadcast parked until the screen says what it is waiting for. */
+    private Waiter waiter;
 
     /** The enabled service, or null while accessibility is not handing it work. */
     static DumpService running() {
@@ -130,6 +133,7 @@ public final class DumpService extends AccessibilityService {
     @Override
     public void onDestroy() {
         instance = null;
+        finish(2);
         handler.removeCallbacksAndMessages(null);
         removeFlash();
         super.onDestroy();
@@ -137,11 +141,20 @@ public final class DumpService extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (!watching) {
+        // A waiter watches even when the record is off: it is waiting for the
+        // screen to say something, and the screen is the only thing that can.
+        Waiter parked = waiter;
+        if (!watching && parked == null) {
             return;
         }
         handler.removeCallbacks(pending);
         handler.postDelayed(pending, QUIET_MS);
+        // A quiet wait is the same idea as the debounce the record uses: the
+        // screen is still when it has stopped saying anything for a moment.
+        if (parked != null && parked.quietMs > 0) {
+            handler.removeCallbacks(parked.quiet);
+            handler.postDelayed(parked.quiet, parked.quietMs);
+        }
     }
 
     @Override
@@ -164,6 +177,96 @@ public final class DumpService extends AccessibilityService {
     boolean requestCapture(String why) {
         handler.removeCallbacks(pending);
         return capture(why);
+    }
+
+    //
+    // --- waiting on the screen --------------------------------------------
+
+    /**
+     * One parked broadcast: the screen is looked at until it holds the needle
+     * (or stops holding it, or has changed at all), and the caller is released
+     * with the answer. This is what lets the harness wait for the thing a step
+     * caused instead of sleeping and hoping it happened in time.
+     */
+    private static final class Waiter {
+        final String needle;
+        final boolean gone;
+        final boolean change;
+        /** Quiet mode: finished when the screen has been still this long. */
+        final long quietMs;
+        final BroadcastReceiver.PendingResult pending;
+        final Runnable timeout;
+        final Runnable quiet;
+
+        Waiter(String needle, boolean gone, boolean change, long quietMs,
+                BroadcastReceiver.PendingResult pending, Runnable timeout, Runnable quiet) {
+            this.needle = needle;
+            this.gone = gone;
+            this.change = change;
+            this.quietMs = quietMs;
+            this.pending = pending;
+            this.timeout = timeout;
+            this.quiet = quiet;
+        }
+
+        boolean matches(String xml) {
+            boolean there = needle == null || xml.contains(needle);
+            return gone ? !there : there;
+        }
+    }
+
+    /**
+     * Park {@code pending} until the screen matches, or the timeout runs out.
+     * The answer is the broadcast's result: 0 for the screen, 1 for the clock.
+     */
+    void await(String needle, boolean gone, boolean change, long quietMs, int timeoutMs,
+            BroadcastReceiver.PendingResult pending) {
+        if (waiter != null) {
+            // Someone is already waiting for the screen; two would race for it.
+            pending.setResultCode(2);
+            pending.finish();
+            return;
+        }
+        if (needle != null && needle.isEmpty()) {
+            needle = null;
+        }
+        boolean changed = change || needle == null;
+        Waiter parked = new Waiter(needle, gone, changed, quietMs, pending,
+                () -> finish(1), () -> finish(0));
+        waiter = parked;
+        handler.postDelayed(parked.timeout, Math.max(1, timeoutMs));
+        // The screen may already be saying it: a step that taps and then waits
+        // for what the tap did must not be told to wait for the next change.
+        if (!changed && matchesNow(parked)) {
+            finish(0);
+        }
+        if (quietMs > 0) {
+            handler.postDelayed(parked.quiet, quietMs);
+        }
+    }
+
+    private boolean matchesNow(Waiter parked) {
+        List<AccessibilityNodeInfo> roots = windows();
+        if (roots.isEmpty()) {
+            return false;
+        }
+        DisplayMetrics metrics = getResources().getDisplayMetrics();
+        return parked.matches(Hierarchy.of(roots, metrics.widthPixels, metrics.heightPixels));
+    }
+
+    private void finish(int result) {
+        // Both the timeout and the quiet timer can be in flight; whichever is
+        // second finds no waiter and does nothing.
+        Waiter parked = waiter;
+        if (parked == null) {
+            return;
+        }
+        waiter = null;
+        handler.removeCallbacks(parked.timeout);
+        handler.removeCallbacks(parked.quiet);
+        parked.pending.setResultCode(result);
+        parked.pending.finish();
+        Log.i(TAG, "wait over: " + (result == 0 ? "the screen" : "the clock"));
     }
 
     //
@@ -247,7 +350,10 @@ public final class DumpService extends AccessibilityService {
         if (edges < 1) {
             return;
         }
-        handler.removeCallbacksAndMessages(null);
+        // Only the debounced capture is dropped, not everything this handler
+        // holds: a broadcast waiting on the screen has its timeout parked here
+        // too, and it must still time out.
+        handler.removeCallbacks(pending);
         setFlash(false);
         handler.postDelayed(() -> step(edges, periodMs, 0), 100);
     }
@@ -358,6 +464,16 @@ public final class DumpService extends AccessibilityService {
             }
             append(new File(dir, "index.csv"), "n,device_ns,wall_ms,trigger\n",
                     String.format(Locale.ROOT, "%d,%d,%d,%s%n", index, now, wall, why));
+        }
+        // Every capture is the chance a parked broadcast was waiting for: the
+        // screen it was told to watch for is the one just written.
+        // Only a capture the screen itself caused counts as a change: one a
+        // caller asked for is no news to a broadcast waiting for news. A quiet
+        // wait is answered by its own timer, not by any single capture.
+        Waiter parked = waiter;
+        if (parked != null && parked.quietMs == 0
+                && (parked.change ? "change".equals(why) : parked.matches(xml))) {
+            finish(0);
         }
         return true;
     }

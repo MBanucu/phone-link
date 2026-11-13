@@ -12,6 +12,10 @@ import android.util.Log;
  * <pre>
  * adb shell am broadcast -a org.phonelink.capture.DUMP
  * adb shell am broadcast -a org.phonelink.capture.WATCH --ez watch true
+ * adb shell am broadcast -a org.phonelink.capture.WAIT --es has 'text="OK"'
+ * adb shell am broadcast -a org.phonelink.capture.WAIT --es has X --ez gone true
+ * adb shell am broadcast -a org.phonelink.capture.WAIT --ez change true
+ * adb shell am broadcast -a org.phonelink.capture.WAIT --ei quiet 250
  * adb shell am broadcast -a org.phonelink.capture.TAP --ei x 540 --ei y 1200
  * adb shell am broadcast -a org.phonelink.capture.SWIPE \
  *     --ei x1 540 --ei y1 2200 --ei x2 540 --ei y2 1200 --ei ms 200
@@ -25,6 +29,13 @@ import android.util.Log;
  * takes as long as it takes and is simply left to run. The receiver runs on the
  * app's main thread, which is where the accessibility service writes from too,
  * so the two cannot interleave a half-open file.
+ *
+ * <p>{@code WAIT} is the exception and the point: it is answered when the
+ * screen says what it was asked about, so {@code am broadcast} returns at that
+ * moment. That is how a step of the live harness waits for what it caused —
+ * {@code result=0} when the screen answered, {@code 1} when time ran out and
+ * {@code 2} when nothing was listening. It goes async, because the answer comes
+ * from the main thread this receiver runs on.
  */
 public final class DumpReceiver extends BroadcastReceiver {
 
@@ -59,6 +70,15 @@ public final class DumpReceiver extends BroadcastReceiver {
                         intent.getIntExtra("x2", 0), intent.getIntExtra("y2", 0),
                         Math.max(1, intent.getIntExtra("ms", 200)));
                 break;
+            case "org.phonelink.capture.WAIT": {
+                PendingResult pending = goAsync();
+                service.await(intent.getStringExtra("has"),
+                        intent.getBooleanExtra("gone", false),
+                        intent.getBooleanExtra("change", false),
+                        Math.max(0, intent.getIntExtra("quiet", 0)),
+                        intent.getIntExtra("timeout", 3000), pending);
+                break;
+            }
             case "org.phonelink.capture.BACK":
                 service.back();
                 break;

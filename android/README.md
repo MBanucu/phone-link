@@ -117,6 +117,19 @@ deleted the app's stored configuration.
   this run cost" a question with an answer. `PHONE_LIVE_CAPTURE=0` turns the
   recording and the snapshots off for a quick run.
 
+  The steps wait on the phone, not on the clock. The service answers a `WAIT`
+  broadcast when the screen does one of three things: holds a piece of XML
+  (`--es has 'text="OK"'`), stops holding it (`--ez gone true`), changes at all
+  (`--ez change true`), or has been still for a moment (`--ei quiet 250`). The
+  broadcast is held, so the harness's next command arrives the instant the
+  screen said it — after a tap it asks for "still", after a dialog it asks for
+  the dialog's own button — and the answer is the result code: `0` for the
+  screen, `1` for the clock. Measured: a needle already on screen answers in
+  0.13 s, one that never arrives returns at the timeout with `result=1`, and the
+  first run built this way took 324 s against 377 s of fixed sleeps, with the
+  steps that open dialogs (`Save`, the info marks, `new proxy`) each 5–11 s
+  cheaper. `PHONE_LIVE_DUMPS=uiautomator` falls back to sleeping a second.
+
   Everything the phone writes down is on one clock
   (`SystemClock.elapsedRealtimeNanos()`, which counts through deep sleep):
   `ui-index.csv` gives each capture the instant it was read, `actions.csv`

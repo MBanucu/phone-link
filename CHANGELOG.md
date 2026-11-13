@@ -73,6 +73,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The live harness waits on the phone instead of on the clock. The capture
+  service answers a `WAIT` broadcast when the screen holds a piece of XML, stops
+  holding it, changes at all, or has stood still for a moment, and the broadcast
+  is held until then — so a step that taps and waits for a dialog continues on
+  the dialog's event, and a step that taps and waits for the screen to settle
+  continues as soon as it has. Measured: a needle already on screen is answered
+  in 0.13 s, one that never arrives returns at its timeout, and the run went
+  from 377 s to 324 s with the same 72 checks, the dialog-heavy steps (`Save`,
+  the info marks, `new proxy`) each 5–11 s cheaper. `PHONE_LIVE_DUMPS=uiautomator`
+  keeps the old sleeps, since there is no service to ask.
 - Every instant the phone writes down now has a place in the recording. The
   capture service stamps what it records with the phone's own monotonic clock,
   takes the harness's taps and swipes through accessibility instead of sending

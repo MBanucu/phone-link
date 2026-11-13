@@ -294,6 +294,15 @@ be 13 ms at the end of a run, which is why the slope is part of the answer.
 The run fails if the fit is worse than 10 ms. The recording's start is not
 written anywhere, which is why it is measured rather than assumed.
 
+The steps themselves wait on the phone rather than on the clock: after a tap the
+harness asks the service to answer once the screen has stopped changing, and
+where a step knows what it caused — a dialog, a menu item, a card that should
+say `Running` — it waits for exactly that, so a quick phone is not made to wait
+for a second and a busy one is not failed by it. The same run that first used
+this took 324 s against 377 s of fixed sleeps, and the steps that wait for a
+dialog gained the most (the info marks, `Save` and `new proxy` steps each lost
+5–11 s).
+
 ```sh
 tests/live/proxy-app.sh
 ```

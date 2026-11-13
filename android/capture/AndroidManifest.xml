@@ -49,6 +49,7 @@
                 <action android:name="org.phonelink.capture.BACK" />
                 <action android:name="org.phonelink.capture.HOME" />
                 <action android:name="org.phonelink.capture.FLASH" />
+                <action android:name="org.phonelink.capture.WAIT" />
             </intent-filter>
         </receiver>
     </application>

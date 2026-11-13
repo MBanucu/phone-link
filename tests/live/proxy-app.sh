@@ -339,6 +339,55 @@ echo \"\$a \$b\"" | tr -d '\r' | awk 'NF == 2 { print $1, $2; exit }')
     "$*" >>"$ARTIFACTS/input.csv"
 }
 
+# --- waiting on the phone instead of on the clock -------------------------
+# A step used to tap and then sleep: too long when the phone is quick, too short
+# when it is busy. The service holds a broadcast until the screen it already
+# watches says what the step is waiting for, so the step continues on the event
+# it caused — and, because it is the same service, the instant it continued is
+# in the run's record too.
+
+# One argument for the phone's shell: a needle is XML, and XML is full of the
+# punctuation a shell would eat.
+phone_arg() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+
+wait_phone() { # wait_phone AM-ARGS... -> 0 the screen answered, 1 time ran out
+  [ "$capture_dumps" = 1 ] || return 1
+  local out
+  out=$(shell am broadcast -a "$CAPTURE_PKG.WAIT" "$@" \
+    -n "$CAPTURE_PKG/.DumpReceiver" 2>/dev/null)
+  case $out in *'result=0'*) return 0 ;; esac
+  return 1
+}
+
+wait_for() { # wait_for NEEDLE [MS] -> the screen holds it
+  wait_phone --es has "$(phone_arg "$1")" --ei timeout "${2:-3000}"
+}
+
+wait_gone() { # wait_gone NEEDLE [MS] -> the screen has stopped holding it
+  wait_phone --es has "$(phone_arg "$1")" --ez gone true \
+    --ei timeout "${2:-3000}"
+}
+
+wait_change() { # wait_change [MS] -> the screen said something
+  wait_phone --ez change true --ei timeout "${1:-2000}"
+}
+
+# The screen has stopped moving: the service answers once nothing on it has
+# changed for a moment, which is the event a step actually wants after a tap.
+settle() { # settle [QUIET_MS]
+  if [ "$capture_dumps" != 1 ]; then
+    sleep 1
+    return 0
+  fi
+  wait_phone --ei quiet "${1:-250}" --ei timeout 2500
+}
+
+# The panel, up and still, whatever it was showing before.
+open_panel() {
+  shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
+  settle
+}
+
 # Where the phone's clock sits in the recording: clock.sh fits the flashes and
 # leaves the mapping in $ARTIFACTS/clock.txt, so any device_ns in the run's own
 # files can be turned into a second of screen.mp4 afterwards.
@@ -378,9 +427,9 @@ start_capture() {
     # shade opens and closes first — a change, and the only thing on screen at
     # this point in the run — and then the phone paints its clock into it.
     shell cmd statusbar expand-notifications >/dev/null 2>&1
-    sleep 1
+    settle 500
     shell cmd statusbar collapse >/dev/null 2>&1
-    sleep 1
+    settle 500
     flash_markers
   else
     : >"$ARTIFACTS/.capturing"
@@ -515,7 +564,7 @@ foreground() { shell dumpsys activity services "$PKG" | grep -q 'isForeground=tr
 # The panel has to inflate and stay up; a crash shows in the crash buffer.
 panel_opens() {
   shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1 || return 1
-  sleep 1
+  settle
   shell dumpsys activity activities | grep -q "$PKG/.MainActivity" || return 1
   ! phone logcat -d -b crash 2>/dev/null | grep -q "$PKG"
 }
@@ -534,7 +583,7 @@ panel_checked() { # panel_checked ID -> yes|no
       return 0
     fi
     swipe 1300 2200 1300 1200 200
-    sleep 1
+    settle
   done
   return 1
 }
@@ -601,7 +650,9 @@ ui_dump() {
           ;;
       esac
     fi
-    sleep 1
+    # Whatever it was is waited out rather than slept through: a toast or a
+    # sheet leaves on its own, and the wait ends on the event that says so.
+    wait_change 700 || true
   done
   return 1
 }
@@ -621,7 +672,7 @@ panel_top() {
   # Both ends stay inside the page area: a drag that leaves it belongs to
   # whatever is underneath instead of the page.
   for _ in 1 2 3 4; do swipe 1300 1200 1300 2200 150; done
-  sleep 1
+  settle
 }
 
 # A configuration under a name, and the same back off the phone again.
@@ -650,16 +701,18 @@ panel_where() {
 # phone will not deliver; it is a window of its own and would swallow the taps
 # of the next step, so answer it and carry on.
 dismiss_battery() {
-  if ui_dump | grep -q 'Let the proxy restart by itself'; then
+  # It is waited for rather than looked at once and slept past: if Start opened
+  # it, it arrives within a moment, and if it did not, the wait is the cost of
+  # asking.
+  if wait_for 'Let the proxy restart by itself' 700; then
     ui_tap_id button2 2>/dev/null || back >/dev/null 2>&1
-    sleep 1
+    settle
   fi
 }
 
 # The one button on a proxy's own page starts it, and stops it while it runs.
 panel_toggle() {
   panel_tap toggle || return 1
-  sleep 1
   dismiss_battery
 }
 
@@ -680,12 +733,12 @@ $(ui_dump | tr '>' '\n' | grep "text=\"$1\"" | head -1 |
 EOF
     if [ -n "$x" ] && [ "$x" = "$px" ] && [ "$y" = "$py" ]; then
       tap "$x" "$y"
-      sleep 1
+      settle
       return 0
     fi
     px=$x
     py=$y
-    sleep 0.5
+    wait_change 600
   done
   return 1
 }
@@ -693,7 +746,8 @@ EOF
 # The menu is a popup over the header, opened by the burger.
 menu_pick() { # menu_pick TEXT
   ui_tap_id menu || return 1
-  sleep 1
+  # The menu slides in; its items are waited for rather than slept past.
+  wait_for "text=\"$1\"" 2000 || true
   ui_tap_text "$1"
 }
 
@@ -717,7 +771,7 @@ $(card_line "$1" card_toggle |
 EOF
   [ -n "$x" ] || return 1
   tap "$x" "$y"
-  sleep 2
+  settle
   dismiss_battery
 }
 
@@ -754,7 +808,7 @@ panel_home() {
       # launcher, so bring the panel up instead.
       shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
     fi
-    sleep 1
+    settle
   done
   return 1
 }
@@ -774,12 +828,12 @@ $(ui_dump | tr '>' '\n' | grep "id/card_name\"" | grep "text=\"$1\"" | head -1 |
 EOF
     if [ -n "$x" ]; then
       tap "$x" "$y"
-      sleep 1
+      settle
       ui_dump | grep -q "id/back\""
       return $?
     fi
     swipe 1300 2200 1300 1200 200
-    sleep 1
+    settle
   done
   return 1
 }
@@ -794,7 +848,7 @@ close_keyboard() {
       return 0
     fi
     back >/dev/null 2>&1
-    sleep 1
+    settle
   done
   return 0
 }
@@ -812,10 +866,10 @@ $(ui_bounds "$1")
 EOF
     if [ -n "$x" ]; then
       tap "$x" "$y"
-      sleep 1
+      settle
       return 0
     fi
-    sleep 0.5
+    wait_change 500
   done
   return 1
 }
@@ -830,7 +884,7 @@ ui_text_seek() { # ui_text_seek ID, scrolling down until the line is on screen
       return 0
     fi
     swipe 1300 2200 1300 1200 200
-    sleep 1
+    settle
   done
   return 1
 }
@@ -847,11 +901,11 @@ $(ui_bounds "$id")
 EOF
     if [ -n "$x" ]; then
       tap "$x" "$y"
-      sleep 1
+      settle
       return 0
     fi
     swipe 1300 2200 1300 1200 200
-    sleep 1
+    settle
   done
   return 1
 }
@@ -1031,8 +1085,7 @@ else
   phone logcat -d -s phone-link-proxy | tail -5
 fi
 save_profile harness-panel
-shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
-sleep 1
+open_panel
 if panel_open harness-panel; then
   ok 'a card opens that proxy'
 else
@@ -1053,29 +1106,25 @@ if battery_exempt; then exempt=yes; fi
 shell cmd deviceidle whitelist -"$PKG" >/dev/null 2>&1
 # renderBattery() runs on resume, so leave the panel and come back.
 home >/dev/null 2>&1
-sleep 1
-shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
-sleep 1
+open_panel
 if ui_dump | grep -q 'id/warning"'; then
   ok 'the header warns while a reboot restart cannot work'
 else
   bad 'the header warns while a reboot restart cannot work'
 fi
 panel_tap warning
-sleep 1
-if ui_dump | grep -q 'Let the proxy restart by itself'; then
+if wait_for 'Let the proxy restart by itself' 2000; then
   ok 'the mark opens the battery request'
 else
   bad 'the mark opens the battery request'
 fi
 back >/dev/null 2>&1
-sleep 1
+settle
 if [ "$exempt" = yes ]; then
   shell cmd deviceidle whitelist +"$PKG" >/dev/null 2>&1
   home >/dev/null 2>&1
-  sleep 1
-  shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
-  sleep 1
+  settle
+  open_panel
   if ui_dump | grep -q 'id/warning"'; then
     bad 'the mark goes away with the exemption'
   else
@@ -1086,8 +1135,7 @@ else
 fi
 
 step 'panel state'
-shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
-sleep 1
+open_panel
 panel_open harness-panel
 panel_tab service
 state=$(ui_text_seek adb_state)
@@ -1116,8 +1164,7 @@ step 'anonymous from the panel'
 # The one button is Start only while nothing runs, so stop first.
 shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
 sleep 2
-shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
-sleep 1
+open_panel
 if panel_open harness-panel && panel_tab listener && panel_tap anonymous &&
   panel_toggle; then
   if wait_anonymous yes; then
@@ -1173,8 +1220,7 @@ if save_profile harness-one; then
   else
     bad 'dumpsys lists what is saved'
   fi
-  shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
-  sleep 1
+  open_panel
   if panel_home &&
     ui_dump | tr '>' '\n' | grep 'id/card_name"' | grep -q 'text="harness-one"'; then
     ok 'the panel lists a configuration saved over adb'
@@ -1252,8 +1298,7 @@ step 'plain Save'
 start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
 sleep 2
 save_profile harness-save
-shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
-sleep 1
+open_panel
 if panel_open harness-save; then
   ok 'the card opens the proxy to save'
 else
@@ -1265,10 +1310,9 @@ panel_tap port
 input_action keyevent KEYCODE_MOVE_END 67 67 67 67 67 67
 input_action text 18099
 close_keyboard
-sleep 1
 panel_tab listener
 panel_tap save
-sleep 1
+settle
 if shell dumpsys activity service "$SERVICE" | grep -q 'harness-save.*port 18099'; then
   ok 'Save writes the form to the open proxy'
 else
@@ -1279,7 +1323,7 @@ panel_tap auto_start
 want=off
 if [ "$(panel_checked auto_start)" = yes ]; then want=on; fi
 panel_tap save_service
-sleep 1
+settle
 if shell dumpsys activity service "$SERVICE" |
   grep -q "harness-save.*auto-start $want"; then
   ok 'Save writes the switches too'
@@ -1297,8 +1341,7 @@ sleep 2
 save_profile harness-card
 shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
 sleep 2
-shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
-sleep 1
+open_panel
 if panel_home; then
   state=$(card_state harness-card)
   if [ "$state" = Stopped ]; then
@@ -1363,8 +1406,7 @@ save_profile harness-old
 shell am start-foreground-service -n "$SERVICE" \
   -a "$START" --es profile harness-old >/dev/null 2>&1
 sleep 3
-shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
-sleep 1
+open_panel
 if panel_open harness-old; then
   ok 'the proxy to rename opens'
 else
@@ -1372,18 +1414,15 @@ else
   panel_where
 fi
 if menu_pick Rename; then
-  sleep 1
   # The dialog opens on its name field with the keyboard up, so the field does
   # not have to be found among the page's own edit fields behind it.
-  if ui_dump | grep -q 'class="android.widget.EditText"'; then
+  if wait_for 'class="android.widget.EditText"' 2000; then
     input_action keyevent KEYCODE_MOVE_END
     input_action keyevent 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67 67
     input_action text harness-renamed
-    sleep 1
     close_keyboard
-    sleep 1
     if ui_tap_id button1; then
-      sleep 2
+      settle
       if shell dumpsys activity service "$SERVICE" | grep 'saved' |
         grep -q '"harness-renamed"'; then
         ok 'the menu renames a proxy'
@@ -1434,16 +1473,15 @@ step 'info marks'
 start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
 sleep 2
 save_profile harness-info
-shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
-sleep 1
+open_panel
 if panel_open harness-info; then
   ok 'a proxy opens for its info marks'
 else
   bad 'a proxy opens for its info marks'
   panel_where
 fi
-if panel_tab listener && ui_tap_id info_port; then
-  sleep 1
+if panel_tab listener && ui_tap_id info_port &&
+  wait_for 'id/alertTitle"' 2000; then
   if ui_text alertTitle | grep -q 'Port'; then
     ok 'the i next to a field explains that field'
   else
@@ -1451,31 +1489,30 @@ if panel_tab listener && ui_tap_id info_port; then
     panel_where
   fi
   back >/dev/null 2>&1
-  sleep 1
+  settle
 else
   bad 'the field carries an i'
 fi
-if panel_tab log && ui_tap_id info_log; then
-  sleep 1
+if panel_tab log && ui_tap_id info_log &&
+  wait_for 'id/alertTitle"' 2000; then
   if ui_dump | grep -q 'id/alertTitle"'; then
     ok 'the log page carries one too'
   else
     bad 'the log page carries one too'
   fi
   back >/dev/null 2>&1
-  sleep 1
+  settle
 else
   bad 'the log page carries an i'
 fi
-if menu_pick 'About this app'; then
-  sleep 1
+if menu_pick 'About this app' && wait_for 'RENAME_PROFILE' 2000; then
   if ui_dump | grep -q 'RENAME_PROFILE'; then
     ok 'About this app is in the menu and shows the contract'
   else
     bad 'About this app is in the menu and shows the contract'
   fi
   back >/dev/null 2>&1
-  sleep 1
+  settle
 else
   bad 'the menu has About this app'
 fi
@@ -1484,14 +1521,12 @@ delete_profile_by_adb harness-info
 step 'new proxy'
 # The list's way in: name it, and the proxy that was created opens itself.
 panel_home
-if panel_tap new_profile; then
-  sleep 1
+if panel_tap new_profile &&
+  wait_for 'class="android.widget.EditText"' 2000; then
   input_action text harness-new
-  sleep 1
   close_keyboard
-  sleep 1
   if ui_tap_id button1; then
-    sleep 2
+    settle
     if shell dumpsys activity service "$SERVICE" | grep 'saved' |
       grep -q '"harness-new"'; then
       ok 'New proxy is saved under its name'
@@ -1520,8 +1555,7 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
     -a org.phonelink.proxy.action.SAVE_PROFILE --es profile "harness-$i" >/dev/null 2>&1
   sleep 1
 done
-shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
-sleep 1
+open_panel
 if panel_home; then
   ok 'the list is showing'
 else
@@ -1544,18 +1578,16 @@ for _ in 1 2 3 4 5 6 7 8; do
     break
   fi
   swipe 1300 2200 1300 1200 200
-  sleep 1
+  settle
 done
 if [ "$scrolled" = yes ]; then
   ok 'New proxy is still reachable under ten cards'
-  if ui_tap_id new_profile; then
-    sleep 1
+  if ui_tap_id new_profile &&
+    wait_for 'class="android.widget.EditText"' 2000; then
     input_action text harness-eleven
-    sleep 1
     close_keyboard
-    sleep 1
     if ui_tap_id button1; then
-      sleep 2
+      settle
       if shell dumpsys activity service "$SERVICE" | sed -n '/  saved/,$p' |
         grep -q '"harness-eleven"'; then
         ok 'and it saves an eleventh proxy'
@@ -1582,9 +1614,7 @@ for i in 1 2 3 4 5 6 7 8 9 10 eleven; do
   sleep 1
 done
 home >/dev/null 2>&1
-sleep 1
-shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
-sleep 1
+open_panel
 report=$(shell dumpsys activity service "$SERVICE" 2>/dev/null |
   sed -n '/  saved/,$p' | grep -o '"harness-[0-9]*"' | wc -l)
 if [ "${report:-1}" -eq 0 ]; then
@@ -1603,19 +1633,17 @@ shell am start-foreground-service -n "$SERVICE" \
   -a "$START" --es profile harness-panel >/dev/null 2>&1
 sleep 3
 if through_proxy; then ok 'the listener still serves'; else bad 'the listener still serves'; fi
-shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
-sleep 1
+open_panel
 if panel_open harness-panel; then
   ok 'the proxy with its log is reachable'
 else
   bad 'the proxy with its log is reachable'
   panel_where
 fi
-sleep 2
 # The counters and the log share the Log segment now, so nothing has to be
 # scrolled: a node below the fold would not be in a dump at all.
 panel_tab log
-sleep 1
+wait_for 'id/traffic"' 3000 || true
 traffic=$(ui_dump)
 if printf '%s' "$traffic" | grep -q 'id/traffic"'; then
   ok 'the proxy page shows the traffic line'
@@ -1642,17 +1670,9 @@ else
   bad 'and the state changes with their port'
 fi
 panel_tap log_clear
-# Clearing is a redraw like any other: it is asserted to happen, not to have
-# happened before the next dump could be taken.
-cleared=no
-for _ in 1 2 3 4 5; do
-  if ! ui_dump | grep -q 'saved configuration'; then
-    cleared=yes
-    break
-  fi
-  sleep 1
-done
-if [ "$cleared" = yes ]; then
+# Clearing is a redraw like any other: the screen is watched until it stops
+# saying what it said, rather than asked again and again.
+if wait_gone 'saved configuration' 3000; then
   ok 'Clear empties the log'
 else
   bad 'Clear empties the log'
