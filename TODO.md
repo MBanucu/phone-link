@@ -95,27 +95,15 @@ list is empty.
       (mandatory), and both claiming the SSID is fine, since that is a predicate
       rather than a binding.
 
-## A failure that points at itself
+## A failure points at itself
 
-- [ ] Make a failed check say where it failed without a person reading the run.
-      Today `bad "the panel lists a configuration saved over adb"` prints the
-      claim and, in some steps, `panel_where`; working out *why* means opening
-      the artifacts and correlating three timelines by hand — the harness's own
-      output, `actions.csv` (the phone's instants) and `ui-index.csv` (which
-      capture was which), with `clock.txt` to place them in the video. What
-      should be there instead: every check recorded with the harness file and
-      line that made it (`BASH_LINENO`, `FUNCNAME`, `$0`), the step it belongs
-      to, its verdict and the phone instant it was decided at, in one
-      `checks.csv` beside `timings.csv`; and on failure the harness printing, by
-      itself, the last handful of things that happened before it — the actions
-      and captures from the CSVs around that instant, the screen that was
-      captured (or the fact that no capture could be taken, which is itself the
-      answer when an app has gone from the stack), and whether the previous
-      check in the same step passed. The pieces exist — the capture index, the
-      action log, the clock mapping, the per-step timings — the work is one
-      timeline assembled at the end of a step rather than a hunt after a run.
-      Worth doing before the frames wish, because the frames then hang off the
-      instants this produces instead of being guessed.
+- [x] Every check is a row in `checks.csv` — step, verdict, harness file and
+      line, function, the laptop instant, the claim — and a failure prints, by
+      itself, the previous check in its step, the phone's clock and the phone's
+      last three actions and two captures. What is left is the screen: the
+      capture the phone had at that instant is one adb `cat` away from the file
+      it already names, and belongs in the run's folder next to the frame
+      (wish "A failure brings its own pictures") rather than only in a log line.
 
 ## Files too big to work in
 
@@ -140,19 +128,23 @@ list is empty.
       to. The point is not to make it fast once, but to know which part got
       slower when it does — a check with no timing is a check nobody can watch.
 
-## Deleting a proxy while it runs
+## One step, not the whole run
 
-- [ ] No step deletes a saved proxy while its listener is up, and the two ways of
-      doing it disagree. The panel's Delete (`confirmDeleteProfile`) sends a
-      `STOP` for the name when that proxy was running, so its port closes; the
-      adb `DELETE_PROFILE` (`ProxyService.deleteSaved`) drops the configuration
-      and leaves the listener running — its comment says the listener "keeps its
-      port but loses the name it is listed under", and nothing does that, so the
-      service holds a listener under a name the store no longer has, `dumpsys`
-      shows it, the list has no card for it, and no panel page can stop it
-      because the page went with the profile. What to write: two proxies
-      running, delete one — from the menu, and over adb — and require the same
-      outcome both ways (the port closes or the listener gets a name the panel
-      can still show, the other proxy keeps serving, the card is gone and
-      `dumpsys` lists only what the list shows). The menu's Delete is not
-      exercised by any step today, running or stopped.
+- [ ] A run costs four to five minutes, and changing one step means running all
+      twenty. A `PHONE_LIVE_ONLY` (comma-separated step names) would cut that:
+      run the steps asked for and say, in the log and in `timings.csv`, that the
+      run was partial so it can never be mistaken for a green one. The steps are
+      not independent — most assume the app is installed and a proxy saved — so
+      the filter needs a small preamble (install, unlock, a proxy) marked as
+      such, and a partial run should not write the `TOTAL` row that the history
+      is compared by.
+
+## The rest of the menu
+
+- [ ] `Save as` and `All events` are the two menu items no step has ever
+      pressed; `Delete` was in the same state until the delete-while-running
+      step. Both are cheap to write now that the panel helpers exist: Save as
+      with a new name has to leave the old proxy alone and open the new one, and
+      Save as onto an existing name has to ask before overwriting; All events
+      has to show more than the open proxy's own log and say what it is when
+      there is nothing in it.
