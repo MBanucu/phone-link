@@ -734,10 +734,21 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         if (live != null) {
             // This proxy's own line, whether or not others are running too.
             footerState.setText(live.state.describe());
-        } else if (!ProxyRuntime.running().isEmpty()) {
-            footerState.setText(R.string.footer_not_this);
         } else {
-            footerState.setText(R.string.footer_stopped);
+            // A start adds this proxy; only a listener that already holds its
+            // port is replaced, so the line says which one this would be.
+            int port = formPort();
+            switch (ProxyState.footer(ProxyRuntime.states(), port)) {
+                case REPLACES:
+                    footerState.setText(getString(R.string.footer_replaces, port));
+                    break;
+                case BESIDE:
+                    footerState.setText(R.string.footer_beside);
+                    break;
+                default:
+                    footerState.setText(R.string.footer_stopped);
+                    break;
+            }
         }
         renderBattery();
     }
@@ -1020,7 +1031,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
      */
     private void toggleFromCard(String name) {
         if (isRunning(name)) {
-            stopListening();
+            stopListening(name);
             return;
         }
         if (ConfigStore.profile(this, name) == null) {
@@ -1038,7 +1049,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
             return;
         }
         if (isRunning(editing)) {
-            stopListening();
+            stopListening(editing);
             return;
         }
         ProxyConfig config;
@@ -1064,8 +1075,21 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
                 .putExtra(ConfigStore.EXTRA_PROFILE, editing));
     }
 
-    private void stopListening() {
-        startService(new Intent(this, ProxyService.class).setAction(ProxyService.ACTION_STOP));
+    /**
+     * Stop one proxy's listener; the others keep listening and the service goes
+     * away with the last one. A page and a card both mean that card's proxy, so
+     * neither can stop a proxy the button is not about.
+     */
+    private void stopListening(String name) {
+        startService(new Intent(this, ProxyService.class)
+                .setAction(ProxyService.ACTION_STOP)
+                .putExtra(ConfigStore.EXTRA_PROFILE, name));
+    }
+
+    /** The port the form would start on, for a footer that has to name it. */
+    private int formPort() {
+        ProxyConfig saved = editing == null ? null : ConfigStore.profile(this, editing);
+        return readPortOr(saved == null ? 0 : saved.port);
     }
 
     private int readPort() {

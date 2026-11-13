@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A page's Start and Stop mean that page's proxy, and the line under them says
+  what Start will do. `Stop` sent a bare `STOP`, which stops *every* listener, so
+  with two proxies up the button under one of them closed both; it now names its
+  proxy, as does a card's Stop, and the others keep listening. The footer no
+  longer claims `Another proxy is running — Start switches to this one`, which
+  stopped being true when the service learned to hold more than one listener: it
+  says `Stopped — Start adds this one beside the others`, or `Stopped — port N is
+  another proxy's; Start replaces it` when a listener already holds the port the
+  form would use. The toggle's and the card's `i` dialogs now say the same, and
+  that starting marks the proxy *in use* — the mark on its card, which is what
+  the tile and a reboot start. Measured on the phone: with `laptop` listening on
+  1081 and `footer-check` open on 18082, the footer said the old sentence, Start
+  left both ports listening, and Stop closed both; after the change the footer
+  says it adds this one, Start opens 18082 beside 1081, and Stop closes 18082 and
+  leaves 1081 alone.
+- The harness no longer gives up on the capture service after three seconds. A
+  freshly installed app's accessibility service can be held back by this phone's
+  own startup policy, and a run that came up without it fell back to uiautomator
+  and lost 27 checks that need the service — one run did exactly that. It now
+  waits up to thirty seconds for a capture to come back before deciding.
 - A touch or a drag no longer runs on top of the one before it. The capture
   service dispatched gestures and returned, so four drags 1 ms apart went down
   as one three-fingered gesture that moved nothing, and the tap after them was

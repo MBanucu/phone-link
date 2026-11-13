@@ -34,7 +34,8 @@
     <string name="state_waiting">Waiting</string>
     <string name="state_stopped">Stopped</string>
     <string name="footer_stopped">Stopped — nothing is listening for this proxy</string>
-    <string name="footer_not_this">Another proxy is running — Start switches to this one</string>
+    <string name="footer_beside">Stopped — Start adds this one beside the others</string>
+    <string name="footer_replaces">Stopped — port %1$d is another proxy\'s; Start replaces it</string>
     <string name="all_events_title">Everything that happened</string>
     <string name="all_events_empty">Nothing has happened yet in this session.</string>
 
@@ -98,13 +99,13 @@
     <string name="info_revert_title">Revert</string>
     <string name="info_revert">Throw the unsaved edits away and show what the store holds for this proxy.</string>
     <string name="info_toggle_title">Start and stop</string>
-    <string name="info_toggle">Start this proxy with the settings on these pages — the form is stored first — or stop the running listener. Which one the button offers follows the state of this proxy.</string>
+    <string name="info_toggle">Start this proxy with the settings on these pages — the form is stored first — or stop it. Start adds a listener: the proxies already running keep listening, unless one of them holds this port, which this one then takes over. Starting also marks this proxy in use, the mark on its card — that is the proxy the Quick Settings tile and a restart after a reboot start. Stop stops this proxy alone; the service goes away with the last listener.</string>
     <string name="info_new_title">New proxy</string>
     <string name="info_new">Another proxy: it copies this one\'s credentials and network and takes the next free port, then opens for its own settings.</string>
     <string name="info_log_title">This proxy\'s log</string>
     <string name="info_log">The last 200 things that happened to this proxy, newest first, plus the bytes this run moved and a sparkline of the last minute. It lives in memory; `adb logcat -s phone-link-proxy` keeps the full record.</string>
     <string name="info_card_toggle_title">Start or stop from the list</string>
-    <string name="info_card_toggle">Start this proxy with its saved settings without opening it, or stop it when it is the one running.</string>
+    <string name="info_card_toggle">Start this proxy with its saved settings without opening it, or stop it while it is running. Both are about this proxy alone: the others keep listening, and Start marks it in use, which is what the tile starts.</string>
 
     <string name="tile_label">Proxy</string>
     <string name="tile_listening">listening</string>

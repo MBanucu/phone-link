@@ -461,7 +461,14 @@ adb shell am start-foreground-service -n org.phonelink.proxy/.ProxyService \
 ```
 
 `STOP` alone stops them all; `STOP --es profile NAME` stops that one and leaves
-the rest listening, and `STOP --ei port N` stops whatever holds that port.
+the rest listening, and `STOP --ei port N` stops whatever holds that port. A
+button in the panel means one proxy, never all of them: `Start` on a card or on
+a page starts that proxy and `Stop` stops that proxy — a page whose proxy is not
+running says which of the two a start would be, `Stopped — Start adds this one
+beside the others`, or `Stopped — port 18081 is another proxy's; Start replaces
+it` when a listener already holds its port. `Start` also marks that proxy *in
+use*, the mark on its card, which is the one the tile and a restart at boot
+start; the panel's `i` marks say so.
 `dumpsys` lists every running listener with its port, its bytes and its clients,
 then the counters of all of them; the notification names them (`2 proxies:
 "laptop" on 1081, "hotel" on 1082`), and the panel's list marks every card that

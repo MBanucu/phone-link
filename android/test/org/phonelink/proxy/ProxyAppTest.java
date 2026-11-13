@@ -379,6 +379,22 @@ public final class ProxyAppTest {
             assertEqual("not listening", ProxyState.summary(new ArrayList<>()), "none");
         });
 
+        test("the footer says what a start would do", () -> {
+            // Nothing running: the plain stopped line.
+            assertEqual("NOTHING", String.valueOf(
+                    ProxyState.footer(new ArrayList<>(), 1080)), "nothing running");
+            // Another proxy on another port: a start adds this one.
+            assertEqual("BESIDE", String.valueOf(ProxyState.footer(Arrays.asList(
+                    ProxyState.listening("laptop", 1081, 0)), 1080)), "another port");
+            // A listener already holding this port is the one start replaces.
+            assertEqual("REPLACES", String.valueOf(ProxyState.footer(Arrays.asList(
+                    ProxyState.listening("laptop", 1081, 0),
+                    ProxyState.listening("hotel", 1080, 2)), 1080)), "same port");
+            // A port the form has not got right says nothing about replacing it.
+            assertEqual("BESIDE", String.valueOf(ProxyState.footer(Arrays.asList(
+                    ProxyState.listening("laptop", 1081, 0)), 0)), "no port");
+        });
+
         test("running separates a paused service from a stopped one", () -> {
             assertTrue(!ProxyState.stopped().running, "stopped is not running");
             assertTrue(ProxyState.waiting().running, "waiting is running");

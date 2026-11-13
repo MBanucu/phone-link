@@ -116,6 +116,37 @@ final class ProxyState {
     }
 
     /**
+     * Which line an open proxy that is not running needs under its button.
+     *
+     * <p>A start adds a listener, and the only thing it ever replaces is a
+     * listener that already holds the port — so the line under the button says
+     * which of those two it is rather than promising a switch.
+     */
+    enum Footer {
+        /** Nothing is running at all. */
+        NOTHING,
+        /** Others are running: this one would listen beside them. */
+        BESIDE,
+        /** Another listener holds this port: a start would replace it. */
+        REPLACES
+    }
+
+    /** {@link Footer} for a proxy that is not running, started on that port. */
+    static Footer footer(List<ProxyState> states, int port) {
+        if (states.isEmpty()) {
+            return Footer.NOTHING;
+        }
+        if (port > 0) {
+            for (ProxyState state : states) {
+                if (state.port == port) {
+                    return Footer.REPLACES;
+                }
+            }
+        }
+        return Footer.BESIDE;
+    }
+
+    /**
      * All of them as one state, for the tile: on if anything is listening, and
      * the clients of everything put together.
      */
