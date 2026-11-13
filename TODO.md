@@ -61,20 +61,89 @@ list is empty.
       none of it — a signed APK on a release is installable and updatable from
       the phone — and is worth having from the first tag whatever else happens.
 
-## The page says Start switches to this one
+## A stable proxy and a test proxy on the same phone
 
-- [ ] The footer under an open proxy that is not running, while something else
-      is, says "Another proxy is running — Start switches to this one"
-      (`footer_not_this`, shown by `MainActivity.renderPending()` whenever
-      `ProxyRuntime.forName(editing) == null` and the list is not empty). It is
-      true only in the narrow case where the running proxy holds the same port:
-      `ProxyService.start()` replaces a listener only when the port is taken,
-      otherwise it adds one, so pressing Start on a page adds a second proxy
-      beside the first and stops nothing. What does change is the "in use" mark,
-      which is only the one the tile and a restart at boot start. The same page's
-      button contradicts it: Start adds, Stop is a bare `STOP` and stops every
-      listener, not just this one. Decide what the two halves mean on a page
-      (add/remove this one, with the in-use mark named rather than implied), say
-      it in the footer and in the two `i` dialogs, and let the harness check it —
-      the `several at once` step already builds the state (two listeners up, a
-      third saved and open).
+- [ ] Testing an unstable build must not replace the proxy the phone uses every
+      day. Today it does: the harness installs the app under test over the
+      installed one (`adb install -r`, the same package, so the same store), and
+      every step that saves or deletes a profile, starts and stops listeners or
+      flips the service switches runs against the real configuration. Keeping
+      the app installed (`KEEP_APP=1`) only keeps the *last tested* build
+      installed. What is wanted: two packages on one phone — the stable one the
+      phone lives on, and an unstable one from any build — both installable, both
+      startable, listening at the same time on their own ports, with their own
+      store, their own notifications and their own Quick Settings tiles, so a
+      test run never touches the daily proxy and the daily proxy never shows up
+      in a test's list. The mechanism is mostly there: the harness takes the
+      package name from `PHONE_PROXY_PKG`, the service is addressed as
+      `$PKG/.ProxyService`, and the panel reads the package from its own
+      resources — so an `applicationId` suffix for a test build
+      (`org.phonelink.proxy` vs `org.phonelink.proxy.test`, built by `build.sh`
+      with one more `aapt2` flag) may be the whole of it. What has to be checked
+      and made explicitly package-relative: the manifest's service, receiver and
+      tile components (a `TileService` component is unique per package, and two
+      apps both offering "Proxy" in the shade is a thing to expect), the
+      notification channel and both notification ids (they are per package,
+      which is what makes two notifications possible), the `dumpsys activity
+      service` and `am start-foreground-service` commands the scripts and the
+      help text use, the preference/store file (already per package), and the
+      capture app's a11y setting, which is per component and so already fine.
+      Then the harness: install the *test* package, never the stable one, and
+      prove in a step that the other one is untouched — its dumpsys still lists
+      its listener, its store still holds its profiles. The daily proxy and the
+      unstable one also have to coexist as *listeners*: different ports
+      (mandatory), and both claiming the SSID is fine, since that is a predicate
+      rather than a binding.
+
+## Tests that run on the phone instead of over adb
+
+- [ ] Evaluate on-device testing and use it where it wins. Every check today
+      costs a round trip and, worse, a *capture*: the harness asks the phone what
+      is on screen, decides on the laptop, and taps over a broadcast. Android
+      has frameworks that run inside the device: instrumentation tests
+      (`androidx.test` with Espresso for the app's own views, UiAutomator for
+      the shade and other apps) launched with `am instrument`, the platform's
+      own (deprecated) `InstrumentationTestRunner`, `cmd uiautomator runtest`
+      with a jar built against the platform's `uiautomator.jar`, and
+      `uiautomator2`-style servers driven from the host. What has to be answered
+      first: which of them exist on *this* phone and at this API level, and what
+      each costs to build without Gradle and without dependencies — the repo
+      builds APKs with `aapt2`, `javac`, `d8` and `apksigner` by hand, and an
+      instrumentation APK needs a runner class on the device (either the
+      platform runner or a vendored `androidx.test` jar) plus a
+      `testInstrumentationRunner` in its manifest, which is more manifest than
+      a dependency-free build has ever had to carry. What would actually move:
+      assertions about the app itself (this view says that, this switch is off,
+      this page is showing), which is most of what the harness checks, and
+      waiting for a view instead of for a captured hierarchy — UiAutomator has
+      `UiDevice.wait(Until.hasObject(...))` and Espresso synchronises on the UI
+      thread by itself. What cannot move: the tunnel tests (a request from the
+      laptop through the phone's SOCKS5 port), `dumpsys`, `logcat`, the video and
+      the clock fit, and anything about the phone's network — the phone cannot
+      test the thing the phone is. A middle path worth costing: keep the harness
+      as the driver and the record, but let it call a small on-device test APK
+      for the checks that are pure UI (`am instrument` for one test class,
+      result read from its output), so the phone decides what it saw and the
+      laptop still decides what that means.
+
+## A failure that points at itself
+
+- [ ] Make a failed check say where it failed without a person reading the run.
+      Today `bad "the panel lists a configuration saved over adb"` prints the
+      claim and, in some steps, `panel_where`; working out *why* means opening
+      the artifacts and correlating three timelines by hand — the harness's own
+      output, `actions.csv` (the phone's instants) and `ui-index.csv` (which
+      capture was which), with `clock.txt` to place them in the video. What
+      should be there instead: every check recorded with the harness file and
+      line that made it (`BASH_LINENO`, `FUNCNAME`, `$0`), the step it belongs
+      to, its verdict and the phone instant it was decided at, in one
+      `checks.csv` beside `timings.csv`; and on failure the harness printing, by
+      itself, the last handful of things that happened before it — the actions
+      and captures from the CSVs around that instant, the screen that was
+      captured (or the fact that no capture could be taken, which is itself the
+      answer when an app has gone from the stack), and whether the previous
+      check in the same step passed. The pieces exist — the capture index, the
+      action log, the clock mapping, the per-step timings — the work is one
+      timeline assembled at the end of a step rather than a hunt after a run.
+      Worth doing before the frames wish, because the frames then hang off the
+      instants this produces instead of being guessed.
