@@ -41,6 +41,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A run can be asked for one of its steps. `PHONE_LIVE_ONLY="card toggle,rename"`
+  runs only the steps it names — by the name the log prints — instead of all
+  twenty-three: a step is a function now (`card toggle` is `step_card_toggle`)
+  and the run walks the list of them, so the filter costs a `case` and no step
+  is copied in order to be run on its own. The steps are not independent, so a
+  filtered run first does the little preamble any step may lean on — the phone
+  awake, the app installed, one proxy saved under the name a page opens by —
+  and says what it was asked for in the log, how many of the twenty-three
+  actually ran in the summary, and writes a `PARTIAL` row where a full run
+  writes `TOTAL`, so the history can never read a filtered run as a green one.
+  A name no step answers to stops the run with the list. `checks.csv` gains a
+  little by the same move: the `function` column names the step
+  (`step_card_toggle`) instead of `main`. Measured: `PHONE_LIVE_ONLY="panel
+  state"` is 35.4 s and 6 checks (unlock 10.4, install 5.0, the step 19.7) and
+  `PHONE_LIVE_ONLY="plain Save"` 64.4 s and 8 checks, against 304 s and 91
+  checks for the whole run.
 - A listener is asked for instead of held in the service. `ProxyService` (689
   lines) kept the sockets, the `Running` records that answered for them and the
   store's front door in one class; a listener is now `Port` (174) — the socket

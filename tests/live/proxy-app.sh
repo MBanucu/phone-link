@@ -66,6 +66,15 @@
 # step appended to result-live/timings.csv, which is never rewritten — the
 # history is what makes "is this cheap enough to run before a commit"
 # answerable. PHONE_LIVE_CAPTURE=0 skips the recording and the snapshots.
+#
+# PHONE_LIVE_ONLY="card toggle,rename" runs just the steps it names, by the
+# name the log prints, instead of all twenty-three. The steps are not
+# independent — most assume the phone is awake, the app is installed and a
+# proxy is saved under the name their page opens by — so a filtered run always
+# does that preamble (the `unlock` and `install` steps, then one proxy on the
+# test port), and says in the log and in timings.csv that it was partial: it
+# writes a PARTIAL row where a full run writes TOTAL, so the
+# history can never mistake it for a run that was green all the way through.
 set -u
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -222,6 +231,9 @@ printf 'start_ns,end_ns,kind,what\n' >"$ARTIFACTS/input.csv"
 unlocked=0
 # Set when the steps are over, so cleanup knows the exit status is its to set.
 finished=0
+# Set when PHONE_LIVE_ONLY asked for some of the steps; a partial run is never
+# written to timings.csv as a TOTAL row.
+partial=0
 # Set when this run changed the screen timeout, so the old one can go back.
 screen_timeout=""
 
@@ -282,11 +294,22 @@ cleanup() {
   local total
   total=$(awk -v start="$run_start" -v end="$(now_ms)" \
     'BEGIN { printf "%.1f", (end - start) / 1000 }')
-  timing_row TOTAL "$total" "$pass" "$fail" \
-    "$([ "$fail" -eq 0 ] && echo ok || echo failed)"
+  if [ "$partial" = 1 ]; then
+    # Never TOTAL: the history compares full runs, and a filtered one that
+    # looked like one would hide a step that was never asked for. The row still
+    # says a run happened, what it cost and how it ended.
+    timing_row PARTIAL "$total" "$pass" "$fail" partial
+  else
+    timing_row TOTAL "$total" "$pass" "$fail" \
+      "$([ "$fail" -eq 0 ] && echo ok || echo failed)"
+  fi
   printf 'timings: %s\n' "$TIMINGS"
   printf 'artifacts: %s\n' "$ARTIFACTS"
   printf '\n%d passed, %d failed\n' "$pass" "$fail"
+  if [ "$partial" = 1 ]; then
+    printf 'partial run: %d of %d steps (%s); no TOTAL row in timings.csv\n' \
+      "$steps_run" "${#STEPS[@]}" "$only"
+  fi
   if [ "$finished" = 1 ]; then
     # A run that reached its last step exits on what its checks said, which
     # includes the clock fit decided above; an interrupted one keeps the status
@@ -474,840 +497,1022 @@ if [ -z "$ADDRESS" ] || [ -z "$SSID" ]; then
 fi
 printf 'phone %s on "%s" at %s, port %s\n' "$serial" "$SSID" "$ADDRESS" "$PORT"
 
-step 'unlock'
-if unlock_phone; then
-  ok 'the phone is unlocked'
-else
-  printf 'SKIP unlocking: needs the root-only PIN (sudo -n %s/bin/phone-unlock)\n' "$ROOT"
-fi
-# screenrecord needs an unlocked screen, and the snapshots are only useful
-# once the app is on it.
-quiet_autofill
-quiet_play_protect
-# The fast path for every dump in the run, when the capture app is there. It is
-# installed and its service enabled here, so even the first step uses it, and
-# it does not depend on PHONE_LIVE_CAPTURE: that switch is about the artifacts,
-# this is about how the steps read the screen.
-if capture_start; then
-  ok 'the capture service answers a request'
-else
-  printf 'SKIP the capture service (%s); dumps stay on uiautomator, which is\n' \
-    "$CAPTURE_APK"
-  printf '     about 2.5 s each instead of about 0.3 s.\n'
-fi
-start_capture
+# --- unlock
+step_unlock() {
+  step 'unlock'
+  if unlock_phone; then
+    ok 'the phone is unlocked'
+  else
+    printf 'SKIP unlocking: needs the root-only PIN (sudo -n %s/bin/phone-unlock)\n' "$ROOT"
+  fi
+  # screenrecord needs an unlocked screen, and the snapshots are only useful
+  # once the app is on it.
+  quiet_autofill
+  quiet_play_protect
+  # The fast path for every dump in the run, when the capture app is there. It is
+  # installed and its service enabled here, so even the first step uses it, and
+  # it does not depend on PHONE_LIVE_CAPTURE: that switch is about the artifacts,
+  # this is about how the steps read the screen.
+  if capture_start; then
+    ok 'the capture service answers a request'
+  else
+    printf 'SKIP the capture service (%s); dumps stay on uiautomator, which is\n' \
+      "$CAPTURE_APK"
+    printf '     about 2.5 s each instead of about 0.3 s.\n'
+  fi
+  start_capture
 
-step 'install'
-if phone install -r -g "$APK" >/dev/null 2>&1; then
-  ok 'installs'
-else
-  bad 'installs'
-  printf '\n%d passed, %d failed\n' "$pass" "$fail"
-  exit 1
-fi
-if phone install -r "$DEVICETEST_APK" >/dev/null 2>&1; then
-  ok 'the on-device checks install'
-else
-  bad 'the on-device checks install'
-fi
-# A run that was killed leaves its own harness-* profiles behind, and a pile of
-# them pushes the next run's cards off the screen. They belong to this harness,
-# so they go before anything looks at the list.
-leftovers=$(shell dumpsys activity service "$SERVICE" 2>/dev/null |
-  grep -o '"harness-[0-9a-z-]*"' | tr -d '"' | sort -u)
-if [ -n "$leftovers" ]; then
-  printf '  clearing profiles left by an earlier run: %s\n' "$(echo $leftovers)"
-  for name in $leftovers; do
+}
+
+# --- install
+step_install() {
+  step 'install'
+  if phone install -r -g "$APK" >/dev/null 2>&1; then
+    ok 'installs'
+  else
+    bad 'installs'
+    printf '\n%d passed, %d failed\n' "$pass" "$fail"
+    exit 1
+  fi
+  if phone install -r "$DEVICETEST_APK" >/dev/null 2>&1; then
+    ok 'the on-device checks install'
+  else
+    bad 'the on-device checks install'
+  fi
+  # A run that was killed leaves its own harness-* profiles behind, and a pile of
+  # them pushes the next run's cards off the screen. They belong to this harness,
+  # so they go before anything looks at the list.
+  leftovers=$(shell dumpsys activity service "$SERVICE" 2>/dev/null |
+    grep -o '"harness-[0-9a-z-]*"' | tr -d '"' | sort -u)
+  if [ -n "$leftovers" ]; then
+    printf '  clearing profiles left by an earlier run: %s\n' "$(echo $leftovers)"
+    for name in $leftovers; do
+      shell am start-foreground-service -n "$SERVICE" \
+        -a org.phonelink.proxy.action.DELETE_PROFILE --es profile "$name" \
+        >/dev/null 2>&1
+      sleep 1
+    done
+  fi
+
+
+}
+
+# --- panel
+step_panel() {
+  step 'panel'
+  # Only a crash from this run should fail the step, and the buffer can still
+  # hold one from before.
+  phone logcat -b crash -c >/dev/null 2>&1
+  if panel_opens; then ok 'the panel opens'; else bad 'the panel opens'; fi
+  if panel_home; then
+    ok 'the panel opens on the list of proxies'
+  else
+    bad 'the panel opens on the list of proxies'
+    panel_where
+  fi
+  if ui_dump | grep -q 'id/new_profile"'; then
+    ok 'the list offers a new proxy'
+  else
+    bad 'the list offers a new proxy'
+  fi
+
+}
+
+# --- auto start
+step_auto_start() {
+  step 'auto start'
+  start_app --es ssid "$SSID" --ez any_network false --ez auto_start true
+  if wait_foreground; then
+    ok 'auto_start starts the service'
+  else
+    bad 'auto_start starts the service'
+    shell dumpsys activity services "$PKG" | head -3
+    phone logcat -d -s phone-link-proxy | tail -5
+  fi
+  save_profile harness-panel
+  open_panel
+  if panel_open harness-panel; then
+    ok 'a card opens that proxy'
+  else
+    bad 'a card opens that proxy'
+    panel_where
+  fi
+  if panel_auto_start_checked; then
+    ok 'the open proxy shows auto_start on'
+  else
+    bad 'the open proxy shows auto_start on'
+  fi
+
+}
+
+# --- header warning
+step_header_warning() {
+  step 'header warning'
+  # The mark in the header is the battery warning, so take the exemption away and
+  # put it back exactly as it was found.
+  exempt=no
+  if battery_exempt; then exempt=yes; fi
+  shell cmd deviceidle whitelist -"$PKG" >/dev/null 2>&1
+  # renderBattery() runs on resume, so leave the panel and come back.
+  home >/dev/null 2>&1
+  open_panel
+  if ui_dump | grep -q 'id/warning"'; then
+    ok 'the header warns while a reboot restart cannot work'
+  else
+    bad 'the header warns while a reboot restart cannot work'
+  fi
+  panel_tap warning
+  if wait_for 'Let the proxy restart by itself' 2000; then
+    ok 'the mark opens the battery request'
+  else
+    bad 'the mark opens the battery request'
+  fi
+  back >/dev/null 2>&1
+  settle
+  if [ "$exempt" = yes ]; then
+    shell cmd deviceidle whitelist +"$PKG" >/dev/null 2>&1
+    home >/dev/null 2>&1
+    settle
+    open_panel
+    if ui_dump | grep -q 'id/warning"'; then
+      bad 'the mark goes away with the exemption'
+    else
+      ok 'the mark goes away with the exemption'
+    fi
+  else
+    printf 'SKIP the mark going away: the phone was not exempt before this run\n'
+  fi
+
+}
+
+# --- panel state
+step_panel_state() {
+  step 'panel state'
+  open_panel
+  panel_open harness-panel
+  panel_tab service
+  state=$(ui_text_seek adb_state)
+  case $state in
+    'Wireless debugging: on'*|'Wireless debugging: off'*|\
+    'Wireless debugging: this build cannot change it'*)
+      ok 'the panel says what wireless debugging is doing' ;;
+    *)
+      bad 'the panel says what wireless debugging is doing' "$state" ;;
+  esac
+
+}
+
+# --- allowed network
+step_allowed_network() {
+  step 'allowed network'
+  start_app --es ssid "$SSID" --ez any_network false
+  if wait_foreground; then ok 'service is foreground'; else bad 'service is foreground'; fi
+  if through_proxy; then ok 'request through the tunnel'; else bad 'request through the tunnel'; fi
+  if curl -sS -m 10 -o /dev/null --socks5-hostname \
+    "$USER_NAME:wrong@$ADDRESS:$PORT" https://example.com >/dev/null 2>&1; then
+    bad 'a wrong password is refused'
+  else
+    ok 'a wrong password is refused'
+  fi
+
+}
+
+# --- anonymous from the panel
+step_anonymous_from_the_panel() {
+  step 'anonymous from the panel'
+  # The open proxy is the one that starts: Start stores the form first, so the
+  # anonymous box is applied to that saved configuration and not just to a form.
+  # The one button is Start only while nothing runs, so stop first.
+  shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
+  sleep 2
+  open_panel
+  if panel_open harness-panel && panel_tab listener && panel_tap anonymous &&
+    panel_toggle; then
+    if wait_anonymous yes; then
+      ok 'the anonymous checkbox is applied by Start'
+    else
+      bad 'the anonymous checkbox is applied by Start'
+    fi
+    # Put authentication back through the same controls: the running proxy is
+    # stopped, the box is ticked again and it is started, so the tunnel works
+    # with credentials again and nobody without them does.
+    panel_toggle
+    panel_tab listener
+    panel_tap anonymous
+    panel_toggle
+    if wait_anonymous no; then
+      ok 'unticking it asks for a password again'
+    else
+      bad 'unticking it asks for a password again'
+    fi
+    if through_proxy; then
+      ok 'and the credentials still work'
+    else
+      bad 'and the credentials still work'
+    fi
+  else
+    bad 'the panel controls are reachable'
+  fi
+
+}
+
+# --- unrelated SSID
+step_unrelated_ssid() {
+  step 'unrelated SSID'
+  start_app --es ssid "not-$SSID" --ez any_network false
+  sleep 2
+  if port_closed; then ok 'the port is closed'; else bad 'the port is closed'; fi
+  if foreground; then ok 'the service keeps running while paused'; else
+    bad 'the service keeps running while paused'
+  fi
+
+}
+
+# --- predicate bypass
+step_predicate_bypass() {
+  step 'predicate bypass'
+  start_app --es ssid "not-$SSID" --ez any_network true
+  sleep 2
+  if through_proxy; then ok 'any_network serves requests'; else bad 'any_network serves requests'; fi
+
+}
+
+# --- profiles over adb
+step_profiles_over_adb() {
+  step 'profiles over adb'
+  start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
+  sleep 2
+  if save_profile harness-one; then
+    if phone logcat -d -s phone-link-proxy | grep -q 'saved configuration "harness-one"'; then
+      ok 'SAVE_PROFILE keeps the running configuration'
+    else
+      bad 'SAVE_PROFILE keeps the running configuration'
+    fi
+    if shell dumpsys activity service "$SERVICE" | grep -q '"harness-one" — port'; then
+      ok 'dumpsys lists what is saved'
+    else
+      bad 'dumpsys lists what is saved'
+    fi
+    open_panel
+    if panel_home &&
+      ui_dump | tr '>' '\n' | grep 'id/card_name"' | grep -q 'text="harness-one"'; then
+      ok 'the panel lists a configuration saved over adb'
+    else
+      bad 'the panel lists a configuration saved over adb'
+      panel_where
+    fi
+    # Move the running configuration somewhere else, then start the saved one by
+    # name: it has to come back exactly as it was saved.
+    start_app --es ssid "$SSID" --ez any_network false --ei port 19999
+    sleep 2
     shell am start-foreground-service -n "$SERVICE" \
-      -a org.phonelink.proxy.action.DELETE_PROFILE --es profile "$name" \
+      -a org.phonelink.proxy.action.START --es profile harness-one >/dev/null 2>&1
+    sleep 3
+    if through_proxy; then
+      ok 'START --es profile brings a saved configuration back'
+    else
+      bad 'START --es profile brings a saved configuration back'
+    fi
+    # A configuration is the whole panel, so the two service switches come back
+    # with it: turn them off, start the saved one by name, and read the store's
+    # answer out of dumpsys.
+    start_app --es ssid "$SSID" --ez any_network false --ez auto_start false \
+      --ez adb_wifi false
+    sleep 2
+    shell am start-foreground-service -n "$SERVICE" \
+      -a org.phonelink.proxy.action.START --es profile harness-one >/dev/null 2>&1
+    sleep 3
+    now=$(shell dumpsys activity service "$SERVICE")
+    if printf '%s\n' "$now" | grep -q 'auto-start  true'; then
+      ok 'the saved auto-start comes back with the configuration'
+    else
+      bad 'the saved auto-start comes back with the configuration'
+    fi
+    if printf '%s\n' "$now" | grep -q 'adb_wifi    true'; then
+      ok 'the saved wireless-debugging switch comes back with it'
+    else
+      bad 'the saved wireless-debugging switch comes back with it'
+    fi
+    shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
+    sleep 2
+    shell am start-foreground-service -n "$SERVICE" \
+      -a org.phonelink.proxy.action.START --es profile harness-absent >/dev/null 2>&1
+    sleep 2
+    if port_closed; then
+      ok 'an unknown profile name starts nothing'
+    else
+      bad 'an unknown profile name starts nothing'
+    fi
+    if phone logcat -d -s phone-link-proxy |
+      grep -q 'no saved configuration called "harness-absent"'; then
+      ok 'and says why'
+    else
+      bad 'and says why'
+    fi
+    # Leave the harness on the configuration the remaining steps expect.
+    start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
+    sleep 2
+    shell am start-foreground-service -n "$SERVICE" \
+      -a org.phonelink.proxy.action.DELETE_PROFILE --es profile harness-one \
+      >/dev/null 2>&1
+    sleep 2
+    # Only the saved lines: the dump also names the proxy that is in use.
+    if shell dumpsys activity service "$SERVICE" | grep 'saved' |
+      grep -q '"harness-one"'; then
+      bad 'DELETE_PROFILE removes a saved configuration'
+    else
+      ok 'DELETE_PROFILE removes a saved configuration'
+    fi
+  fi
+
+}
+
+# --- plain Save
+step_plain_save() {
+  step 'plain Save'
+  # Save on the open proxy writes the whole form back to it — listener and the
+  # service switches — without going through Save as….
+  start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
+  sleep 2
+  save_profile harness-save
+  open_panel
+  if panel_open harness-save; then
+    ok 'the card opens the proxy to save'
+  else
+    bad 'the card opens the proxy to save'
+    panel_where
+  fi
+  panel_tab listener
+  panel_tap port
+  # Typing here replaces the field in place rather than clearing it with a dozen
+  # Backspaces and an `input text` of its own: the field already has the focus,
+  # and a sequence takes it from there. Tapping the field raised the keyboard,
+  # which covers the Save row, so the phone puts it away before anything looks
+  # for that button — and only if one is really up.
+  if ! sequence 'text 18099; wait-quiet 250; keyboard-off; wait-quiet 300'; then
+    bad 'the port field takes a number'
+    panel_where
+  fi
+  panel_tap save
+  settle
+  if shell dumpsys activity service "$SERVICE" | grep -q 'harness-save.*port 18099'; then
+    ok 'Save writes the form to the open proxy'
+  else
+    bad 'Save writes the form to the open proxy'
+  fi
+  panel_tab service
+  panel_tap auto_start
+  want=off
+  if [ "$(panel_checked auto_start)" = yes ]; then want=on; fi
+  panel_tap save_service
+  settle
+  if shell dumpsys activity service "$SERVICE" |
+    grep -q "harness-save.*auto-start $want"; then
+    ok 'Save writes the switches too'
+  else
+    bad "Save writes the switches too (wanted $want)"
+    panel_where
+  fi
+  delete_profile_by_adb harness-save
+
+}
+
+# --- card toggle
+step_card_toggle() {
+  step 'card toggle'
+  # The card starts and stops a proxy by itself. What the words on it say while it
+  # does that is checked on the phone, inside the app (step 'the page from the
+  # inside'); what only the laptop can see is the listener: up after the press,
+  # serving this proxy's credentials, and gone after the second one.
+  start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
+  sleep 2
+  save_profile harness-card
+  shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
+  sleep 2
+  open_panel
+  if panel_home; then
+    if card_toggle harness-card; then
+      sleep 2
+      if foreground; then ok 'the card starts that proxy'; else
+        bad 'the card starts that proxy'
+      fi
+      if through_proxy; then ok 'and requests go through it'; else
+        bad 'and requests go through it'
+      fi
+      if card_toggle harness-card; then
+        sleep 2
+        if foreground; then bad 'a second press stops it'; else
+          ok 'a second press stops it'
+        fi
+      else
+        bad 'the card button can be pressed again'
+      fi
+    else
+      bad 'the card button can be pressed'
+      panel_where
+    fi
+  else
+    bad 'the list is reachable'
+  fi
+  delete_profile_by_adb harness-card
+
+}
+
+# --- rename
+step_rename() {
+  step 'rename'
+  # A name is a label on the settings, so renaming moves the settings, the
+  # service switches and the mark of which proxy is in use under the new name.
+  start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
+  sleep 2
+  save_profile harness-old
+  # Start it by name, so that proxy is the one the service reports as in use.
+  shell am start-foreground-service -n "$SERVICE" \
+    -a "$START" --es profile harness-old >/dev/null 2>&1
+  sleep 3
+  open_panel
+  if panel_open harness-old; then
+    ok 'the proxy to rename opens'
+  else
+    bad 'the proxy to rename opens'
+    panel_where
+  fi
+  if menu_pick Rename; then
+    # The dialog opens on its name field, so the new name goes straight into the
+    # focused field and the button follows it — one straight line, one message.
+    # The dialog's buttons leaving the screen is what says it closed: the page
+    # behind has edit fields of its own and would answer any question about
+    # "no EditText on screen" wrongly.
+    if sequence 'wait class=android.widget.EditText 2000; text harness-renamed; tap-id button1 3000; wait-gone id=button1 3000'; then
+      if shell dumpsys activity service "$SERVICE" | grep 'saved' |
+        grep -q '"harness-renamed"'; then
+        ok 'the menu renames a proxy'
+      else
+        bad 'the menu renames a proxy'
+        panel_where
+      fi
+      if shell dumpsys activity service "$SERVICE" | grep 'saved' |
+        grep -q '"harness-old"'; then
+        bad 'and the old name is gone'
+      else
+        ok 'and the old name is gone'
+      fi
+      if [ "$(ui_text header_title)" = harness-renamed ]; then
+        ok 'the page follows the new name'
+      else
+        bad "the page follows the new name ($(ui_text header_title))"
+      fi
+    else
+      bad 'the rename dialog can be answered'
+      panel_where
+    fi
+  else
+    bad "the menu offers Rename"
+  fi
+  # The service does the same from adb, for an agent with no screen.
+  shell am start-foreground-service -n "$SERVICE" \
+    -a org.phonelink.proxy.action.RENAME_PROFILE --es profile harness-renamed \
+    --es to harness-adb >/dev/null 2>&1
+  sleep 2
+  if shell dumpsys activity service "$SERVICE" | grep 'saved' |
+    grep -q '"harness-adb"'; then
+    ok 'RENAME_PROFILE renames from adb'
+  else
+    bad 'RENAME_PROFILE renames from adb'
+  fi
+  if shell dumpsys activity service "$SERVICE" | grep -q 'profile *"harness-adb"'; then
+    ok 'and the proxy in use keeps its place'
+  else
+    bad 'and the proxy in use keeps its place'
+  fi
+  delete_profile_by_adb harness-adb
+
+}
+
+# --- info marks
+step_info_marks() {
+  step 'info marks'
+  # Every control carries its own i, and the app's own Info is behind the burger.
+  start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
+  sleep 2
+  save_profile harness-info
+  open_panel
+  if panel_open harness-info; then
+    ok 'a proxy opens for its info marks'
+  else
+    bad 'a proxy opens for its info marks'
+    panel_where
+  fi
+  if panel_tab listener && sequence 'tap-id info_port 5000; wait id=alertTitle 2000'; then
+    if ui_text alertTitle | grep -q 'Port'; then
+      ok 'the i next to a field explains that field'
+    else
+      bad 'the i next to a field explains that field'
+      panel_where
+    fi
+    back >/dev/null 2>&1
+    settle
+  else
+    bad 'the field carries an i'
+  fi
+  if panel_tab log && sequence 'tap-id info_log 5000; wait id=alertTitle 2000'; then
+    if ui_dump | grep -q 'id/alertTitle"'; then
+      ok 'the log page carries one too'
+    else
+      bad 'the log page carries one too'
+    fi
+    back >/dev/null 2>&1
+    settle
+  else
+    bad 'the log page carries an i'
+  fi
+  if menu_pick 'About this app' && wait_for 'RENAME_PROFILE' 2000; then
+    if ui_dump | grep -q 'RENAME_PROFILE'; then
+      ok 'About this app is in the menu and shows the contract'
+    else
+      bad 'About this app is in the menu and shows the contract'
+    fi
+    back >/dev/null 2>&1
+    settle
+  else
+    bad 'the menu has About this app'
+  fi
+  delete_profile_by_adb harness-info
+
+}
+
+# --- new proxy
+step_new_proxy() {
+  step 'new proxy'
+  # The list's way in: name it, and the proxy that was created opens itself.
+  panel_home
+  if panel_tap new_profile &&
+    sequence 'wait class=android.widget.EditText 2000; text harness-new; tap-id button1 3000; wait id=back 3000; wait-quiet 250'; then
+    if shell dumpsys activity service "$SERVICE" | grep 'saved' |
+      grep -q '"harness-new"'; then
+      ok 'New proxy is saved under its name'
+    else
+      bad 'New proxy is saved under its name'
+      panel_where
+    fi
+    if ui_dump | grep -q 'id/back"'; then
+      ok 'and it opens for its settings'
+    else
+      bad 'and it opens for its settings'
+    fi
+  else
+    bad 'the list has a New proxy button'
+    panel_where
+  fi
+  delete_profile_by_adb harness-new
+
+}
+
+# --- ten proxies
+step_ten_proxies() {
+  step 'ten proxies'
+  # Ten saved proxies push the list past one screen. `New proxy` sits under it,
+  # so it has to stay reachable by scrolling and still save an eleventh.
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    shell am start-foreground-service -n "$SERVICE" \
+      -a org.phonelink.proxy.action.SAVE_PROFILE --es profile "harness-$i" >/dev/null 2>&1
+    sleep 1
+  done
+  open_panel
+  if panel_home; then
+    ok 'the list is showing'
+  else
+    bad 'the list is showing'
+    panel_where
+  fi
+  total=$(shell dumpsys activity service "$SERVICE" 2>/dev/null |
+    grep -o '"harness-[0-9]*"' | wc -l)
+  if [ "$total" -ge 10 ]; then
+    ok 'ten proxies are saved'
+  else
+    bad "ten proxies are saved ($total in the dump)"
+  fi
+  # A dump holds only what is on screen, so the button is reached the way a hand
+  # would reach it: the phone scrolls the list until it is there.
+  if sequence 'scroll-to id=new_profile 10000'; then
+    ok 'New proxy is still reachable under ten cards'
+    if ui_tap_id new_profile &&
+      sequence 'wait class=android.widget.EditText 2000; text harness-eleven; tap-id button1 3000; wait id=back 3000; wait-quiet 250'; then
+      if shell dumpsys activity service "$SERVICE" | sed -n '/  saved/,$p' |
+        grep -q '"harness-eleven"'; then
+        ok 'and it saves an eleventh proxy'
+      else
+        bad 'and it saves an eleventh proxy'
+        panel_where
+      fi
+    else
+      bad 'New proxy can be tapped'
+      panel_where
+    fi
+  else
+    bad 'New proxy is still reachable under ten cards'
+    panel_where
+  fi
+  # Leave the list as short as the next steps expect: the panel reads the store
+  # on resume, so it is left and re-opened after the ten are gone.
+  for i in 1 2 3 4 5 6 7 8 9 10 eleven; do
+    shell am start-foreground-service -n "$SERVICE" \
+      -a org.phonelink.proxy.action.DELETE_PROFILE --es profile "harness-$i" \
       >/dev/null 2>&1
     sleep 1
   done
-fi
-
-
-step 'panel'
-# Only a crash from this run should fail the step, and the buffer can still
-# hold one from before.
-phone logcat -b crash -c >/dev/null 2>&1
-if panel_opens; then ok 'the panel opens'; else bad 'the panel opens'; fi
-if panel_home; then
-  ok 'the panel opens on the list of proxies'
-else
-  bad 'the panel opens on the list of proxies'
-  panel_where
-fi
-if ui_dump | grep -q 'id/new_profile"'; then
-  ok 'the list offers a new proxy'
-else
-  bad 'the list offers a new proxy'
-fi
-
-step 'auto start'
-start_app --es ssid "$SSID" --ez any_network false --ez auto_start true
-if wait_foreground; then
-  ok 'auto_start starts the service'
-else
-  bad 'auto_start starts the service'
-  shell dumpsys activity services "$PKG" | head -3
-  phone logcat -d -s phone-link-proxy | tail -5
-fi
-save_profile harness-panel
-open_panel
-if panel_open harness-panel; then
-  ok 'a card opens that proxy'
-else
-  bad 'a card opens that proxy'
-  panel_where
-fi
-if panel_auto_start_checked; then
-  ok 'the open proxy shows auto_start on'
-else
-  bad 'the open proxy shows auto_start on'
-fi
-
-step 'header warning'
-# The mark in the header is the battery warning, so take the exemption away and
-# put it back exactly as it was found.
-exempt=no
-if battery_exempt; then exempt=yes; fi
-shell cmd deviceidle whitelist -"$PKG" >/dev/null 2>&1
-# renderBattery() runs on resume, so leave the panel and come back.
-home >/dev/null 2>&1
-open_panel
-if ui_dump | grep -q 'id/warning"'; then
-  ok 'the header warns while a reboot restart cannot work'
-else
-  bad 'the header warns while a reboot restart cannot work'
-fi
-panel_tap warning
-if wait_for 'Let the proxy restart by itself' 2000; then
-  ok 'the mark opens the battery request'
-else
-  bad 'the mark opens the battery request'
-fi
-back >/dev/null 2>&1
-settle
-if [ "$exempt" = yes ]; then
-  shell cmd deviceidle whitelist +"$PKG" >/dev/null 2>&1
   home >/dev/null 2>&1
-  settle
   open_panel
-  if ui_dump | grep -q 'id/warning"'; then
-    bad 'the mark goes away with the exemption'
+  report=$(shell dumpsys activity service "$SERVICE" 2>/dev/null |
+    sed -n '/  saved/,$p' | grep -o '"harness-[0-9]*"' | wc -l)
+  if [ "${report:-1}" -eq 0 ]; then
+    ok 'the ten are gone again'
   else
-    ok 'the mark goes away with the exemption'
+    bad "the ten are gone again ($report left)"
   fi
-else
-  printf 'SKIP the mark going away: the phone was not exempt before this run\n'
-fi
 
-step 'panel state'
-open_panel
-panel_open harness-panel
-panel_tab service
-state=$(ui_text_seek adb_state)
-case $state in
-  'Wireless debugging: on'*|'Wireless debugging: off'*|\
-  'Wireless debugging: this build cannot change it'*)
-    ok 'the panel says what wireless debugging is doing' ;;
-  *)
-    bad 'the panel says what wireless debugging is doing' "$state" ;;
-esac
+}
 
-step 'allowed network'
-start_app --es ssid "$SSID" --ez any_network false
-if wait_foreground; then ok 'service is foreground'; else bad 'service is foreground'; fi
-if through_proxy; then ok 'request through the tunnel'; else bad 'request through the tunnel'; fi
-if curl -sS -m 10 -o /dev/null --socks5-hostname \
-  "$USER_NAME:wrong@$ADDRESS:$PORT" https://example.com >/dev/null 2>&1; then
-  bad 'a wrong password is refused'
-else
-  ok 'a wrong password is refused'
-fi
-
-step 'anonymous from the panel'
-# The open proxy is the one that starts: Start stores the form first, so the
-# anonymous box is applied to that saved configuration and not just to a form.
-# The one button is Start only while nothing runs, so stop first.
-shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
-sleep 2
-open_panel
-if panel_open harness-panel && panel_tab listener && panel_tap anonymous &&
-  panel_toggle; then
-  if wait_anonymous yes; then
-    ok 'the anonymous checkbox is applied by Start'
+# --- several at once
+step_several_at_once() {
+  step 'several at once'
+  # The list is a list of listeners: two saved proxies, on two ports, with their
+  # own credentials, both serving at the same time.
+  PORT2=$((PORT + 1))
+  USER2=phonelink-second
+  PASSWORD2=phonelink-second-password
+  start_app --es ssid "$SSID" --ez any_network false
+  wait_foreground || true
+  save_profile harness-a
+  start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT2" \
+    --es user "$USER2" --es password "$PASSWORD2"
+  wait_foreground || true
+  save_profile harness-b
+  shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
+  sleep 2
+  shell am start-foreground-service -n "$SERVICE" -a "$START" \
+    --es profile harness-a >/dev/null 2>&1
+  sleep 2
+  shell am start-foreground-service -n "$SERVICE" -a "$START" \
+    --es profile harness-b >/dev/null 2>&1
+  sleep 3
+  if through "$PORT" "$USER_NAME" "$PASSWORD" &&
+    through "$PORT2" "$USER2" "$PASSWORD2"; then
+    ok 'two proxies serve at once'
   else
-    bad 'the anonymous checkbox is applied by Start'
+    bad 'two proxies serve at once'
+    shell dumpsys activity service "$SERVICE" | sed -n '/Right now/,/  saved/p'
   fi
-  # Put authentication back through the same controls: the running proxy is
-  # stopped, the box is ticked again and it is started, so the tunnel works
-  # with credentials again and nobody without them does.
-  panel_toggle
-  panel_tab listener
-  panel_tap anonymous
-  panel_toggle
-  if wait_anonymous no; then
-    ok 'unticking it asks for a password again'
+  # Each one's own credentials, not the other's: the ports are not just both open.
+  if through "$PORT" "$USER2" "$PASSWORD2"; then
+    bad 'each proxy keeps its own credentials'
   else
-    bad 'unticking it asks for a password again'
+    ok 'each proxy keeps its own credentials'
   fi
-  if through_proxy; then
-    ok 'and the credentials still work'
+  # dumpsys indents a service's own lines by four spaces, so the block is taken
+  # out first and the lines are matched without an anchor on the left.
+  now=$(shell dumpsys activity service "$SERVICE" | sed -n '/Right now/,/  saved/p')
+  running=$(printf '%s\n' "$now" | grep -c '^ *running')
+  if [ "$running" -eq 2 ] &&
+    printf '%s\n' "$now" | grep -q "\"harness-a\" · port $PORT " &&
+    printf '%s\n' "$now" | grep -q "\"harness-b\" · port $PORT2 "; then
+    ok 'dumpsys lists both, with their ports'
   else
-    bad 'and the credentials still work'
-  fi
-else
-  bad 'the panel controls are reachable'
-fi
-
-step 'unrelated SSID'
-start_app --es ssid "not-$SSID" --ez any_network false
-sleep 2
-if port_closed; then ok 'the port is closed'; else bad 'the port is closed'; fi
-if foreground; then ok 'the service keeps running while paused'; else
-  bad 'the service keeps running while paused'
-fi
-
-step 'predicate bypass'
-start_app --es ssid "not-$SSID" --ez any_network true
-sleep 2
-if through_proxy; then ok 'any_network serves requests'; else bad 'any_network serves requests'; fi
-
-step 'profiles over adb'
-start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
-sleep 2
-if save_profile harness-one; then
-  if phone logcat -d -s phone-link-proxy | grep -q 'saved configuration "harness-one"'; then
-    ok 'SAVE_PROFILE keeps the running configuration'
-  else
-    bad 'SAVE_PROFILE keeps the running configuration'
-  fi
-  if shell dumpsys activity service "$SERVICE" | grep -q '"harness-one" — port'; then
-    ok 'dumpsys lists what is saved'
-  else
-    bad 'dumpsys lists what is saved'
+    bad "dumpsys lists both, with their ports ($running listed)"
+    shell dumpsys activity service "$SERVICE" | sed -n '/Right now/,/  saved/p'
   fi
   open_panel
-  if panel_home &&
-    ui_dump | tr '>' '\n' | grep 'id/card_name"' | grep -q 'text="harness-one"'; then
-    ok 'the panel lists a configuration saved over adb'
+  if panel_home; then
+    if [ "$(card_state harness-a)" = Running ] &&
+      [ "$(card_state harness-b)" = Running ]; then
+      ok 'the list marks both of them running'
+    else
+      bad "the list marks both of them running ($(card_state harness-a)/$(card_state harness-b))"
+      panel_where
+    fi
   else
-    bad 'the panel lists a configuration saved over adb'
-    panel_where
+    bad 'the list is showing'
   fi
-  # Move the running configuration somewhere else, then start the saved one by
-  # name: it has to come back exactly as it was saved.
-  start_app --es ssid "$SSID" --ez any_network false --ei port 19999
+  # One by name, and the other is left alone.
+  shell am start-foreground-service -n "$SERVICE" -a "$STOP" \
+    --es profile harness-b >/dev/null 2>&1
   sleep 2
-  shell am start-foreground-service -n "$SERVICE" \
-    -a org.phonelink.proxy.action.START --es profile harness-one >/dev/null 2>&1
-  sleep 3
-  if through_proxy; then
-    ok 'START --es profile brings a saved configuration back'
+  if closed "$PORT2" && through "$PORT" "$USER_NAME" "$PASSWORD"; then
+    ok 'a stop by name closes one port and leaves the other'
   else
-    bad 'START --es profile brings a saved configuration back'
+    bad 'a stop by name closes one port and leaves the other'
   fi
-  # A configuration is the whole panel, so the two service switches come back
-  # with it: turn them off, start the saved one by name, and read the store's
-  # answer out of dumpsys.
-  start_app --es ssid "$SSID" --ez any_network false --ez auto_start false \
-    --ez adb_wifi false
-  sleep 2
-  shell am start-foreground-service -n "$SERVICE" \
-    -a org.phonelink.proxy.action.START --es profile harness-one >/dev/null 2>&1
-  sleep 3
-  now=$(shell dumpsys activity service "$SERVICE")
-  if printf '%s\n' "$now" | grep -q 'auto-start  true'; then
-    ok 'the saved auto-start comes back with the configuration'
+  now=$(shell dumpsys activity service "$SERVICE" | sed -n '/Right now/,/  saved/p')
+  remaining=$(printf '%s\n' "$now" | grep -c '^ *running')
+  if [ "${remaining:-0}" -eq 1 ] &&
+    printf '%s\n' "$now" | grep '^ *running' | grep -q "harness-a"; then
+    ok 'and the one left is the one that was not named'
   else
-    bad 'the saved auto-start comes back with the configuration'
-  fi
-  if printf '%s\n' "$now" | grep -q 'adb_wifi    true'; then
-    ok 'the saved wireless-debugging switch comes back with it'
-  else
-    bad 'the saved wireless-debugging switch comes back with it'
+    bad "and the one left is the one that was not named ($remaining listed)"
   fi
   shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
   sleep 2
-  shell am start-foreground-service -n "$SERVICE" \
-    -a org.phonelink.proxy.action.START --es profile harness-absent >/dev/null 2>&1
-  sleep 2
-  if port_closed; then
-    ok 'an unknown profile name starts nothing'
+  if closed "$PORT" && closed "$PORT2" && ! foreground; then
+    ok 'stop stops them all'
   else
-    bad 'an unknown profile name starts nothing'
+    bad 'stop stops them all'
   fi
-  if phone logcat -d -s phone-link-proxy |
-    grep -q 'no saved configuration called "harness-absent"'; then
-    ok 'and says why'
-  else
-    bad 'and says why'
-  fi
-  # Leave the harness on the configuration the remaining steps expect.
-  start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
-  sleep 2
-  shell am start-foreground-service -n "$SERVICE" \
-    -a org.phonelink.proxy.action.DELETE_PROFILE --es profile harness-one \
-    >/dev/null 2>&1
-  sleep 2
-  # Only the saved lines: the dump also names the proxy that is in use.
-  if shell dumpsys activity service "$SERVICE" | grep 'saved' |
-    grep -q '"harness-one"'; then
-    bad 'DELETE_PROFILE removes a saved configuration'
-  else
-    ok 'DELETE_PROFILE removes a saved configuration'
-  fi
-fi
+  delete_profile_by_adb harness-a
+  delete_profile_by_adb harness-b
 
-step 'plain Save'
-# Save on the open proxy writes the whole form back to it — listener and the
-# service switches — without going through Save as….
-start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
-sleep 2
-save_profile harness-save
-open_panel
-if panel_open harness-save; then
-  ok 'the card opens the proxy to save'
-else
-  bad 'the card opens the proxy to save'
-  panel_where
-fi
-panel_tab listener
-panel_tap port
-# Typing here replaces the field in place rather than clearing it with a dozen
-# Backspaces and an `input text` of its own: the field already has the focus,
-# and a sequence takes it from there. Tapping the field raised the keyboard,
-# which covers the Save row, so the phone puts it away before anything looks
-# for that button — and only if one is really up.
-if ! sequence 'text 18099; wait-quiet 250; keyboard-off; wait-quiet 300'; then
-  bad 'the port field takes a number'
-  panel_where
-fi
-panel_tap save
-settle
-if shell dumpsys activity service "$SERVICE" | grep -q 'harness-save.*port 18099'; then
-  ok 'Save writes the form to the open proxy'
-else
-  bad 'Save writes the form to the open proxy'
-fi
-panel_tab service
-panel_tap auto_start
-want=off
-if [ "$(panel_checked auto_start)" = yes ]; then want=on; fi
-panel_tap save_service
-settle
-if shell dumpsys activity service "$SERVICE" |
-  grep -q "harness-save.*auto-start $want"; then
-  ok 'Save writes the switches too'
-else
-  bad "Save writes the switches too (wanted $want)"
-  panel_where
-fi
-delete_profile_by_adb harness-save
+}
 
-step 'card toggle'
-# The card starts and stops a proxy by itself. What the words on it say while it
-# does that is checked on the phone, inside the app (step 'the page from the
-# inside'); what only the laptop can see is the listener: up after the press,
-# serving this proxy's credentials, and gone after the second one.
-start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
-sleep 2
-save_profile harness-card
-shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
-sleep 2
-open_panel
-if panel_home; then
-  if card_toggle harness-card; then
-    sleep 2
-    if foreground; then ok 'the card starts that proxy'; else
-      bad 'the card starts that proxy'
-    fi
-    if through_proxy; then ok 'and requests go through it'; else
-      bad 'and requests go through it'
-    fi
-    if card_toggle harness-card; then
+# --- deleting a proxy while it runs
+step_deleting_a_proxy_while_it_runs() {
+  step 'deleting a proxy while it runs'
+  # A saved proxy is its listener's name, so deleting it has to take the listener
+  # with it: a port the list cannot show is a port the panel cannot stop. Both
+  # ways of deleting one — over adb and from the menu — have to end the same.
+  PORT5=$((PORT + 4))
+  PORT6=$((PORT + 5))
+  start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT5"
+  sleep 2
+  save_profile gone-a
+  start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT6" \
+    --es user "$USER2" --es password "$PASSWORD2"
+  sleep 2
+  save_profile gone-b
+  shell am start-foreground-service -n "$SERVICE" -a "$START" \
+    --es profile gone-a >/dev/null 2>&1
+  sleep 2
+  shell am start-foreground-service -n "$SERVICE" -a "$START" \
+    --es profile gone-b >/dev/null 2>&1
+  sleep 3
+  if through "$PORT5" "$USER_NAME" "$PASSWORD" &&
+    through "$PORT6" "$USER2" "$PASSWORD2"; then
+    ok 'both serve before one of them is deleted'
+  else
+    bad 'both serve before one of them is deleted'
+  fi
+  delete_profile_by_adb gone-a
+  if closed "$PORT5" && through "$PORT6" "$USER2" "$PASSWORD2"; then
+    ok 'deleting a running proxy over adb closes its port and leaves the other'
+  else
+    bad 'deleting a running proxy over adb closes its port and leaves the other'
+  fi
+  now=$(shell dumpsys activity service "$SERVICE" | sed -n '/Right now/,/  saved/p')
+  if [ "$(printf '%s\n' "$now" | grep -c '^ *running')" -eq 1 ] &&
+    printf '%s\n' "$now" | grep '^ *running' | grep -q gone-b; then
+    ok 'and the service reports only the one that is left'
+  else
+    bad 'and the service reports only the one that is left'
+    shell dumpsys activity service "$SERVICE" | sed -n '/Right now/,/  saved/p'
+  fi
+  # The menu's Delete, on the other running one: the panel stops it and goes back
+  # to the list, where its card is gone.
+  open_panel
+  if panel_open gone-b; then
+    if menu_pick Delete && sequence \
+      'wait id=button1 2000; tap-id button1 3000; wait id=new_profile 3000'; then
       sleep 2
-      if foreground; then bad 'a second press stops it'; else
-        ok 'a second press stops it'
+      if closed "$PORT6" && ! foreground; then
+        ok "the menu's Delete stops the proxy it deletes"
+      else
+        bad "the menu's Delete stops the proxy it deletes"
+      fi
+      if shell dumpsys activity service "$SERVICE" | grep 'saved' | grep -q '"gone-b"'; then
+        bad 'and the store no longer has it'
+      else
+        ok 'and the store no longer has it'
       fi
     else
-      bad 'the card button can be pressed again'
-    fi
-  else
-    bad 'the card button can be pressed'
-    panel_where
-  fi
-else
-  bad 'the list is reachable'
-fi
-delete_profile_by_adb harness-card
-
-step 'rename'
-# A name is a label on the settings, so renaming moves the settings, the
-# service switches and the mark of which proxy is in use under the new name.
-start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
-sleep 2
-save_profile harness-old
-# Start it by name, so that proxy is the one the service reports as in use.
-shell am start-foreground-service -n "$SERVICE" \
-  -a "$START" --es profile harness-old >/dev/null 2>&1
-sleep 3
-open_panel
-if panel_open harness-old; then
-  ok 'the proxy to rename opens'
-else
-  bad 'the proxy to rename opens'
-  panel_where
-fi
-if menu_pick Rename; then
-  # The dialog opens on its name field, so the new name goes straight into the
-  # focused field and the button follows it — one straight line, one message.
-  # The dialog's buttons leaving the screen is what says it closed: the page
-  # behind has edit fields of its own and would answer any question about
-  # "no EditText on screen" wrongly.
-  if sequence 'wait class=android.widget.EditText 2000; text harness-renamed; tap-id button1 3000; wait-gone id=button1 3000'; then
-    if shell dumpsys activity service "$SERVICE" | grep 'saved' |
-      grep -q '"harness-renamed"'; then
-      ok 'the menu renames a proxy'
-    else
-      bad 'the menu renames a proxy'
-      panel_where
-    fi
-    if shell dumpsys activity service "$SERVICE" | grep 'saved' |
-      grep -q '"harness-old"'; then
-      bad 'and the old name is gone'
-    else
-      ok 'and the old name is gone'
-    fi
-    if [ "$(ui_text header_title)" = harness-renamed ]; then
-      ok 'the page follows the new name'
-    else
-      bad "the page follows the new name ($(ui_text header_title))"
-    fi
-  else
-    bad 'the rename dialog can be answered'
-    panel_where
-  fi
-else
-  bad "the menu offers Rename"
-fi
-# The service does the same from adb, for an agent with no screen.
-shell am start-foreground-service -n "$SERVICE" \
-  -a org.phonelink.proxy.action.RENAME_PROFILE --es profile harness-renamed \
-  --es to harness-adb >/dev/null 2>&1
-sleep 2
-if shell dumpsys activity service "$SERVICE" | grep 'saved' |
-  grep -q '"harness-adb"'; then
-  ok 'RENAME_PROFILE renames from adb'
-else
-  bad 'RENAME_PROFILE renames from adb'
-fi
-if shell dumpsys activity service "$SERVICE" | grep -q 'profile *"harness-adb"'; then
-  ok 'and the proxy in use keeps its place'
-else
-  bad 'and the proxy in use keeps its place'
-fi
-delete_profile_by_adb harness-adb
-
-step 'info marks'
-# Every control carries its own i, and the app's own Info is behind the burger.
-start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
-sleep 2
-save_profile harness-info
-open_panel
-if panel_open harness-info; then
-  ok 'a proxy opens for its info marks'
-else
-  bad 'a proxy opens for its info marks'
-  panel_where
-fi
-if panel_tab listener && sequence 'tap-id info_port 5000; wait id=alertTitle 2000'; then
-  if ui_text alertTitle | grep -q 'Port'; then
-    ok 'the i next to a field explains that field'
-  else
-    bad 'the i next to a field explains that field'
-    panel_where
-  fi
-  back >/dev/null 2>&1
-  settle
-else
-  bad 'the field carries an i'
-fi
-if panel_tab log && sequence 'tap-id info_log 5000; wait id=alertTitle 2000'; then
-  if ui_dump | grep -q 'id/alertTitle"'; then
-    ok 'the log page carries one too'
-  else
-    bad 'the log page carries one too'
-  fi
-  back >/dev/null 2>&1
-  settle
-else
-  bad 'the log page carries an i'
-fi
-if menu_pick 'About this app' && wait_for 'RENAME_PROFILE' 2000; then
-  if ui_dump | grep -q 'RENAME_PROFILE'; then
-    ok 'About this app is in the menu and shows the contract'
-  else
-    bad 'About this app is in the menu and shows the contract'
-  fi
-  back >/dev/null 2>&1
-  settle
-else
-  bad 'the menu has About this app'
-fi
-delete_profile_by_adb harness-info
-
-step 'new proxy'
-# The list's way in: name it, and the proxy that was created opens itself.
-panel_home
-if panel_tap new_profile &&
-  sequence 'wait class=android.widget.EditText 2000; text harness-new; tap-id button1 3000; wait id=back 3000; wait-quiet 250'; then
-  if shell dumpsys activity service "$SERVICE" | grep 'saved' |
-    grep -q '"harness-new"'; then
-    ok 'New proxy is saved under its name'
-  else
-    bad 'New proxy is saved under its name'
-    panel_where
-  fi
-  if ui_dump | grep -q 'id/back"'; then
-    ok 'and it opens for its settings'
-  else
-    bad 'and it opens for its settings'
-  fi
-else
-  bad 'the list has a New proxy button'
-  panel_where
-fi
-delete_profile_by_adb harness-new
-
-step 'ten proxies'
-# Ten saved proxies push the list past one screen. `New proxy` sits under it,
-# so it has to stay reachable by scrolling and still save an eleventh.
-for i in 1 2 3 4 5 6 7 8 9 10; do
-  shell am start-foreground-service -n "$SERVICE" \
-    -a org.phonelink.proxy.action.SAVE_PROFILE --es profile "harness-$i" >/dev/null 2>&1
-  sleep 1
-done
-open_panel
-if panel_home; then
-  ok 'the list is showing'
-else
-  bad 'the list is showing'
-  panel_where
-fi
-total=$(shell dumpsys activity service "$SERVICE" 2>/dev/null |
-  grep -o '"harness-[0-9]*"' | wc -l)
-if [ "$total" -ge 10 ]; then
-  ok 'ten proxies are saved'
-else
-  bad "ten proxies are saved ($total in the dump)"
-fi
-# A dump holds only what is on screen, so the button is reached the way a hand
-# would reach it: the phone scrolls the list until it is there.
-if sequence 'scroll-to id=new_profile 10000'; then
-  ok 'New proxy is still reachable under ten cards'
-  if ui_tap_id new_profile &&
-    sequence 'wait class=android.widget.EditText 2000; text harness-eleven; tap-id button1 3000; wait id=back 3000; wait-quiet 250'; then
-    if shell dumpsys activity service "$SERVICE" | sed -n '/  saved/,$p' |
-      grep -q '"harness-eleven"'; then
-      ok 'and it saves an eleventh proxy'
-    else
-      bad 'and it saves an eleventh proxy'
+      bad 'the menu offers Delete'
       panel_where
     fi
   else
-    bad 'New proxy can be tapped'
+    bad 'the running proxy to delete opens'
     panel_where
   fi
-else
-  bad 'New proxy is still reachable under ten cards'
-  panel_where
-fi
-# Leave the list as short as the next steps expect: the panel reads the store
-# on resume, so it is left and re-opened after the ten are gone.
-for i in 1 2 3 4 5 6 7 8 9 10 eleven; do
-  shell am start-foreground-service -n "$SERVICE" \
-    -a org.phonelink.proxy.action.DELETE_PROFILE --es profile "harness-$i" \
-    >/dev/null 2>&1
-  sleep 1
-done
-home >/dev/null 2>&1
-open_panel
-report=$(shell dumpsys activity service "$SERVICE" 2>/dev/null |
-  sed -n '/  saved/,$p' | grep -o '"harness-[0-9]*"' | wc -l)
-if [ "${report:-1}" -eq 0 ]; then
-  ok 'the ten are gone again'
-else
-  bad "the ten are gone again ($report left)"
-fi
 
-step 'several at once'
-# The list is a list of listeners: two saved proxies, on two ports, with their
-# own credentials, both serving at the same time.
-PORT2=$((PORT + 1))
-USER2=phonelink-second
-PASSWORD2=phonelink-second-password
-start_app --es ssid "$SSID" --ez any_network false
-wait_foreground || true
-save_profile harness-a
-start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT2" \
-  --es user "$USER2" --es password "$PASSWORD2"
-wait_foreground || true
-save_profile harness-b
-shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
-sleep 2
-shell am start-foreground-service -n "$SERVICE" -a "$START" \
-  --es profile harness-a >/dev/null 2>&1
-sleep 2
-shell am start-foreground-service -n "$SERVICE" -a "$START" \
-  --es profile harness-b >/dev/null 2>&1
-sleep 3
-if through "$PORT" "$USER_NAME" "$PASSWORD" &&
-  through "$PORT2" "$USER2" "$PASSWORD2"; then
-  ok 'two proxies serve at once'
-else
-  bad 'two proxies serve at once'
-  shell dumpsys activity service "$SERVICE" | sed -n '/Right now/,/  saved/p'
-fi
-# Each one's own credentials, not the other's: the ports are not just both open.
-if through "$PORT" "$USER2" "$PASSWORD2"; then
-  bad 'each proxy keeps its own credentials'
-else
-  ok 'each proxy keeps its own credentials'
-fi
-# dumpsys indents a service's own lines by four spaces, so the block is taken
-# out first and the lines are matched without an anchor on the left.
-now=$(shell dumpsys activity service "$SERVICE" | sed -n '/Right now/,/  saved/p')
-running=$(printf '%s\n' "$now" | grep -c '^ *running')
-if [ "$running" -eq 2 ] &&
-  printf '%s\n' "$now" | grep -q "\"harness-a\" · port $PORT " &&
-  printf '%s\n' "$now" | grep -q "\"harness-b\" · port $PORT2 "; then
-  ok 'dumpsys lists both, with their ports'
-else
-  bad "dumpsys lists both, with their ports ($running listed)"
-  shell dumpsys activity service "$SERVICE" | sed -n '/Right now/,/  saved/p'
-fi
-open_panel
-if panel_home; then
-  if [ "$(card_state harness-a)" = Running ] &&
-    [ "$(card_state harness-b)" = Running ]; then
-    ok 'the list marks both of them running'
-  else
-    bad "the list marks both of them running ($(card_state harness-a)/$(card_state harness-b))"
-    panel_where
-  fi
-else
-  bad 'the list is showing'
-fi
-# One by name, and the other is left alone.
-shell am start-foreground-service -n "$SERVICE" -a "$STOP" \
-  --es profile harness-b >/dev/null 2>&1
-sleep 2
-if closed "$PORT2" && through "$PORT" "$USER_NAME" "$PASSWORD"; then
-  ok 'a stop by name closes one port and leaves the other'
-else
-  bad 'a stop by name closes one port and leaves the other'
-fi
-now=$(shell dumpsys activity service "$SERVICE" | sed -n '/Right now/,/  saved/p')
-remaining=$(printf '%s\n' "$now" | grep -c '^ *running')
-if [ "${remaining:-0}" -eq 1 ] &&
-  printf '%s\n' "$now" | grep '^ *running' | grep -q "harness-a"; then
-  ok 'and the one left is the one that was not named'
-else
-  bad "and the one left is the one that was not named ($remaining listed)"
-fi
-shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
-sleep 2
-if closed "$PORT" && closed "$PORT2" && ! foreground; then
-  ok 'stop stops them all'
-else
-  bad 'stop stops them all'
-fi
-delete_profile_by_adb harness-a
-delete_profile_by_adb harness-b
+}
 
-step 'deleting a proxy while it runs'
-# A saved proxy is its listener's name, so deleting it has to take the listener
-# with it: a port the list cannot show is a port the panel cannot stop. Both
-# ways of deleting one — over adb and from the menu — have to end the same.
-PORT5=$((PORT + 4))
-PORT6=$((PORT + 5))
-start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT5"
-sleep 2
-save_profile gone-a
-start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT6" \
-  --es user "$USER2" --es password "$PASSWORD2"
-sleep 2
-save_profile gone-b
-shell am start-foreground-service -n "$SERVICE" -a "$START" \
-  --es profile gone-a >/dev/null 2>&1
-sleep 2
-shell am start-foreground-service -n "$SERVICE" -a "$START" \
-  --es profile gone-b >/dev/null 2>&1
-sleep 3
-if through "$PORT5" "$USER_NAME" "$PASSWORD" &&
-  through "$PORT6" "$USER2" "$PASSWORD2"; then
-  ok 'both serve before one of them is deleted'
-else
-  bad 'both serve before one of them is deleted'
-fi
-delete_profile_by_adb gone-a
-if closed "$PORT5" && through "$PORT6" "$USER2" "$PASSWORD2"; then
-  ok 'deleting a running proxy over adb closes its port and leaves the other'
-else
-  bad 'deleting a running proxy over adb closes its port and leaves the other'
-fi
-now=$(shell dumpsys activity service "$SERVICE" | sed -n '/Right now/,/  saved/p')
-if [ "$(printf '%s\n' "$now" | grep -c '^ *running')" -eq 1 ] &&
-  printf '%s\n' "$now" | grep '^ *running' | grep -q gone-b; then
-  ok 'and the service reports only the one that is left'
-else
-  bad 'and the service reports only the one that is left'
-  shell dumpsys activity service "$SERVICE" | sed -n '/Right now/,/  saved/p'
-fi
-# The menu's Delete, on the other running one: the panel stops it and goes back
-# to the list, where its card is gone.
-open_panel
-if panel_open gone-b; then
-  if menu_pick Delete && sequence \
-    'wait id=button1 2000; tap-id button1 3000; wait id=new_profile 3000'; then
-    sleep 2
-    if closed "$PORT6" && ! foreground; then
-      ok "the menu's Delete stops the proxy it deletes"
-    else
-      bad "the menu's Delete stops the proxy it deletes"
-    fi
-    if shell dumpsys activity service "$SERVICE" | grep 'saved' | grep -q '"gone-b"'; then
-      bad 'and the store no longer has it'
-    else
-      ok 'and the store no longer has it'
-    fi
-  else
-    bad 'the menu offers Delete'
-    panel_where
-  fi
-else
-  bad 'the running proxy to delete opens'
-  panel_where
-fi
-
-step 'the page from the inside'
-# The same claims about the page and the cards, decided where the views are.
-# An instrumentation starts the app's process again, so this runs with nothing
-# listening and starts what it needs from the page itself; the port stays the
-# laptop's business, and the step before this one is where it is proven.
-PORT3=$((PORT + 2))
-PORT4=$((PORT + 3))
-start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT3" \
-  --es user "$USER_NAME" --es password "$PASSWORD"
-wait_foreground || true
-save_profile inside-a
-start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT4" \
-  --es user "$USER2" --es password "$PASSWORD2"
-wait_foreground || true
-save_profile inside-b
-shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
-sleep 2
-device_checks inside-a inside-b
-delete_profile_by_adb inside-a
-delete_profile_by_adb inside-b
-
-step 'proxy log'
-# Start the saved proxy by name so its events carry its name, and move some
-# bytes through it: the page shows this run's counters and this proxy's log.
-start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
-sleep 2
-save_profile harness-panel
-shell am start-foreground-service -n "$SERVICE" \
-  -a "$START" --es profile harness-panel >/dev/null 2>&1
-sleep 3
-if through_proxy; then ok 'the listener still serves'; else bad 'the listener still serves'; fi
-open_panel
-if panel_open harness-panel; then
-  ok 'the proxy with its log is reachable'
-else
-  bad 'the proxy with its log is reachable'
-  panel_where
-fi
-# The counters and the log share the Log segment now, so nothing has to be
-# scrolled: a node below the fold would not be in a dump at all.
-panel_tab log
-wait_for 'id/traffic"' 3000 || true
-traffic=$(ui_dump)
-if printf '%s' "$traffic" | grep -q 'id/traffic"'; then
-  ok 'the proxy page shows the traffic line'
-  if printf '%s' "$traffic" | grep -q 'No traffic in this run yet'; then
-    bad 'the counters moved bytes'
-    printf '  counters with the page open: %s\n' \
-      "$(shell dumpsys activity service "$SERVICE" | grep 'traffic ')"
-  else
-    ok 'the counters moved bytes'
-  fi
-else
-  bad 'the proxy page shows the traffic line'
-  bad 'the counters moved bytes'
-  panel_where
-fi
-if printf '%s' "$traffic" | grep -q 'saved configuration'; then
-  ok 'the page shows what happened to this proxy'
-else
-  bad 'the page shows what happened to this proxy'
-fi
-if printf '%s' "$traffic" | grep -q "listening on 0.0.0.0:$PORT"; then
-  ok 'and the state changes with their port'
-else
-  bad 'and the state changes with their port'
-fi
-panel_tap log_clear
-# Clearing is a redraw like any other: the screen is watched until it stops
-# saying what it said, rather than asked again and again.
-if wait_gone 'saved configuration' 3000; then
-  ok 'Clear empties the log'
-else
-  bad 'Clear empties the log'
-fi
-delete_profile_by_adb harness-panel
-
-step 'stop'
-shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
-sleep 2
-if foreground; then bad 'stop leaves no service'; else ok 'stop leaves no service'; fi
-if port_closed; then ok 'the port is closed after stop'; else bad 'the port is closed after stop'; fi
-
-step 'tile'
-if unlock_phone; then :; fi
-if keyguard_showing; then
-  printf 'SKIP the tile: the shade ignores clicks while the phone is locked\n'
-else
-  # The tile starts whatever the last start stored, so store the good settings
-  # first and stop the service the adb start created.
-  start_app --es ssid "$SSID" --ez any_network false
-  sleep 1
+# --- the page from the inside
+step_the_page_from_the_inside() {
+  step 'the page from the inside'
+  # The same claims about the page and the cards, decided where the views are.
+  # An instrumentation starts the app's process again, so this runs with nothing
+  # listening and starts what it needs from the page itself; the port stays the
+  # laptop's business, and the step before this one is where it is proven.
+  PORT3=$((PORT + 2))
+  PORT4=$((PORT + 3))
+  start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT3" \
+    --es user "$USER_NAME" --es password "$PASSWORD"
+  wait_foreground || true
+  save_profile inside-a
+  start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT4" \
+    --es user "$USER2" --es password "$PASSWORD2"
+  wait_foreground || true
+  save_profile inside-b
   shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
   sleep 2
-  shell cmd statusbar add-tile "$PKG/.ProxyTile" >/dev/null 2>&1
-  shell cmd statusbar expand-settings >/dev/null 2>&1
+  device_checks inside-a inside-b
+  delete_profile_by_adb inside-a
+  delete_profile_by_adb inside-b
+
+}
+
+# --- proxy log
+step_proxy_log() {
+  step 'proxy log'
+  # Start the saved proxy by name so its events carry its name, and move some
+  # bytes through it: the page shows this run's counters and this proxy's log.
+  start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
   sleep 2
-  shell cmd statusbar click-tile "$PKG/.ProxyTile" >/dev/null 2>&1
-  if wait_foreground; then ok 'the tile starts the service'; else
-    bad 'the tile starts the service'
-  fi
-  if through_proxy; then ok 'the tile start serves requests'; else
-    bad 'the tile start serves requests'
-  fi
-  shell cmd statusbar expand-settings >/dev/null 2>&1
-  sleep 2
-  shell cmd statusbar click-tile "$PKG/.ProxyTile" >/dev/null 2>&1
+  save_profile harness-panel
+  shell am start-foreground-service -n "$SERVICE" \
+    -a "$START" --es profile harness-panel >/dev/null 2>&1
   sleep 3
-  if foreground; then bad 'the tile stops the service'; else
-    ok 'the tile stops the service'
+  if through_proxy; then ok 'the listener still serves'; else bad 'the listener still serves'; fi
+  open_panel
+  if panel_open harness-panel; then
+    ok 'the proxy with its log is reachable'
+  else
+    bad 'the proxy with its log is reachable'
+    panel_where
   fi
-  if port_closed; then ok 'the tile stop closes the port'; else
-    bad 'the tile stop closes the port'
+  # The counters and the log share the Log segment now, so nothing has to be
+  # scrolled: a node below the fold would not be in a dump at all.
+  panel_tab log
+  wait_for 'id/traffic"' 3000 || true
+  traffic=$(ui_dump)
+  if printf '%s' "$traffic" | grep -q 'id/traffic"'; then
+    ok 'the proxy page shows the traffic line'
+    if printf '%s' "$traffic" | grep -q 'No traffic in this run yet'; then
+      bad 'the counters moved bytes'
+      printf '  counters with the page open: %s\n' \
+        "$(shell dumpsys activity service "$SERVICE" | grep 'traffic ')"
+    else
+      ok 'the counters moved bytes'
+    fi
+  else
+    bad 'the proxy page shows the traffic line'
+    bad 'the counters moved bytes'
+    panel_where
   fi
-  shell cmd statusbar collapse >/dev/null 2>&1
+  if printf '%s' "$traffic" | grep -q 'saved configuration'; then
+    ok 'the page shows what happened to this proxy'
+  else
+    bad 'the page shows what happened to this proxy'
+  fi
+  if printf '%s' "$traffic" | grep -q "listening on 0.0.0.0:$PORT"; then
+    ok 'and the state changes with their port'
+  else
+    bad 'and the state changes with their port'
+  fi
+  panel_tap log_clear
+  # Clearing is a redraw like any other: the screen is watched until it stops
+  # saying what it said, rather than asked again and again.
+  if wait_gone 'saved configuration' 3000; then
+    ok 'Clear empties the log'
+  else
+    bad 'Clear empties the log'
+  fi
+  delete_profile_by_adb harness-panel
+
+}
+
+# --- stop
+step_stop() {
+  step 'stop'
+  shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
+  sleep 2
+  if foreground; then bad 'stop leaves no service'; else ok 'stop leaves no service'; fi
+  if port_closed; then ok 'the port is closed after stop'; else bad 'the port is closed after stop'; fi
+
+}
+
+# --- tile
+step_tile() {
+  step 'tile'
+  if unlock_phone; then :; fi
+  if keyguard_showing; then
+    printf 'SKIP the tile: the shade ignores clicks while the phone is locked\n'
+  else
+    # The tile starts whatever the last start stored, so store the good settings
+    # first and stop the service the adb start created.
+    start_app --es ssid "$SSID" --ez any_network false
+    sleep 1
+    shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
+    sleep 2
+    shell cmd statusbar add-tile "$PKG/.ProxyTile" >/dev/null 2>&1
+    shell cmd statusbar expand-settings >/dev/null 2>&1
+    sleep 2
+    shell cmd statusbar click-tile "$PKG/.ProxyTile" >/dev/null 2>&1
+    if wait_foreground; then ok 'the tile starts the service'; else
+      bad 'the tile starts the service'
+    fi
+    if through_proxy; then ok 'the tile start serves requests'; else
+      bad 'the tile start serves requests'
+    fi
+    shell cmd statusbar expand-settings >/dev/null 2>&1
+    sleep 2
+    shell cmd statusbar click-tile "$PKG/.ProxyTile" >/dev/null 2>&1
+    sleep 3
+    if foreground; then bad 'the tile stops the service'; else
+      ok 'the tile stops the service'
+    fi
+    if port_closed; then ok 'the tile stop closes the port'; else
+      bad 'the tile stop closes the port'
+    fi
+    shell cmd statusbar collapse >/dev/null 2>&1
+  fi
+
+}
+
+# --- the steps, in the order a full run takes them ------------------------
+
+# Every step a full run takes, by the name the log prints. A step is a function
+# named after itself (`card toggle` is `step_card_toggle`), which is what makes
+# PHONE_LIVE_ONLY possible: the loop at the bottom calls the ones asked for.
+STEPS=(
+  'unlock' 'install' 'panel' 'auto start' 'header warning' 'panel state'
+  'allowed network' 'anonymous from the panel' 'unrelated SSID'
+  'predicate bypass' 'profiles over adb' 'plain Save' 'card toggle' 'rename'
+  'info marks' 'new proxy' 'ten proxies' 'several at once'
+  'deleting a proxy while it runs' 'the page from the inside' 'proxy log'
+  'stop' 'tile'
+)
+
+step_function() { # step_function 'card toggle' -> step_card_toggle
+  printf 'step_%s' "$(printf '%s' "$1" | tr ' A-Z' '_a-z')"
+}
+
+# Whether the run was asked for this step by name; a full run asks for all.
+wanted() { # wanted NAME
+  [ -n "$only" ] || return 0
+  local want
+  for want in ${only//,/ }; do
+    [ "$want" = "$1" ] && return 0
+  done
+  return 1
+}
+
+# The three things a step may lean on: the phone awake, the app installed, and
+# one proxy saved under the name a page opens by (`harness-panel`). The first
+# two are steps of their own; the third is this, and it is what a filtered run
+# does between them.
+preamble() {
+  start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
+  sleep 2
+  save_profile harness-panel
+}
+
+only=${PHONE_LIVE_ONLY:-}
+steps_run=0
+# The names are split by commas and nothing else, because a step's name has
+# spaces in it; a comma around each one makes the membership test a `case`.
+only_list=""
+
+# Whether the run was asked for this step; a full run asks for all of them.
+wanted() { # wanted NAME
+  [ -n "$only" ] || return 0
+  case $only_list in
+    *",$1,"*) return 0 ;;
+  esac
+  return 1
+}
+
+if [ -n "$only" ]; then
+  partial=1
+  only_list=",$(printf '%s' "$only" | sed 's/^ *//; s/ *$//; s/ *, */,/g'),"
+  # A name no step answers to would otherwise run nothing and still look green,
+  # so the names asked for have to be exactly the steps that answer to them.
+  asked_count=$(($(printf '%s' "$only_list" | grep -o ',' | wc -l) - 1))
+  matched=0
+  for each in "${STEPS[@]}"; do
+    wanted "$each" && matched=$((matched + 1))
+  done
+  if [ "$matched" -ne "$asked_count" ]; then
+    printf 'no step is called one of "%s"; the steps are:\n' "$only" >&2
+    printf '  %s\n' "${STEPS[@]}" >&2
+    exit 2
+  fi
+  printf 'a partial run: only %s, and the preamble every step assumes\n' "$only"
 fi
+
+# The loop keeps its own name: a step's body is free to use `name` for its own
+# loops, and a variable a step clobbers must not be what decides the next step.
+for wanted_step in "${STEPS[@]}"; do
+  if [ -n "$only" ]; then
+    # The preamble runs whatever was asked for; everything else only if it was.
+    case $wanted_step in
+      unlock | install) ;;
+      *)
+        wanted "$wanted_step" || continue
+        ;;
+    esac
+  fi
+  steps_run=$((steps_run + 1))
+  "$(step_function "$wanted_step")"
+  if [ -n "$only" ] && [ "$wanted_step" = install ]; then
+    preamble
+  fi
+done
 
 # The verdict is printed by cleanup, after the last check — the clock fit is
 # decided there, and a summary printed here could say "0 failed" and then fail
