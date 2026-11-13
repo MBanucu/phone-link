@@ -61,25 +61,20 @@ list is empty.
       none of it — a signed APK on a release is installable and updatable from
       the phone — and is worth having from the first tag whatever else happens.
 
-## More of the test on the phone, not over adb
+## The page says Start switches to this one
 
-- [ ] Ask how far this goes: a step that is a straight line already runs as one
-      message (the sequences above), but the step's *shape* — open this card,
-      read that field, decide, go on — is still written in bash. Every decision
-      costs a round trip to the host, and every look at the screen costs another
-      (about 0.1 s each; the run makes several hundred of them). What could move
-      is anything the phone can answer about itself: resolving a control and
-      tapping it (done), waiting for it (done), reading a field's text, deciding
-      which page or dialog is showing, and the branches that follow from those —
-      "if the list is not showing, go back once and look again". What cannot
-      move is anything about the rest of the world: a request through the
-      tunnel, dumpsys, logcat, the artifacts pulled to the host, the clock
-      fit — the phone cannot test the thing the phone is. The shape of the
-      answer is probably a second instruction set on top of the sequences — a
-      small conditional or a named routine the host can call — plus the harness
-      becoming a list of routines with its assertions still in bash, so a
-      failure still says which claim was wrong rather than "the script failed".
-      Worth doing where a step is long and branchy (`panel_open`, the scroll
-      loops, the rename dance); not worth it for a step that is one tap and one
-      request. The trap to avoid: a self-reported verdict. The phone may say
-      what it saw; the host decides what that means.
+- [ ] The footer under an open proxy that is not running, while something else
+      is, says "Another proxy is running — Start switches to this one"
+      (`footer_not_this`, shown by `MainActivity.renderPending()` whenever
+      `ProxyRuntime.forName(editing) == null` and the list is not empty). It is
+      true only in the narrow case where the running proxy holds the same port:
+      `ProxyService.start()` replaces a listener only when the port is taken,
+      otherwise it adds one, so pressing Start on a page adds a second proxy
+      beside the first and stops nothing. What does change is the "in use" mark,
+      which is only the one the tile and a restart at boot start. The same page's
+      button contradicts it: Start adds, Stop is a bare `STOP` and stops every
+      listener, not just this one. Decide what the two halves mean on a page
+      (add/remove this one, with the in-use mark named rather than implied), say
+      it in the footer and in the two `i` dialogs, and let the harness check it —
+      the `several at once` step already builds the state (two listeners up, a
+      third saved and open).
