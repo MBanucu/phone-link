@@ -31,6 +31,8 @@
 #      and to save an eleventh,
 #  10b. require the open proxy's own log to show the traffic counters, the
 #      events it caused and their port, and Clear to empty the list,
+#  10e. delete a running proxy over adb and from the menu, and require the
+#      port to close both ways with the other proxy still serving,
 #  10d. the page's own checks, run by an instrumentation inside the proxy's
 #      process (tests/live/../android/devicetest): two saved proxies, one
 #      started from its card, the other's page saying Start adds it beside,
@@ -102,15 +104,55 @@ step_start=0
 step_pass=0
 step_fail=0
 
+# Every verdict is also a row in checks.csv, so a failed run can be read as a
+# list instead of as scrollback: the step, whether it was good, the harness file
+# and line that asked, the function it was asked from, when the laptop decided
+# it, and the claim itself.
+checks_row() { # checks_row VERDICT CLAIM FUNCTION FILE LINE
+  local file=${4#"$ROOT"/}
+  file=${file#./}
+  printf '%s,%s,%s,%s,%s,%s,%s,"%s"\n' \
+    "$run_id" "$step_name" "$1" "$file" "$5" "$3" "$(now_ms)" "${2//\"/\"\"}" \
+    >>"$CHECKS"
+}
+
+# What happened just before a failed check, from the phone's own record: its
+# clock, the last actions it took and the last screen it captured. Best effort,
+# and only on a failure — a run whose capture service never came up still says
+# which check failed and where.
+failure_context() {
+  [ "$capture_dumps" = 1 ] || return 0
+  local clock actions captures
+  # One string: adb joins its arguments, and the space would be lost.
+  clock=$(shell "cut -d' ' -f1 /proc/uptime" 2>/dev/null)
+  actions=$(shell tail -n 3 "$CAPTURE_DIR/actions.csv" 2>/dev/null | tr '\n' '|')
+  captures=$(shell tail -n 2 "$CAPTURE_DIR/ui-index.csv" 2>/dev/null | tr '\n' '|')
+  if [ -n "${last_check:-}" ]; then
+    printf '  previous check: %s\n' "$last_check"
+  fi
+  if [ -n "$clock" ]; then
+    printf '  phone clock: %s s since boot (device_ns ~%s)\n' \
+      "$clock" "$(printf '%s' "$clock" | awk '{ printf "%d", $1 * 1000000000 }')"
+  fi
+  [ -n "$actions" ] && printf '  last actions:  %s\n' "$actions"
+  [ -n "$captures" ] && printf '  last captures: %s\n' "$captures"
+  return 0
+}
+
 ok() {
   pass=$((pass + 1))
   step_pass=$((step_pass + 1))
   printf 'PASS %s\n' "$*"
+  checks_row pass "$*" "${FUNCNAME[1]}" "${BASH_SOURCE[1]}" "${BASH_LINENO[0]}"
+  last_check="PASS $*"
 }
 bad() {
   fail=$((fail + 1))
   step_fail=$((step_fail + 1))
   printf 'FAIL %s\n' "$*"
+  checks_row fail "$*" "${FUNCNAME[1]}" "${BASH_SOURCE[1]}" "${BASH_LINENO[0]}"
+  failure_context
+  last_check="FAIL $*"
 }
 
 # Milliseconds since the epoch, for the per-step timings.
@@ -162,7 +204,11 @@ fi
 run_id=$(date -u +%Y%m%dT%H%M%SZ)
 ARTIFACTS=${PHONE_LIVE_ARTIFACTS:-$ROOT/result-live/$run_id}
 TIMINGS=${PHONE_LIVE_TIMINGS:-$ROOT/result-live/timings.csv}
+# This run's checks, one row each; beside it timings.csv, which keeps the
+# history of every run.
+CHECKS=${PHONE_LIVE_CHECKS:-$ARTIFACTS/checks.csv}
 mkdir -p "$ARTIFACTS" "$(dirname "$TIMINGS")"
+printf 'run,step,verdict,file,line,function,decided_ms,claim\n' >"$CHECKS"
 # The actions that had to go through `input`, each with the interval its
 # instant is inside; the ones the phone took itself are in the actions.csv the
 # capture service writes, which is pulled with the rest of its files.
@@ -207,7 +253,7 @@ cleanup() {
   # with test proxies in its list.
   local leftover
   for leftover in harness-panel harness-save harness-one harness-new \
-    inside-a inside-b; do
+    inside-a inside-b gone-a gone-b; do
     shell am start-foreground-service -n "$SERVICE" \
       -a org.phonelink.proxy.action.DELETE_PROFILE --es profile "$leftover" \
       >/dev/null 2>&1
@@ -1080,6 +1126,71 @@ else
 fi
 delete_profile_by_adb harness-a
 delete_profile_by_adb harness-b
+
+step 'deleting a proxy while it runs'
+# A saved proxy is its listener's name, so deleting it has to take the listener
+# with it: a port the list cannot show is a port the panel cannot stop. Both
+# ways of deleting one — over adb and from the menu — have to end the same.
+PORT5=$((PORT + 4))
+PORT6=$((PORT + 5))
+start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT5"
+sleep 2
+save_profile gone-a
+start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT6" \
+  --es user "$USER2" --es password "$PASSWORD2"
+sleep 2
+save_profile gone-b
+shell am start-foreground-service -n "$SERVICE" -a "$START" \
+  --es profile gone-a >/dev/null 2>&1
+sleep 2
+shell am start-foreground-service -n "$SERVICE" -a "$START" \
+  --es profile gone-b >/dev/null 2>&1
+sleep 3
+if through "$PORT5" "$USER_NAME" "$PASSWORD" &&
+  through "$PORT6" "$USER2" "$PASSWORD2"; then
+  ok 'both serve before one of them is deleted'
+else
+  bad 'both serve before one of them is deleted'
+fi
+delete_profile_by_adb gone-a
+if closed "$PORT5" && through "$PORT6" "$USER2" "$PASSWORD2"; then
+  ok 'deleting a running proxy over adb closes its port and leaves the other'
+else
+  bad 'deleting a running proxy over adb closes its port and leaves the other'
+fi
+now=$(shell dumpsys activity service "$SERVICE" | sed -n '/Right now/,/  saved/p')
+if [ "$(printf '%s\n' "$now" | grep -c '^ *running')" -eq 1 ] &&
+  printf '%s\n' "$now" | grep '^ *running' | grep -q gone-b; then
+  ok 'and the service reports only the one that is left'
+else
+  bad 'and the service reports only the one that is left'
+  shell dumpsys activity service "$SERVICE" | sed -n '/Right now/,/  saved/p'
+fi
+# The menu's Delete, on the other running one: the panel stops it and goes back
+# to the list, where its card is gone.
+open_panel
+if panel_open gone-b; then
+  if menu_pick Delete && sequence \
+    'wait id=button1 2000; tap-id button1 3000; wait id=new_profile 3000'; then
+    sleep 2
+    if closed "$PORT6" && ! foreground; then
+      ok "the menu's Delete stops the proxy it deletes"
+    else
+      bad "the menu's Delete stops the proxy it deletes"
+    fi
+    if shell dumpsys activity service "$SERVICE" | grep 'saved' | grep -q '"gone-b"'; then
+      bad 'and the store no longer has it'
+    else
+      ok 'and the store no longer has it'
+    fi
+  else
+    bad 'the menu offers Delete'
+    panel_where
+  fi
+else
+  bad 'the running proxy to delete opens'
+  panel_where
+fi
 
 step 'the page from the inside'
 # The same claims about the page and the cards, decided where the views are.

@@ -118,7 +118,13 @@ installed by a test run and removed by it.
   from polling — with `ui-index.csv` giving each one's timestamp and what
   caused it, so what the phone showed at a moment can be re-read afterwards.
   `tests/live/frames.sh result-live/<run>/screen.mp4 0:42 95.5` writes a still
-  per moment; it needs ffmpeg on the host. Each step's duration and pass/fail
+  per moment; it needs ffmpeg on the host. `checks.csv` is the run's verdicts as
+  a list: one row per check with the step, the harness file and line that asked
+  it, the function it was asked from, when the laptop decided it and the claim —
+  and a failure prints by itself what happened just before it (the previous
+  check, the phone's clock, its last three actions and two captures), so a red
+  line is a place to look rather than a place to start searching. Each step's
+  duration and pass/fail
   counts are appended to `result-live/timings.csv`, one row per step plus a
   `TOTAL` row: the file is never rewritten, which is what makes "how long does
   this run cost" a question with an answer. `PHONE_LIVE_CAPTURE=0` turns the

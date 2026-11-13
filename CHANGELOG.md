@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A run keeps its checks as a file. `checks.csv` beside the run's artifacts has a
+  row per check — the step, the verdict, the harness file and line that asked it,
+  the function it was asked from, when the laptop decided it, and the claim — so
+  a failed run can be read as a list instead of as scrollback. A failure also
+  prints, by itself, what happened just before it: the previous check in the same
+  step, the phone's clock (`/proc/uptime`, the same clock as `actions.csv` and
+  `ui-index.csv`, which `clock.txt` maps into the recording), and the phone's last
+  three actions and two captures. Measured cost when nothing fails: none; a
+  failure costs three adb calls.
 - The panel's own checks can run on the phone, inside the proxy's process.
   `android/devicetest/` is an instrumentation with no JUnit and no androidx — one
   `Instrumentation` subclass, loaded by `am instrument`, that starts the
@@ -53,6 +62,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and gone after the second one. The run went from 91 checks to 86, still green.
 
 ### Fixed
+
+- Deleting a saved proxy over adb took the configuration and left the listener
+  running under a name the store no longer had — a port nothing could show and
+  the panel could not stop, because the page went with the profile. The comment
+  in `deleteSaved` said the listener "keeps its port but loses the name it is
+  listed under" and no code did that. It now stops the listener, which is what
+  the panel's own Delete already did, so both ways of deleting one end the same;
+  the dialog says so too ("If its proxy is listening, its port closes with it").
 
 - A run's verdict is printed after its last check. The summary line came before
   the exit trap that fits the recording to the phone's clock, so it counted one

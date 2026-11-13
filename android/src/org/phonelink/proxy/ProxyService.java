@@ -321,6 +321,16 @@ public final class ProxyService extends Service {
         name = name == null ? null : name.trim();
         boolean byPort = intent != null && intent.hasExtra(ConfigStore.EXTRA_PORT);
         int port = intent == null ? 0 : intent.getIntExtra(ConfigStore.EXTRA_PORT, 0);
+        stopListeners(name, byPort, port);
+    }
+
+    /**
+     * Close the listeners a stop is about — one name, one port, or all of them
+     * — and let the service go when the last one is gone. Kept apart from
+     * {@link #stopRequested} so a delete can stop what its name owned without
+     * going through the intent again.
+     */
+    private void stopListeners(String name, boolean byPort, int port) {
         List<Running> going = new ArrayList<>();
         synchronized (lock) {
             if (name != null && !name.isEmpty()) {
@@ -525,8 +535,7 @@ public final class ProxyService extends Service {
             // The list must not keep pointing at a proxy that no longer exists.
             ConfigStore.setInUse(this, null);
         }
-        // A listener running under that name keeps its port but loses the name
-        // it is listed under, or the panel would show a card that is not there.
+        // A listener running under that name has nothing left to be called.
         Running named = null;
         synchronized (lock) {
             for (Running each : running.values()) {
@@ -535,12 +544,17 @@ public final class ProxyService extends Service {
                 }
             }
         }
-        if (named != null) {
-            EventLog.addTo(name, "deleted \"" + name + "\" while it was running");
-            publishAll();
-        }
         EventLog.addTo(name, "deleted \"" + name + "\"");
         Log.i(TAG, "deleted configuration \"" + name + "\"");
+        if (named != null) {
+            // The configuration is the listener's name, so it goes with the
+            // configuration: a port the list cannot show is a port the panel
+            // cannot stop. This is also what the panel's own Delete does, so
+            // both ways of deleting one end the same.
+            EventLog.addTo(name, "deleted \"" + name + "\" while it was running");
+            stopListeners(name, false, 0);
+            return;
+        }
         if (first && running.isEmpty()) {
             stopSelf();
         } else {

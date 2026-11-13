@@ -68,7 +68,7 @@
     <string name="profile_overwrite_title">Overwrite %1$s?</string>
     <string name="profile_overwrite_message">A saved configuration with that name is replaced by what the form holds.</string>
     <string name="profile_delete_title">Delete %1$s?</string>
-    <string name="profile_delete_message">The saved configuration goes away; the proxy keeps the settings it is running with.</string>
+    <string name="profile_delete_message">The saved configuration goes away. If its proxy is listening, its port closes with it.</string>
     <string name="pending_changes">Not saved yet — Save writes this to the configuration</string>
     <string name="battery_exempt">Battery: unrestricted — the proxy can come back after a reboot</string>
     <string name="battery_optimized">Battery: optimized — Android will not restart the proxy after a reboot (tap to change)</string>
