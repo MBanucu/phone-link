@@ -20,27 +20,15 @@ list is empty.
   `get-state` are false when it happens, because "it turned itself off" is a
   diagnosis nobody can check twice.
 
-## The diagnosis probes the wrong route
-
-- [ ] `uplink_diag` asks the phone to `ping 1.1.1.1`, which goes out over the
-  phone's *default* network — here the Wi-Fi link the laptop made. The app's
-  egress is deliberately the cellular network, so "the phone's route works, so
-  the proxy is the suspect" holds only while both are up: a cellular outage with
-  Wi-Fi working reads as a proxy bug, which is exactly the mis-blame the
-  diagnosis exists to prevent. What is wanted: probe the path the proxy uses
-  (`ping -I ccmni1 1.1.1.1`, or better, have the app say which egress it is
-  bound to in its `dumpsys`), and have the verdict name both — the default route
-  and the app's own egress — so the reader can see when they disagree.
-
 ## A short run confuses the clock fit
 
-- [ ] The 33 s `PHONE_LIVE_ONLY='allowed network'` run failed `the recording and
-  the phone share a clock` once: `clock.sh` said "burst 1: 8 flashes in the
-  phone's record, 16 in the recording (the phone put it near 0 s of 13.2)". A
-  run that short has the calibration burst at its start and the one at its end
-  inside the same recording, and the fitter reads both as one burst of 16; the
-  next two runs of the same step fitted fine (16 edges, ±1.1 ms), so it is the
-  length of the run and not the phone. What is wanted: a burst is a run of
+- [ ] The 33 s `PHONE_LIVE_ONLY='allowed network'` run fails `the recording and
+  the phone share a clock` about half the time — four of the last six short runs
+  — with `clock.sh` saying "burst 1: 8 flashes in the phone's record, 16 in the
+  recording (the phone put it near 0 s of 13.2)". A run that short has the
+  calibration burst at its start and the one at its end inside the same
+  recording, and the fitter reads both as one burst of 16; longer runs fit at
+  ±1 ms, so it is the length of the run and not the phone. What is wanted: a burst is a run of
   flashes separated by a gap, and the phone's own `clock.csv` has that gap, so
   the fitter should split on it instead of assuming one burst per file — and say
   what it split on, since "could not be fitted" is the only thing it says now.
