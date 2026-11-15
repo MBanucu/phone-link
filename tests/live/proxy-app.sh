@@ -178,6 +178,43 @@ bad() {
 # Milliseconds since the epoch, for the per-step timings.
 now_ms() { date +%s%3N; }
 
+# The link itself, before anything is read through it. A phone whose wireless
+# debugging has gone away answers nothing, and every read below then comes back
+# empty — which reads as "the phone has no Wi-Fi", a different fault with a
+# different fix. A port that merely rotated is not a lost phone: adbd advertises
+# the new one, and `avahi-browse -rtp` prints it in a second.
+adb_link() {
+  local state found endpoint
+  state=$(phone get-state 2>&1 | head -1)
+  [ "$state" = device ] && return 0
+  found=$(timeout 20 avahi-browse -rtp _adb-tls-connect._tcp 2>/dev/null || true)
+  endpoint=$(printf '%s\n' "$found" | awk -F';' \
+    '$1 == "=" && $3 == "IPv4" && $8 != "" && $9 ~ /^[0-9]+$/ {
+      print $8 ":" $9
+      exit }')
+  if [ -n "$endpoint" ] && [ "$endpoint" != "$serial" ]; then
+    adb connect "$endpoint" >/dev/null 2>&1 || true
+    if [ "$(adb -s "$endpoint" get-state 2>&1 | head -1)" = device ]; then
+      printf 'the phone moved to %s, %s no longer answers\n' "$endpoint" "$serial"
+      serial=$endpoint
+      return 0
+    fi
+  fi
+  printf 'the adb link is gone: "%s" said "%s"\n' "$state" "$serial" >&2
+  if [ -n "$endpoint" ]; then
+    printf '  it advertises %s, and that does not answer either: wireless\n' "$endpoint" >&2
+    printf '  debugging was just switched, or the phone left this network\n' >&2
+  elif printf '%s' "$found" | grep -q '^+'; then
+    printf '  adbd is advertised with no address in its record, which is wireless\n' >&2
+    printf '  debugging switched off on the phone\n' >&2
+  else
+    printf '  nothing on this network advertises _adb-tls-connect: the phone is\n' >&2
+    printf '  off, elsewhere, or its wireless debugging is off\n' >&2
+  fi
+  printf '  a cable and phone-adb-wifi turn it back on without the screen\n' >&2
+  exit 2
+}
+
 # Append-only, one row per step plus a TOTAL row: the point of the file is the
 # history, so it is never rewritten and never sorted.
 timing_row() { # timing_row STEP SECONDS PASSED FAILED STATUS
@@ -628,6 +665,9 @@ tile_click() {
   sleep 2
   shell cmd statusbar click-tile "$PKG/.ProxyTile" >/dev/null 2>&1
 }
+
+# Before the Wi-Fi read, because a dead link makes every read empty.
+adb_link
 
 ADDRESS=$(shell ip -4 addr show wlan0 2>/dev/null |
   awk '/inet / { sub(/\/.*/, "", $2); print $2; exit }')

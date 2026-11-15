@@ -44,6 +44,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A run no longer blames Wi-Fi for a phone that adb cannot reach. When the
+  wireless-debugging endpoint went away, every read through adb came back empty
+  and the harness stopped with "the phone needs a Wi-Fi client link for this
+  harness (address=none ssid=none)" — a different fault, with a different fix,
+  from the one that had actually happened. It now spends one `adb get-state`
+  before the first read: a serial that no longer answers is retargeted at the
+  endpoint adbd advertises over mDNS (the port changes when wireless debugging
+  restarts, not when the phone reboots, so the old one is stale rather than
+  wrong), and only when that fails too does the run stop, saying which link is
+  gone and what the phone is telling the network — "adbd is advertised with no
+  address in its record, which is wireless debugging switched off on the phone",
+  "nothing on this network advertises _adb-tls-connect", or "it advertises
+  <endpoint>, and that does not answer either". Observed for real: a stale
+  `192.168.77.232:46287` was replaced by the advertised `192.168.77.232:35161`
+  in the same second, and the run then passed every check.
+
 - A short run's clock fit knew about one burst of flashes. `clock.sh` split the
   phone's record on a gap and looked for each burst in a window of the video,
   but it took every flash in that window as belonging to the burst — so on a
