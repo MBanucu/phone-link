@@ -235,7 +235,7 @@ printf 'start_ns,end_ns,kind,what\n' >"$ARTIFACTS/input.csv"
 # What the phone said about its own route when a tunnel check failed; written
 # only on failure, so a green run leaves no rows.
 UPLINK=${PHONE_LIVE_UPLINK:-$ARTIFACTS/uplink.csv}
-printf 'decided_ms,port,ping_ip,ping_dns,verdict\n' >"$UPLINK"
+printf 'decided_ms,port,ping_ip,ping_host,verdict\n' >"$UPLINK"
 
 # How to look at and drive the phone lives in its own file; this one decides
 # what the phone showed means.
@@ -504,8 +504,14 @@ through() { # through PORT USER PASSWORD
 # FAIL and a row in uplink.csv. Two adb calls and one logcat, paid only when a
 # check fails, which is the run that has to be repeated otherwise.
 uplink_diag() { # uplink_diag PORT
-  local port=$1 host said ip dns verdict log_line
+  local port=$1 host said ip reach literal verdict log_line log_lines counters
   host=$(printf '%s' "$TUNNEL_URL" | sed -e 's|^[a-z]*://||' -e 's|[:/].*||')
+  # An address is not a name: the second probe is then about reaching that
+  # host, not about a resolver.
+  case $host in
+    '' | *[!0-9.]*) literal=no ;;
+    *) literal=yes ;;
+  esac
   said=$(shell "ping -c 1 -W 3 1.1.1.1" 2>&1)
   case $said in
     *" 1 received"*) ip=yes ;;
@@ -514,25 +520,41 @@ uplink_diag() { # uplink_diag PORT
   esac
   said=$(shell "ping -c 1 -W 3 $host" 2>&1)
   case $said in
-    *" 1 received"*) dns=yes ;;
-    *" 0 received"*) dns=no ;;
-    *) dns=unknown ;;
+    *" 1 received"*) reach=yes ;;
+    *" 0 received"*) reach=no ;;
+    *) reach=unknown ;;
   esac
   if [ "$ip" = no ]; then
     verdict="the phone has no route (ping 1.1.1.1 got nothing): the proxy was given a request the phone could not make"
-  elif [ "$ip" = yes ] && [ "$dns" = no ]; then
-    verdict="the phone has a route but no answer from $host, so its resolver was the suspect"
-  elif [ "$ip" = yes ] && [ "$dns" = yes ]; then
+  elif [ "$ip" = yes ] && [ "$reach" = no ] && [ "$literal" = yes ]; then
+    verdict="the phone's route works, but $host does not answer it: the check's own address was unreachable, not the proxy"
+  elif [ "$ip" = yes ] && [ "$reach" = no ]; then
+    verdict="the phone has a route but no answer for $host, so its resolver was the suspect"
+  elif [ "$ip" = yes ] && [ "$reach" = yes ]; then
     verdict="the phone's own route works (1.1.1.1 and $host both answered), so the proxy is the suspect"
   else
-    verdict="the phone did not answer the probes (address: $ip, name: $dns)"
+    verdict="the phone did not answer the probes (address: $ip, host: $reach)"
   fi
   printf '  uplink: %s\n' "$verdict"
-  log_line=$(shell "logcat -d -s phone-link-proxy:V | grep -F 'port $port' | tail -1" 2>/dev/null)
+  # What the app said about this port, an error line first: the last line may be
+  # the start that worked, which explains nothing about the failure.
+  log_lines=$(shell "logcat -d -s phone-link-proxy:V" 2>/dev/null |
+    grep -F "port $port" | tail -20)
+  log_line=$(printf '%s\n' "$log_lines" |
+    grep -Ei 'refus|fail|error|timeout|unreachable|denied' | tail -1)
+  [ -n "$log_line" ] || log_line=$(printf '%s\n' "$log_lines" | tail -1)
   if [ -n "$log_line" ]; then
     printf '  uplink: the app says: %s\n' "$(printf '%s' "$log_line" | sed 's/.*phone-link-proxy: //')"
   fi
-  printf '%s,%s,%s,%s,%s\n' "$(now_ms)" "$port" "$ip" "$dns" "$verdict" >>"$UPLINK"
+  # What the port itself saw: bytes in and out say whether the request reached
+  # the app at all, which the log line alone cannot.
+  counters=$(shell dumpsys activity service "$SERVICE" 2>/dev/null |
+    sed -n 's/^ *running *//p' | grep -F "port $port" | head -1)
+  if [ -n "$counters" ]; then
+    printf '  uplink: the app reports: %s\n' "$counters"
+  fi
+  # The verdict has commas in it, so it is quoted: uplink.csv stays five columns.
+  printf '%s,%s,%s,%s,"%s"\n' "$(now_ms)" "$port" "$ip" "$reach" "$verdict" >>"$UPLINK"
 }
 
 # A check whose claim is a request through a tunnel: on failure it says whose
