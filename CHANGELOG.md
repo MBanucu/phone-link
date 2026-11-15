@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `dumpsys` says which network the tunnel leaves by. The app pins its egress to
+  cellular on purpose — a socket on the default route would come back down the
+  Wi-Fi link the requester is on — but nothing said so, and from outside the
+  phone the route is invisible: `ping` follows the default route, which is the
+  Wi-Fi one. The service now prints `egress ccmni1 (cellular, network 113)`, or
+  that it is waiting for a cellular network, or that no listener has started;
+  the help text says the dump carries it.
+
 - A tunnel check that fails says whose fault it was. Five checks failed in one
   run — `request through the tunnel`, `two proxies serve at once`, the tile
   starting both — and all of it was the phone's uplink having a bad minute: a

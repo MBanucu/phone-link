@@ -232,6 +232,11 @@ public final class ProxyService extends Service implements Port.Host {
         if (config != null) {
             writer.println("  using       " + config.summary());
         }
+        // Not the phone's default route: a request that fails here has to be
+        // told apart from one the phone's Wi-Fi could have carried.
+        Egress leaving = egress;
+        writer.println("  egress      "
+                + (leaving == null ? "none (no listener started)" : leaving.describe()));
         writer.println("  auto-start  " + ConfigStore.autoStart(this));
         writer.println("  adb_wifi    " + ConfigStore.adbWireless(this)
                 + " (Android's switch is " + (AdbWireless.on(this) ? "on" : "off") + ")");

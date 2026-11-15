@@ -2,6 +2,7 @@ package org.phonelink.proxy;
 
 import android.content.Context;
 import android.net.ConnectivityManager;
+import android.net.LinkProperties;
 import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
@@ -85,6 +86,30 @@ final class Egress implements Upstream, Closeable {
             requested = true;
         }
         manager.requestNetwork(request, callback);
+    }
+
+    /**
+     * The network the tunnel leaves by, for the service's `dumpsys`.
+     *
+     * <p>Worth printing because it is not the phone's default route: this app
+     * pins its egress to cellular so that a socket does not come back down the
+     * Wi-Fi link the requester is on. A person reading a failed request, or a
+     * harness asking "was it the phone?", cannot see that from the outside —
+     * `ping` follows the default route, this name does not.
+     */
+    String describe() {
+        Network network;
+        boolean asked;
+        synchronized (lock) {
+            network = cellular;
+            asked = requested;
+        }
+        if (network == null) {
+            return asked ? "none yet (waiting for cellular)" : "none (no listener started)";
+        }
+        LinkProperties properties = manager.getLinkProperties(network);
+        String iface = properties == null ? null : properties.getInterfaceName();
+        return (iface == null ? "cellular" : iface) + " (cellular, network " + network + ")";
     }
 
     @Override
