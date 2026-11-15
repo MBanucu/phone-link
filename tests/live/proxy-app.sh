@@ -67,12 +67,13 @@
 # history is what makes "is this cheap enough to run before a commit"
 # answerable. PHONE_LIVE_CAPTURE=0 skips the recording and the snapshots.
 #
-# A tunnel check that fails asks the phone whose fault it was: its own route by
-# address and by name, with the proxy out of the path, plus the app's last word
-# about that port, printed under the FAIL and written to uplink.csv. A flaky
-# uplink then reads as a flaky uplink instead of a proxy bug, which is a rerun
-# not spent. PHONE_LIVE_TUNNEL_URL (default https://example.com) is the name
-# those checks ask for.
+# A tunnel check that fails asks the phone whose fault it was: the route the
+# tunnel really takes (the cellular interface the app reports it is bound to,
+# then a ping through it), the phone's own default route, the app's last word
+# and byte counters for that port — printed under the FAIL and written to
+# uplink.csv. A flaky uplink then reads as a flaky uplink instead of a proxy
+# bug, which is a rerun not spent. PHONE_LIVE_TUNNEL_URL (default
+# https://example.com) is the name those checks ask for.
 #
 # PHONE_LIVE_ONLY="card toggle,rename" runs just the steps it names, by the
 # name the log prints, instead of all twenty-three. The steps are not
@@ -235,7 +236,7 @@ printf 'start_ns,end_ns,kind,what\n' >"$ARTIFACTS/input.csv"
 # What the phone said about its own route when a tunnel check failed; written
 # only on failure, so a green run leaves no rows.
 UPLINK=${PHONE_LIVE_UPLINK:-$ARTIFACTS/uplink.csv}
-printf 'decided_ms,port,ping_ip,ping_host,verdict\n' >"$UPLINK"
+printf 'decided_ms,port,ping_ip,ping_host,egress,verdict\n' >"$UPLINK"
 
 # How to look at and drive the phone lives in its own file; this one decides
 # what the phone showed means.
@@ -266,6 +267,13 @@ clock_failed=""
 
 cleanup() {
   stop_capture
+  # Which profiles are there has to be read before the service is stopped: the
+  # dump is empty afterwards, and a guard that reads nothing deletes nothing.
+  # Two spaces after the name: the help text above the facts also has a line
+  # starting with "saved,".
+  local saved
+  saved=$(shell dumpsys activity service "$SERVICE" 2>/dev/null |
+    sed -n '/  saved  /,$p')
   # Off the phone again: the settings go back to what they were and the test
   # package is uninstalled, so nothing of this run is left behind.
   capture_stop
@@ -279,9 +287,7 @@ cleanup() {
   # with test proxies in its list. Only the names that are really there are
   # named, because a delete of a name that does not exist is an error the app
   # puts in the shade — one notification per name, every run.
-  local leftover saved
-  saved=$(shell dumpsys activity service "$SERVICE" 2>/dev/null |
-    sed -n '/  saved/,$p')
+  local leftover
   for leftover in harness-panel harness-save harness-one harness-new \
     inside-a inside-b gone-a gone-b harness-tile-a harness-tile-b \
     harness-tile-c; do
@@ -504,7 +510,8 @@ through() { # through PORT USER PASSWORD
 # FAIL and a row in uplink.csv. Two adb calls and one logcat, paid only when a
 # check fails, which is the run that has to be repeated otherwise.
 uplink_diag() { # uplink_diag PORT
-  local port=$1 host said ip reach literal verdict log_line log_lines counters
+  local port=$1 host said ip reach literal iface egress_ip verdict
+  local log_line log_lines counters report eg
   host=$(printf '%s' "$TUNNEL_URL" | sed -e 's|^[a-z]*://||' -e 's|[:/].*||')
   # An address is not a name: the second probe is then about reaching that
   # host, not about a resolver.
@@ -512,6 +519,20 @@ uplink_diag() { # uplink_diag PORT
     '' | *[!0-9.]*) literal=no ;;
     *) literal=yes ;;
   esac
+  # One dumpsys answers three questions: which network the app leaves by, what
+  # the port moved, and what the service thinks it is doing.
+  report=$(shell dumpsys activity service "$SERVICE" 2>/dev/null)
+  # `dumpsys activity service` indents the service's own lines by four spaces,
+  # and the dump's column is six spaces after the name; the width is what keeps
+  # a Help sentence that starts with the word from being read as the answer.
+  egress=$(printf '%s\n' "$report" | sed -n 's/^ *egress \{6\}//p' | head -1)
+  counters=$(printf '%s\n' "$report" |
+    sed -n 's/^ *running *//p' | grep -F "port $port" | head -1)
+  case $egress in
+    '' | none*) iface= ;;
+    *) iface=$(printf '%s' "$egress" | sed -n 's/^\([^ ]*\) .*/\1/p') ;;
+  esac
+  # The phone's own default route, which is the Wi-Fi link here.
   said=$(shell "ping -c 1 -W 3 1.1.1.1" 2>&1)
   case $said in
     *" 1 received"*) ip=yes ;;
@@ -524,20 +545,44 @@ uplink_diag() { # uplink_diag PORT
     *" 0 received"*) reach=no ;;
     *) reach=unknown ;;
   esac
-  if [ "$ip" = no ]; then
-    verdict="the phone has no route (ping 1.1.1.1 got nothing): the proxy was given a request the phone could not make"
-  elif [ "$ip" = yes ] && [ "$reach" = no ] && [ "$literal" = yes ]; then
-    verdict="the phone's route works, but $host does not answer it: the check's own address was unreachable, not the proxy"
-  elif [ "$ip" = yes ] && [ "$reach" = no ]; then
-    verdict="the phone has a route but no answer for $host, so its resolver was the suspect"
-  elif [ "$ip" = yes ] && [ "$reach" = yes ]; then
-    verdict="the phone's own route works (1.1.1.1 and $host both answered), so the proxy is the suspect"
+  # And the route the tunnel actually takes: the app pins its egress to
+  # cellular, so a ping that follows the default route says nothing about it.
+  if [ -n "$iface" ]; then
+    said=$(shell "ping -c 1 -W 3 -I $iface 1.1.1.1" 2>&1)
+    case $said in
+      *" 1 received"*) egress_ip=yes ;;
+      *" 0 received"*) egress_ip=no ;;
+      *) egress_ip=unknown ;;
+    esac
   else
-    verdict="the phone did not answer the probes (address: $ip, host: $reach)"
+    egress_ip=none
   fi
+  if [ "$egress_ip" = none ]; then
+    case $egress in
+      *waiting*) verdict="the app is still waiting for a cellular network, so the phone had none to give it" ;;
+      *) verdict="the app holds no cellular egress, so the proxy had nowhere to send the request" ;;
+    esac
+  elif [ "$egress_ip" = no ]; then
+    verdict="the app's egress ($iface) cannot reach 1.1.1.1: the proxy was given a request that network could not carry"
+  elif [ "$ip" = no ]; then
+    verdict="the app's egress ($iface) reaches the internet while the phone's default route does not: the proxy was fine"
+  elif [ "$reach" = no ] && [ "$literal" = yes ]; then
+    verdict="the app's egress ($iface) reaches the internet, but that address does not answer it: the check's own address was unreachable"
+  elif [ "$reach" = no ]; then
+    verdict="the app's egress ($iface) reaches the internet but $host does not answer: the check's own name was the suspect"
+  else
+    verdict="the app's egress ($iface) and the phone's route both work, so the proxy is the suspect"
+  fi
+  # The raw line first: a misparse then reads as one instead of as a verdict.
+  printf '  uplink: the app reports its egress: %s\n' "${egress:-none in the dump}"
   printf '  uplink: %s\n' "$verdict"
-  # What the app said about this port, an error line first: the last line may be
-  # the start that worked, which explains nothing about the failure.
+  # What the port itself saw: bytes in and out say whether the request reached
+  # the app at all, which the log line alone cannot.
+  if [ -n "$counters" ]; then
+    printf '  uplink: the app reports: %s\n' "$counters"
+  fi
+  # The app's last word about this port, an error line first: the last line may
+  # be the start that worked, which explains nothing about the failure.
   log_lines=$(shell "logcat -d -s phone-link-proxy:V" 2>/dev/null |
     grep -F "port $port" | tail -20)
   log_line=$(printf '%s\n' "$log_lines" |
@@ -546,15 +591,9 @@ uplink_diag() { # uplink_diag PORT
   if [ -n "$log_line" ]; then
     printf '  uplink: the app says: %s\n' "$(printf '%s' "$log_line" | sed 's/.*phone-link-proxy: //')"
   fi
-  # What the port itself saw: bytes in and out say whether the request reached
-  # the app at all, which the log line alone cannot.
-  counters=$(shell dumpsys activity service "$SERVICE" 2>/dev/null |
-    sed -n 's/^ *running *//p' | grep -F "port $port" | head -1)
-  if [ -n "$counters" ]; then
-    printf '  uplink: the app reports: %s\n' "$counters"
-  fi
-  # The verdict has commas in it, so it is quoted: uplink.csv stays five columns.
-  printf '%s,%s,%s,%s,"%s"\n' "$(now_ms)" "$port" "$ip" "$reach" "$verdict" >>"$UPLINK"
+  eg=${egress:-none}
+  # The verdict has commas in it, so it is quoted: uplink.csv keeps six columns.
+  printf '%s,%s,%s,%s,"%s","%s"\n' "$(now_ms)" "$port" "$ip" "$reach" "$eg" "$verdict" >>"$UPLINK"
 }
 
 # A check whose claim is a request through a tunnel: on failure it says whose

@@ -22,23 +22,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   starting both — and all of it was the phone's uplink having a bad minute: a
   `curl` through the same proxy answered 200 a few minutes later. The check knew
   only that `curl` exited non-zero, so the run had to be repeated to learn that.
-  Now a `tunnel_check` asks the phone two questions with the proxy out of the
-  path — its route by address (`ping 1.1.1.1`) and its answer for the check's
-  own host, which is a resolver question only when that host is a name and a
-  reachability question when it is an address — then the app for its last word
-  and its byte counters on that port, prints the verdict under the FAIL and
-  appends a quoted row to `uplink.csv` in the run's folder. The verdict says
-  which side to blame: "the phone has no route, the proxy was given a request
-  the phone could not make", "the phone's route works, but that address does not
-  answer it", "the phone has a route but no answer for that name, so its
-  resolver was the suspect", or "the phone's own route works, so the proxy is
-  the suspect" — and the counters say whether the request reached the app at
-  all. Three adb calls and one `logcat`, paid only when a check fails, which is
-  the run that had to be repeated otherwise. `PHONE_LIVE_TUNNEL_URL` names the
-  server the checks ask for (default `https://example.com`), which is also how
-  the failure path is exercised on purpose: pointed at `https://10.255.255.1/`
-  the verdict came back "the check's own address was unreachable, not the
-  proxy", with `↓ 0 B` in the app's counters, and a green run prints nothing.
+  Now a `tunnel_check` asks the phone whose fault it was: the network the app
+  says its egress is bound to, a ping sent through *that* interface, the phone's
+  own default route, the app's byte counters and last word for the port. Its
+  verdict picks the side — "the app's egress (ccmni1) cannot reach 1.1.1.1: the
+  proxy was given a request that network could not carry", "the app's egress
+  reaches the internet while the phone's default route does not: the proxy was
+  fine", "the app's egress reaches the internet, but that address does not
+  answer it: the check's own address was unreachable", "the app is still waiting
+  for a cellular network", or "both work, so the proxy is the suspect" — prints
+  it under the FAIL with the raw egress line above it, and appends a quoted row
+  to `uplink.csv`. Probing the default route was the first version, and it
+  tested the wrong path: `ping` follows the Wi-Fi link the laptop made, while the
+  tunnel leaves by cellular, so a cellular outage would still have been read as
+  a proxy bug. Five adb calls and one `logcat`, paid only when a check fails;
+  `PHONE_LIVE_TUNNEL_URL` names the server the checks ask for (default
+  `https://example.com`), which is also how the failure path is exercised on
+  purpose: pointed at `https://10.255.255.1/` the verdict came back "the app's
+  egress (ccmni1) reaches the internet, but that address does not answer it",
+  and a green run prints nothing.
 
 ## [0.4.0] - 2026-11-15
 
