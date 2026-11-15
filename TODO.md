@@ -20,19 +20,18 @@ list is empty.
   `get-state` are false when it happens, because "it turned itself off" is a
   diagnosis nobody can check twice.
 
-## A tunnel check proved on a phone
+## A short run confuses the clock fit
 
-- [ ] The diagnosis is written and committed (`tunnel_check`, `uplink_diag`,
-  `uplink.csv`), but no run has executed it: wireless debugging was off when it
-  landed and every adb port on the phone refused. Two runs prove it, and both
-  want the phone awake: the ordinary one (a green tunnel check must print
-  nothing new, so the cost on success is exactly zero) and the failure one —
-  `PHONE_LIVE_TUNNEL_URL=https://10.255.255.1/` makes `tunnel_check` fail on
-  purpose, which should print the `uplink:` verdict under the FAIL, write a
-  row to `uplink.csv` and show the app's last word about the port. What the
-  failure run cannot prove is the "no route" branch, which needs the phone's own
-  uplink to be down; that one stays unproven until a bad minute happens, and is
-  worth checking against the row when it does.
+- [ ] The 33 s `PHONE_LIVE_ONLY='allowed network'` run failed `the recording and
+  the phone share a clock` once: `clock.sh` said "burst 1: 8 flashes in the
+  phone's record, 16 in the recording (the phone put it near 0 s of 13.2)". A
+  run that short has the calibration burst at its start and the one at its end
+  inside the same recording, and the fitter reads both as one burst of 16; the
+  next two runs of the same step fitted fine (16 edges, ±1.1 ms), so it is the
+  length of the run and not the phone. What is wanted: a burst is a run of
+  flashes separated by a gap, and the phone's own `clock.csv` has that gap, so
+  the fitter should split on it instead of assuming one burst per file — and say
+  what it split on, since "could not be fitted" is the only thing it says now.
 
 ## Files a run leaves on the phone
 
