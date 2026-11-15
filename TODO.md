@@ -4,34 +4,24 @@ Ideas taken from the user's messages, in the order they are being built.
 Delete an item once it is implemented and committed; delete the file when the
 list is empty.
 
-## The link that turns itself off
+## The doctor's adb line says why
 
-- [ ] Wireless debugging turned itself off on its own (2026-11-15, mid-session,
-  nothing here asked it to), and the way that shows up is every adb command
-  failing at once: the serial stops answering, the harness's first check fails,
-  and the run reads as a broken app until someone plugs in a cable. What is
-  wanted is that a lost link names itself. `phone-doctor` should say `adb` is
-  gone rather than a dead proxy, the harness should spend one `adb get-state`
-  before its unlock step and stop with "the adb link is gone (`adb_wifi_enabled`
-  is 0 / the TLS endpoint is no longer advertised)" instead of a page of failed
-  taps, and `phone-adb-wifi` should reconnect over mDNS without being told the
-  address. Worth writing down while it is still fresh: which of
-  `adb_wifi_enabled`, the mDNS `_adb-tls-connect` record and the serial's
-  `get-state` are false when it happens, because "it turned itself off" is a
-  diagnosis nobody can check twice.
-
-## A short run confuses the clock fit
-
-- [ ] The 33 s `PHONE_LIVE_ONLY='allowed network'` run fails `the recording and
-  the phone share a clock` about half the time — four of the last six short runs
-  — with `clock.sh` saying "burst 1: 8 flashes in the phone's record, 16 in the
-  recording (the phone put it near 0 s of 13.2)". A run that short has the
-  calibration burst at its start and the one at its end inside the same
-  recording, and the fitter reads both as one burst of 16; longer runs fit at
-  ±1 ms, so it is the length of the run and not the phone. What is wanted: a burst is a run of
-  flashes separated by a gap, and the phone's own `clock.csv` has that gap, so
-  the fitter should split on it instead of assuming one burst per file — and say
-  what it split on, since "could not be fitted" is the only thing it says now.
+- [ ] `phone-doctor` stops at `FAIL adb device none (see adb devices)`, while the
+  harness now says which of the three links is down ("adbd is advertised with no
+  address in its record", "nothing on this network advertises
+  _adb-tls-connect", "it advertises <endpoint>, and that does not answer
+  either"). The doctor can read the same thing: `phone_link.adb` can resolve an
+  endpoint but cannot say whether anything was announced at all, so it wants one
+  more reader of `avahi-browse`'s output — the announcement without an address
+  is wireless debugging switched off, no announcement is the phone being
+  elsewhere — and the `[phone]` section's `adb_device` detail is where it goes. A
+  stub `adb` that prints no devices is enough to test the three messages.
+  Worth writing down, from the failure on 2026-11-15 at 23:22: the record was
+  an announcement with nothing resolved (two `+` lines, no `=` line, twice, for
+  12 and 15 s), `adb devices` was empty, `adb_wifi_enabled` could not be read
+  because there was no adb to read it, and the phone never rebooted (uptime 3.3
+  days): wireless debugging restarted by itself and handed out a new port,
+  `35161` for the stale `46287`, about twenty minutes later.
 
 ## Files a run leaves on the phone
 
