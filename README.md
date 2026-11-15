@@ -26,7 +26,7 @@ cable.
 ```nix
 # flake.nix
 {
-  inputs.phone-link.url = "github:MBanucu/phone-link/v0.3.8";
+  inputs.phone-link.url = "github:MBanucu/phone-link/v0.4.0";
 
   outputs = { self, nixpkgs, phone-link, ... }: {
     nixosConfigurations.nixos = nixpkgs.lib.nixosSystem {
@@ -152,7 +152,7 @@ status page and runs the scripts with the flags declared in
 
 ```sh
 nix run .#gui                                 # from a checkout
-nix run github:MBanucu/phone-link/v0.3.8#gui  # straight from the tag
+nix run github:MBanucu/phone-link/v0.4.0#gui  # straight from the tag
 nix build .#phone-link-gui                    # or build it and run the binary
 ```
 
