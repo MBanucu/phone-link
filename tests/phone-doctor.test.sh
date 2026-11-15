@@ -340,7 +340,21 @@ fi
 grep -q 'is advertised but adb connect failed' "$LOG/out" \
   && ok "names the advertised address" || bad "names the advertised address" "$(cat "$LOG/out")"
 
-# 18. --help exits 0.
+# 18. A phone whose wireless debugging is off is announced, and never resolved:
+# the name is on the network with nothing listening behind it, which is a fault
+# on the phone and not a phone that is elsewhere.
+fresh_state
+printf 'List of devices attached\nXPLO2EEA0001541\tdevice\n' >"$LOG/devices"
+printf '+;wlp110s0;IPv6;adb-XPLO2EEA0001541-D1gkYk;_adb-tls-connect._tcp;local\n+;wlp110s0;IPv4;adb-XPLO2EEA0001541-D1gkYk;_adb-tls-connect._tcp;local\n' >"$LOG/avahi"
+if run; then ok "an unresolved announcement still exits 0"; else
+  bad "an unresolved announcement still exits 0" "$(cat "$LOG/out")"
+fi
+grep -q 'announced with no address: wireless debugging is off' "$LOG/out" \
+  && ok "names wireless debugging as the fault" || bad "names wireless debugging as the fault" "$(cat "$LOG/out")"
+grep -q 'USB only' "$LOG/out" && bad "does not fall back to USB only" \
+  || ok "does not fall back to USB only"
+
+# 19. --help exits 0.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"

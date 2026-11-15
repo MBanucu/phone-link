@@ -44,6 +44,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `phone-doctor`'s `[adb over wi-fi]` line can tell a phone whose wireless
+  debugging is off from one that is not on the network. Both used to read
+  `USB only (phone-adb-wifi)`, which is wrong advice in the first case: the
+  phone is on the network, adbd simply is not listening, and the fix is on the
+  phone. The mDNS record is now read for what it says rather than for the
+  address alone — a name that is announced and never resolves is wireless
+  debugging switched off ("announced with no address: wireless debugging is off
+  on the phone (or turn it on from a cable with phone-adb-wifi)"), and nothing
+  announced at all keeps the old line. Seen for real on 2026-11-15: `46287`
+  stopped answering, the record was two announcements with no address for 15 s,
+  and the phone came back twenty minutes later on `35161` without a reboot.
+
 - A run no longer blames Wi-Fi for a phone that adb cannot reach. When the
   wireless-debugging endpoint went away, every read through adb came back empty
   and the harness stopped with "the phone needs a Wi-Fi client link for this

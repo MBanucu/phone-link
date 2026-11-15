@@ -25,7 +25,7 @@ def check(ctx: Context) -> list[Result]:
     # network but missing from `adb devices` is usually unreachable rather than
     # gone: the new port is in its mDNS record, which is far quicker to read
     # than scanning the ephemeral range.
-    address = ctx.mdns_adb_address()
+    address, announced = ctx.mdns_adb()
     if address:
         transport = ctx.adb_connect(address)
         if transport and ":" in transport:
@@ -35,6 +35,18 @@ def check(ctx: Context) -> list[Result]:
                 "network_transport",
                 "network transport",
                 f"{address} is advertised but adb connect failed",
+            )
+        ]
+
+    if announced:
+        # The name is out there and nothing resolved it: adbd is not listening,
+        # so wireless debugging is off and the fix is on the phone.
+        return [
+            warn(
+                "network_transport",
+                "network transport",
+                "announced with no address: wireless debugging is off on the "
+                "phone (or turn it on from a cable with phone-adb-wifi)",
             )
         ]
 

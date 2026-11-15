@@ -129,25 +129,36 @@ class Context:
             return ""
         return self.text(["adb", "-s", self.serial, *args], timeout)
 
-    def mdns_adb_address(self, timeout: float | None = 5) -> str | None:
-        """Where a phone advertises wireless debugging, if it does.
+    def mdns_adb(self, timeout: float | None = 5) -> tuple[str | None, bool]:
+        """Where a phone advertises wireless debugging, and whether it does at all.
 
-        `avahi-browse -rtp _adb-tls-connect._tcp` prints one line per service:
-        `=;iface;IPv4;name;_adb-tls-connect._tcp;local;host;address;port;txt`.
-        That record is the only place the port appears before adb knows it —
-        the port is random per boot, and adb's own mDNS lookup is missing from
-        some builds.
+        `avahi-browse -rtp _adb-tls-connect._tcp` prints `+;…` when it hears the
+        service, and `=;iface;IPv4;name;…;host;address;port;txt` once it has
+        resolved an endpoint. That record is the only place the port appears
+        before adb knows it — the port is random per start, and adb's own mDNS
+        lookup is missing from some builds.
+
+        A name that is announced and never resolves is a phone whose adbd is not
+        listening, which is wireless debugging switched off; nothing announced
+        at all is a phone that is not on this network. The two faults look the
+        same to a reader that only takes the resolved lines, and they are fixed
+        differently.
         """
         output = self.text(
             ["avahi-browse", "-rtp", "_adb-tls-connect._tcp"], timeout
         )
+        announced = False
         for line in output.splitlines():
+            if line.startswith("+"):
+                announced = True
+                continue
             fields = line.split(";")
             if len(fields) >= 9 and fields[0] == "=" and fields[2] == "IPv4":
+                announced = True
                 address, port = fields[7], fields[8]
                 if address and port.isdigit():
-                    return f"{address}:{port}"
-        return None
+                    return f"{address}:{port}", True
+        return None, announced
 
     def adb_connect(self, address: str) -> str | None:
         """Connect to `address`, forget the cached device, and return it."""

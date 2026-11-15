@@ -4,25 +4,6 @@ Ideas taken from the user's messages, in the order they are being built.
 Delete an item once it is implemented and committed; delete the file when the
 list is empty.
 
-## The doctor's adb line says why
-
-- [ ] `phone-doctor` stops at `FAIL adb device none (see adb devices)`, while the
-  harness now says which of the three links is down ("adbd is advertised with no
-  address in its record", "nothing on this network advertises
-  _adb-tls-connect", "it advertises <endpoint>, and that does not answer
-  either"). The doctor can read the same thing: `phone_link.adb` can resolve an
-  endpoint but cannot say whether anything was announced at all, so it wants one
-  more reader of `avahi-browse`'s output — the announcement without an address
-  is wireless debugging switched off, no announcement is the phone being
-  elsewhere — and the `[phone]` section's `adb_device` detail is where it goes. A
-  stub `adb` that prints no devices is enough to test the three messages.
-  Worth writing down, from the failure on 2026-11-15 at 23:22: the record was
-  an announcement with nothing resolved (two `+` lines, no `=` line, twice, for
-  12 and 15 s), `adb devices` was empty, `adb_wifi_enabled` could not be read
-  because there was no adb to read it, and the phone never rebooted (uptime 3.3
-  days): wireless debugging restarted by itself and handed out a new port,
-  `35161` for the stale `46287`, about twenty minutes later.
-
 ## Files a run leaves on the phone
 
 - [ ] `/sdcard/proxy-app-ui.xml`, `/sdcard/proxy-app-shot.xml` and a leftover
