@@ -223,6 +223,34 @@ manual-only and failed-fix paths) and the fix scripts (ambulance APK, AP
 profile creation from the secret, forwarding, mobile data, tunnel: apply,
 no-op and read-only `--check`).
 
+### Where the check's time goes
+
+`nix build .#checks.x86_64-linux.script` times itself: `timings.csv` in the
+output has a row per suite and, where a suite knows them, a row per part —
+`tests/proxy-app.test.sh` splits its `javac` from its `cases` — and the build
+log ends with the five slowest, so the question "which suite got slower" is
+answered by the log that asked it. A store path cannot be compared with the
+last one, so `tests/check-timings.sh` builds the check, appends the rows to
+`result-checks/timings.csv` (append-only, keyed by run, like
+`result-live/timings.csv`) and prints every suite beside the last time it was
+measured:
+
+```sh
+bash tests/check-timings.sh
+```
+
+A suite that wants its own parts named writes `part,ms` rows to the file in
+`$PHONE_TEST_TIMINGS` and the check adds the suite's name to them.
+
+A suite that waits — for a lock screen to animate, for adbd to come back, for a
+network to come up — is waiting for a phone that a stub is not, and it used to
+do that in real seconds: `phone-unlock` spent 46 s of a 198 s check asleep in
+`time.sleep`, `phone-fix-internet` 49 s and `phone-adb-wifi` 22 s. Those waits
+are now `PHONE_UNLOCK_POLL`, `PHONE_FIX_SETTLE` and `PHONE_ADB_POLL` (defaults
+unchanged, so a real phone waits exactly as before) and the three suites set
+them to 0, which is 86 s for the whole check instead of 198 s with the same
+checks passing.
+
 ### Live end-to-end test
 
 `tests/live/doctor-fix-proxy.sh` breaks the setup on purpose and checks that the

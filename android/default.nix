@@ -41,6 +41,16 @@ in
     shellHook = ''
       export ANDROID_HOME="$ANDROID_SDK_ROOT"
       echo "android: $ANDROID_SDK_ROOT"
+      # The flake's build sees only the git tree: a new source file that nobody
+      # added is missing from it, and the "cannot find symbol" errors that follow
+      # read as a bug in the code just written.
+      if command -v git >/dev/null 2>&1; then
+        untracked=$(git ls-files --others --exclude-standard -- android 2>/dev/null |
+          grep -E '\.(java|xml)$' || true)
+        if [ -n "$untracked" ]; then
+          printf '\nnote: untracked files are invisible to nix build:\n%s\n\n' "$untracked" >&2
+        fi
+      fi
     '';
   };
 

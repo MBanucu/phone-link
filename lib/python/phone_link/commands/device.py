@@ -192,19 +192,19 @@ def phone_unlock(args: list[str]) -> int:
             return 0
 
         _swipe_up(serial)
-        time.sleep(1)
+        time.sleep(settings.PHONE_UNLOCK_POLL)
         must(["adb", "-s", serial, "shell", "input", "text", pin])
         must(["adb", "-s", serial, "shell", "input", "keyevent", "KEYCODE_ENTER"])
 
         for _ in range(5):
-            time.sleep(1)
+            time.sleep(settings.PHONE_UNLOCK_POLL)
             locked, awake = _lock_screen(serial)
             if not locked and awake:
                 log("unlocked")
                 return 0
         # Leave the bouncer's error state before typing the PIN again.
         run(["adb", "-s", serial, "shell", "input", "keyevent", "KEYCODE_BACK"])
-        time.sleep(0.5)
+        time.sleep(settings.PHONE_UNLOCK_POLL / 2)
 
     die(
         "still locked after entering the PIN 3 times (wrong PIN, or the lock "

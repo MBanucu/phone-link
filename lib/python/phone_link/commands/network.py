@@ -608,7 +608,7 @@ def phone_fix_internet(args: list[str]) -> int:
     log("no internet; trying mobile data")
     if _run_tool("phone-fix-mobile-data") != 0:
         log("warning: could not enable mobile data")
-    time.sleep(3)
+    time.sleep(3 * settings.PHONE_FIX_SETTLE)
     if _online():
         log("internet is up over mobile data")
         return 0
@@ -617,7 +617,7 @@ def phone_fix_internet(args: list[str]) -> int:
     status(["adb", "shell", "svc", "usb", "setFunctions", "rndis,adb"])
     if _run_tool("phone-usb-tether-default") != 0:
         log("warning: could not set USB tethering")
-    time.sleep(5)
+    time.sleep(5 * settings.PHONE_FIX_SETTLE)
     if _online():
         log("internet is up over USB tethering")
         return 0
@@ -651,7 +651,7 @@ def phone_fix_internet(args: list[str]) -> int:
             f"warning: no saved {settings.PHONE_HOTSPOT_CON} profile and "
             "no PHONE_HOTSPOT_PASS"
         )
-    time.sleep(10)
+    time.sleep(10 * settings.PHONE_FIX_SETTLE)
     if _online():
         log("internet is up over the phone hotspot")
         return 0

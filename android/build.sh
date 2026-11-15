@@ -82,10 +82,18 @@ build_apk() {
         "$work/res/resources.zip"
 
     find "$src" "$work/gen" -name '*.java' -print | sort > "$work/sources.txt"
-    javac --release 11 -encoding UTF-8 -Xlint:all -Werror \
+    # The sources are whatever is in this tree, and the tree is a store path
+    # when the flake builds — a copy of git, so a file nobody committed does not
+    # exist here. javac then blames the classes that use it, which reads as a
+    # bug in code that compiles fine in the checkout. Say what the suspect is.
+    if ! javac --release 11 -encoding UTF-8 -Xlint:all -Werror \
         -classpath "$android_jar" \
         -d "$work/classes" \
-        @"$work/sources.txt"
+        @"$work/sources.txt"; then
+        echo "build.sh: $name did not compile; if a class was just added, make" >&2
+        echo "          sure it is committed: nix build sees only the git tree" >&2
+        return 1
+    fi
 
     # shellcheck disable=SC2046 # the build directory is ours and holds no spaces
     "$build_tools/d8" --lib "$android_jar" --min-api 29 --output "$work/dex" \

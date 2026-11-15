@@ -9,6 +9,8 @@ SCRIPT=$ROOT/bin/phone-adb-wifi
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
+# adbd restarts take seconds on a phone and none in a stub.
+export PHONE_ADB_POLL=0
 mkdir -p "$LOG" "$STUBS"
 
 pass=0

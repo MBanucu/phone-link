@@ -9,6 +9,9 @@ SCRIPT=$ROOT/bin/phone-fix-internet
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
+# The waits being tested are waits for a phone; here the phone is a stub,
+# so the polls are as short as the environment allows them to be.
+export PHONE_FIX_SETTLE=0
 mkdir -p "$LOG" "$STUBS"
 
 pass=0

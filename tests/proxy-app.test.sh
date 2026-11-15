@@ -38,9 +38,26 @@ sources=(
   "$ROOT/android/test/org/phonelink/proxy/ProxyAppTest.java"
 )
 
+# The compile is a part of this suite's time worth naming: it is one javac
+# over twelve files, and when the whole check gets slower it matters whether
+# that or the cases did. PHONE_TEST_TIMINGS=<file> gets `part,ms` rows the
+# flake's script check folds into its timings.csv.
+started=$(date +%s%N)
 if ! "$JAVAC" -encoding UTF-8 -d "$TMP/classes" "${sources[@]}"; then
   printf '\n0 passed, 1 failed\n'
   exit 1
 fi
+compiled=$(date +%s%N)
+part_timing() { # part_timing PART START END
+  local ms=$(((($3 - $2)) / 1000000))
+  printf '  %-6s %6s ms\n' "$1" "$ms"
+  if [ -n "${PHONE_TEST_TIMINGS:-}" ]; then
+    printf '%s,%s\n' "$1" "$ms" >>"$PHONE_TEST_TIMINGS"
+  fi
+}
+part_timing javac "$started" "$compiled"
 
-exec "$JAVA" -cp "$TMP/classes" org.phonelink.proxy.ProxyAppTest
+"$JAVA" -cp "$TMP/classes" org.phonelink.proxy.ProxyAppTest
+status=$?
+part_timing cases "$compiled" "$(date +%s%N)"
+exit $status

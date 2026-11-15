@@ -45,3 +45,15 @@ PHONE_APK_CACHE = _env("PHONE_APK_CACHE", "/var/cache/phone-link")
 PHONE_WIFI_TRIES = int(_env("PHONE_WIFI_TRIES", "10"))
 PHONE_WIFI_POLL = float(_env("PHONE_WIFI_POLL", "1"))
 PHONE_TETHER_TRIES = int(_env("PHONE_TETHER_TRIES", "5"))
+# How long to give the keyguard between attempts, and the screen between the
+# uplink attempts phone-fix-internet makes. Both are real waits for a real
+# phone — a lock screen animating, a network coming up — so they are seconds
+# here and something like 0 in a test that has a stub for a phone: the tests of
+# both commands used to spend most of their time asleep (45.8 s and 48.6 s),
+# which is what makes a suite nobody dares to run.
+PHONE_UNLOCK_POLL = float(_env("PHONE_UNLOCK_POLL", "1"))
+PHONE_FIX_SETTLE = float(_env("PHONE_FIX_SETTLE", "1"))
+# How long to give adbd after a restart before asking again: the wireless
+# debugging endpoint advertises an old port for a moment, so phone-adb-wifi
+# retries. Two seconds each here; a test with a stub adb sets it to 0.
+PHONE_ADB_POLL = float(_env("PHONE_ADB_POLL", "2"))

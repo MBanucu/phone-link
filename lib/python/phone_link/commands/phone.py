@@ -911,7 +911,7 @@ def phone_adb_wifi(args: list[str]) -> int:
                 ["adb", "-s", serial, "tcpip", settings.PHONE_ADB_PORT]
             ) != 0:
                 die("adb tcpip failed")
-            time.sleep(2)
+            time.sleep(settings.PHONE_ADB_POLL)
 
         connected = False
         candidates = list(
@@ -951,7 +951,7 @@ def phone_adb_wifi(args: list[str]) -> int:
                     log(f"wireless debugging on {endpoint}")
                     reachable = True
                     break
-            time.sleep(2)
+            time.sleep(settings.PHONE_ADB_POLL)
         if not reachable:
             if not legacy:
                 die("wireless debugging did not become reachable")
@@ -967,7 +967,7 @@ def adb_wifi_connect(args: list[str]) -> int:
         log("warning: adb tcpip resets the USB gadget (the tether will blip)")
         if status(["adb", "tcpip", settings.PHONE_ADB_PORT]) != 0:
             die("adb tcpip failed (cable attached?)")
-        time.sleep(2)
+        time.sleep(settings.PHONE_ADB_POLL)
 
     target = ""
     for address in [*phone.phone_ips(), settings.PHONE_HOTSPOT_IP, settings.PHONE_AP_IP]:

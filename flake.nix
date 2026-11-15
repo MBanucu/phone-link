@@ -418,12 +418,21 @@
           # Hermetic CLI tests: stub adb/curl first on PATH, no phone, no network.
           # The source script is used (not the wrapper), because wrapProgram
           # prepends its own PATH and would shadow the stubs.
+          #
+          # The check also times itself. `timings.csv` in the output has a row per
+          # suite (`total`) plus whatever rows a suite contributes about its own
+          # parts — proxy-app.test.sh separates the `javac` from the `cases` — so
+          # a suite with a slow compile reads differently from one with slow
+          # tests. The build log ends with the slowest, because the question this
+          # answers is asked mid-build: a check with no timing is a check nobody
+          # can watch. `tests/check-timings.sh` keeps the history across builds.
           script =
             pkgs.runCommand "phone-link-script-check"
               {
                 nativeBuildInputs = [
                   pkgs.bash
                   pkgs.coreutils
+                  pkgs.gawk
                   pkgs.gnugrep
                   pkgs.gnused
                   pkgs.python3
@@ -433,12 +442,33 @@
                 ];
               }
               ''
+                timings=$TMPDIR/timings.csv
+                printf 'suite,part,ms\n' >"$timings"
                 # Run every suite from the flake source root, so each test's
                 # ../bin and ../lib lookups resolve; interpolating ./bin alone
                 # would give a store path without its siblings.
                 for t in ${self.outPath}/tests/*.test.sh; do
-                  bash "$t"
+                  suite=$(basename "$t")
+                  parts=$TMPDIR/parts.csv
+                  rm -f "$parts"
+                  started=$(date +%s%N)
+                  PHONE_TEST_TIMINGS=$parts bash "$t"
+                  finished=$(date +%s%N)
+                  printf '%s,total,%s\n' "$suite" "$(((finished - started) / 1000000))" >>"$timings"
+                  # A suite's own rows are `part,ms`; the suite column is added
+                  # here, so a suite cannot claim another's time.
+                  if [ -s "$parts" ]; then
+                    # Rows are `part,ms` with no header, so nothing is skipped.
+                    gawk -F, -v suite="$suite" 'NF >= 2 { print suite "," $0 }' "$parts" >>"$timings"
+                  fi
                 done
+                mkdir -p $out
+                cp "$timings" $out/timings.csv
+                echo
+                echo "slowest suites:"
+                gawk -F, '$2 == "total" { printf "%8.2f s  %s\n", $3 / 1000, $1 }' "$timings" |
+                  sort -rn | head -5
+                gawk -F, '$2 == "total" { ms += $3; n += 1 } END { printf "total: %.2f s over %d suites\n", ms / 1000, n }' "$timings"
                 touch $out
               '';
         }
@@ -486,6 +516,16 @@
             ];
             shellHook = ''
               export PYTHONPATH="$PWD/lib/python''${PYTHONPATH:+:$PYTHONPATH}"
+              # `nix build` copies the git tree, so a source file nobody added is
+              # missing from the build and javac blames the code instead. Name
+              # those files once, on the way in.
+              if command -v git >/dev/null 2>&1; then
+                untracked=$(git ls-files --others --exclude-standard -- android 2>/dev/null |
+                  grep -E '\.(java|xml)$' || true)
+                if [ -n "$untracked" ]; then
+                  printf '\nnote: untracked files are invisible to nix build:\n%s\n\n' "$untracked" >&2
+                fi
+              fi
             '';
           };
         }

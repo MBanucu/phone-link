@@ -8,6 +8,9 @@ SCRIPT=$ROOT/bin/phone-unlock
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP PHONE_SECRETS=$TMP/secrets
+# The waits being tested are waits for a phone; here the phone is a stub,
+# so the polls are as short as the environment allows them to be.
+export PHONE_UNLOCK_POLL=0
 mkdir -p "$LOG" "$STUBS"
 printf 'PHONE_SOCKS_PASS=unused\n' >"$PHONE_SECRETS"
 

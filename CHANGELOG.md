@@ -53,6 +53,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TilePlan` in plain Java, covered by the JVM suite; the panel, the shade and
   `dumpsys` all read the same `TileScope`.
 
+- The hermetic check knows where its time goes. `nix build
+  .#checks.x86_64-linux.script` times every suite and writes `timings.csv` into
+  its output — a row per suite, plus the parts a suite knows about, which is how
+  `tests/proxy-app.test.sh` shows that 2.2 s of its 2.7 s is one `javac` and
+  0.3 s is its 43 cases — and the build log ends with the five slowest, so the
+  question is answered by the log that asked it. Because a store path cannot be
+  compared with the last one, `tests/check-timings.sh` builds the check and
+  appends the rows to `result-checks/timings.csv` (append-only, keyed by run,
+  like `result-live/timings.csv`), printing each suite beside the last time it
+  was measured. First measurement: 32 suites, 197.8 s, of which
+  `phone-fix-internet` 48.6 s, `phone-unlock` 46.1 s and `phone-adb-wifi`
+  22.1 s.
+
 ### Changed
 
 - A run can be asked for one of its steps. `PHONE_LIVE_ONLY="card toggle,rename"`
@@ -105,6 +118,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and gone after the second one. The run went from 91 checks to 86, still green.
 
 ### Fixed
+
+- Three test suites slept through the check. Most of `phone-unlock.test.sh`'s
+  46 s, `phone-fix-internet.test.sh`'s 49 s and `phone-adb-wifi.test.sh`'s 22 s
+  was `time.sleep` waiting for a lock screen to animate, a network to come up or
+  an adbd port to reappear — on a phone that the test had already replaced with
+  a stub. Those waits are `PHONE_UNLOCK_POLL`, `PHONE_FIX_SETTLE` and
+  `PHONE_ADB_POLL` now, with the same defaults as the literals they replace, so
+  a real phone waits exactly as long as before, and the three suites set them to
+  0. Measured with the new timings: the check's 32 suites went 197.8 s → 86.4 s
+  (46.1 → 2.5, 48.6 → 1.5, 22.1 → 1.8) with every check still passing — 25, 17
+  and 26 of them.
 
 - Deleting a saved proxy over adb took the configuration and left the listener
   running under a name the store no longer had — a port nothing could show and
