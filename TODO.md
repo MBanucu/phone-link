@@ -20,20 +20,19 @@ list is empty.
   `get-state` are false when it happens, because "it turned itself off" is a
   diagnosis nobody can check twice.
 
-## A tunnel that fails is not a proxy that is broken
+## A tunnel check proved on a phone
 
-- [ ] A full run failed five checks — `request through the tunnel`, `two proxies
-  serve at once`, `the tile start serves requests`, `one click starts both
-  proxies on the tile`, `and stopping the tile leaves it alone` — and every one
-  of them was the phone's uplink having a bad minute: a `curl` through the same
-  proxy answered 200 a few minutes later and the next full run was green. The
-  check that fails knows only that `curl` exited non-zero, so the run has to be
-  repeated to learn it was the network. What is wanted: when a `through` check
-  fails, the harness asks the phone two or three cheap questions itself — a
-  request from the phone with the proxy out of the path, and the proxy's own
-  log line for that connection — and writes the answers where `checks.csv` and
-  the failure block can be read, so the failure says "the phone's uplink" when
-  that is the answer and a rerun is only spent when the app is the suspect.
+- [ ] The diagnosis is written and committed (`tunnel_check`, `uplink_diag`,
+  `uplink.csv`), but no run has executed it: wireless debugging was off when it
+  landed and every adb port on the phone refused. Two runs prove it, and both
+  want the phone awake: the ordinary one (a green tunnel check must print
+  nothing new, so the cost on success is exactly zero) and the failure one —
+  `PHONE_LIVE_TUNNEL_URL=https://10.255.255.1/` makes `tunnel_check` fail on
+  purpose, which should print the `uplink:` verdict under the FAIL, write a
+  row to `uplink.csv` and show the app's last word about the port. What the
+  failure run cannot prove is the "no route" branch, which needs the phone's own
+  uplink to be down; that one stays unproven until a bad minute happens, and is
+  worth checking against the row when it does.
 
 ## Files a run leaves on the phone
 
