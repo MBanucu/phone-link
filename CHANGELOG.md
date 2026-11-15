@@ -119,6 +119,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A build that cannot see a file that is not committed now says so. `nix build`
+  copies the git tree, so a class added but never `git add`ed is missing from
+  the build and javac blames the code that uses it — a page of "cannot find
+  symbol" about work that compiles in the checkout. `android/build.sh` adds two
+  lines to that failure ("if a class was just added, make sure it is
+  committed"), and both dev shells list the untracked `*.java` and `*.xml` under
+  `android/` when you enter them.
+
 - Three test suites slept through the check. Most of `phone-unlock.test.sh`'s
   46 s, `phone-fix-internet.test.sh`'s 49 s and `phone-adb-wifi.test.sh`'s 22 s
   was `time.sleep` waiting for a lock screen to animate, a network to come up or
