@@ -67,6 +67,13 @@
 # history is what makes "is this cheap enough to run before a commit"
 # answerable. PHONE_LIVE_CAPTURE=0 skips the recording and the snapshots.
 #
+# A tunnel check that fails asks the phone whose fault it was: its own route by
+# address and by name, with the proxy out of the path, plus the app's last word
+# about that port, printed under the FAIL and written to uplink.csv. A flaky
+# uplink then reads as a flaky uplink instead of a proxy bug, which is a rerun
+# not spent. PHONE_LIVE_TUNNEL_URL (default https://example.com) is the name
+# those checks ask for.
+#
 # PHONE_LIVE_ONLY="card toggle,rename" runs just the steps it names, by the
 # name the log prints, instead of all twenty-three. The steps are not
 # independent — most assume the phone is awake, the app is installed and a
@@ -85,6 +92,9 @@ SERVICE=$PKG/.ProxyService
 START=org.phonelink.proxy.action.START
 STOP=org.phonelink.proxy.action.STOP
 USER_NAME=phonelink-test
+# The name a tunnel check asks for. Overridable so a run can point at a server
+# of its own, and so the failure path can be exercised on purpose.
+TUNNEL_URL=${PHONE_LIVE_TUNNEL_URL:-https://example.com}
 PASSWORD=phonelink-test-password
 # The capture app: a test-only accessibility service that writes the screen as
 # XML in about a tenth of a second, where `adb shell uiautomator dump` costs
@@ -222,6 +232,10 @@ printf 'run,step,verdict,file,line,function,decided_ms,claim\n' >"$CHECKS"
 # instant is inside; the ones the phone took itself are in the actions.csv the
 # capture service writes, which is pulled with the rest of its files.
 printf 'start_ns,end_ns,kind,what\n' >"$ARTIFACTS/input.csv"
+# What the phone said about its own route when a tunnel check failed; written
+# only on failure, so a green run leaves no rows.
+UPLINK=${PHONE_LIVE_UPLINK:-$ARTIFACTS/uplink.csv}
+printf 'decided_ms,port,ping_ip,ping_dns,verdict\n' >"$UPLINK"
 
 # How to look at and drive the phone lives in its own file; this one decides
 # what the phone showed means.
@@ -477,9 +491,60 @@ wait_foreground() {
 through() { # through PORT USER PASSWORD
   local code
   code=$(curl -sS -m 15 -o /dev/null -w '%{http_code}' \
-    --socks5-hostname "$2:$3@$ADDRESS:$1" https://example.com 2>/dev/null) \
+    --socks5-hostname "$2:$3@$ADDRESS:$1" "$TUNNEL_URL" 2>/dev/null) \
     || return 1
   [ "$code" = "200" ]
+}
+
+# Whose fault a failed tunnel is. The check knows only that curl did not get a
+# 200: either the proxy dropped the request or the phone had nowhere to send
+# it, and the second one is nothing this app can fix. So the phone is asked
+# directly, with the proxy out of the path — its route by address, its resolver
+# by name — and the answer goes where the failure is read: a line under the
+# FAIL and a row in uplink.csv. Two adb calls and one logcat, paid only when a
+# check fails, which is the run that has to be repeated otherwise.
+uplink_diag() { # uplink_diag PORT
+  local port=$1 host said ip dns verdict log_line
+  host=$(printf '%s' "$TUNNEL_URL" | sed -e 's|^[a-z]*://||' -e 's|[:/].*||')
+  said=$(shell "ping -c 1 -W 3 1.1.1.1" 2>&1)
+  case $said in
+    *" 1 received"*) ip=yes ;;
+    *" 0 received"*) ip=no ;;
+    *) ip=unknown ;;
+  esac
+  said=$(shell "ping -c 1 -W 3 $host" 2>&1)
+  case $said in
+    *" 1 received"*) dns=yes ;;
+    *" 0 received"*) dns=no ;;
+    *) dns=unknown ;;
+  esac
+  if [ "$ip" = no ]; then
+    verdict="the phone has no route (ping 1.1.1.1 got nothing): the proxy was given a request the phone could not make"
+  elif [ "$ip" = yes ] && [ "$dns" = no ]; then
+    verdict="the phone has a route but no answer from $host, so its resolver was the suspect"
+  elif [ "$ip" = yes ] && [ "$dns" = yes ]; then
+    verdict="the phone's own route works (1.1.1.1 and $host both answered), so the proxy is the suspect"
+  else
+    verdict="the phone did not answer the probes (address: $ip, name: $dns)"
+  fi
+  printf '  uplink: %s\n' "$verdict"
+  log_line=$(shell "logcat -d -s phone-link-proxy:V | grep -F 'port $port' | tail -1" 2>/dev/null)
+  if [ -n "$log_line" ]; then
+    printf '  uplink: the app says: %s\n' "$(printf '%s' "$log_line" | sed 's/.*phone-link-proxy: //')"
+  fi
+  printf '%s,%s,%s,%s,%s\n' "$(now_ms)" "$port" "$ip" "$dns" "$verdict" >>"$UPLINK"
+}
+
+# A check whose claim is a request through a tunnel: on failure it says whose
+# fault it was, beside the claim that failed.
+tunnel_check() { # tunnel_check CLAIM [PORT USER PASSWORD]
+  local claim=$1
+  if through "${2:-$PORT}" "${3:-$USER_NAME}" "${4:-$PASSWORD}"; then
+    ok "$claim"
+    return 0
+  fi
+  bad "$claim"
+  uplink_diag "${2:-$PORT}"
 }
 
 through_proxy() { through "$PORT" "$USER_NAME" "$PASSWORD"; }
@@ -684,7 +749,7 @@ step_allowed_network() {
   step 'allowed network'
   start_app --es ssid "$SSID" --ez any_network false
   if wait_foreground; then ok 'service is foreground'; else bad 'service is foreground'; fi
-  if through_proxy; then ok 'request through the tunnel'; else bad 'request through the tunnel'; fi
+  tunnel_check 'request through the tunnel'
   if curl -sS -m 10 -o /dev/null --socks5-hostname \
     "$USER_NAME:wrong@$ADDRESS:$PORT" https://example.com >/dev/null 2>&1; then
     bad 'a wrong password is refused'
@@ -722,11 +787,7 @@ step_anonymous_from_the_panel() {
     else
       bad 'unticking it asks for a password again'
     fi
-    if through_proxy; then
-      ok 'and the credentials still work'
-    else
-      bad 'and the credentials still work'
-    fi
+    tunnel_check 'and the credentials still work'
   else
     bad 'the panel controls are reachable'
   fi
@@ -750,7 +811,7 @@ step_predicate_bypass() {
   step 'predicate bypass'
   start_app --es ssid "not-$SSID" --ez any_network true
   sleep 2
-  if through_proxy; then ok 'any_network serves requests'; else bad 'any_network serves requests'; fi
+  tunnel_check 'any_network serves requests'
 
 }
 
@@ -913,9 +974,7 @@ step_card_toggle() {
       if foreground; then ok 'the card starts that proxy'; else
         bad 'the card starts that proxy'
       fi
-      if through_proxy; then ok 'and requests go through it'; else
-        bad 'and requests go through it'
-      fi
+      tunnel_check 'and requests go through it'
       if card_toggle harness-card; then
         sleep 2
         if foreground; then bad 'a second press stops it'; else
@@ -1173,11 +1232,15 @@ step_several_at_once() {
   shell am start-foreground-service -n "$SERVICE" -a "$START" \
     --es profile harness-b >/dev/null 2>&1
   sleep 3
-  if through "$PORT" "$USER_NAME" "$PASSWORD" &&
-    through "$PORT2" "$USER2" "$PASSWORD2"; then
+  failed_port=
+  through "$PORT" "$USER_NAME" "$PASSWORD" || failed_port=$PORT
+  [ -n "$failed_port" ] || through "$PORT2" "$USER2" "$PASSWORD2" ||
+    failed_port=$PORT2
+  if [ -z "$failed_port" ]; then
     ok 'two proxies serve at once'
   else
     bad 'two proxies serve at once'
+    uplink_diag "$failed_port"
     shell dumpsys activity service "$SERVICE" | sed -n '/Right now/,/  saved/p'
   fi
   # Each one's own credentials, not the other's: the ports are not just both open.

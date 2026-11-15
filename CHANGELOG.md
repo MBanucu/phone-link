@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A tunnel check that fails says whose fault it was. Five checks failed in one
+  run — `request through the tunnel`, `two proxies serve at once`, the tile
+  starting both — and all of it was the phone's uplink having a bad minute: a
+  `curl` through the same proxy answered 200 a few minutes later. The check knew
+  only that `curl` exited non-zero, so the run had to be repeated to learn that.
+  Now a `tunnel_check` asks the phone two questions with the proxy out of the
+  path — its route by address (`ping 1.1.1.1`) and its resolver by name — and
+  the app for its last word about that port, prints the verdict under the FAIL
+  and appends a row to `uplink.csv` in the run's folder. The verdict says "the
+  phone has no route, the proxy was given a request the phone could not make",
+  "the phone's own route works, so the proxy is the suspect", or that the phone
+  did not answer at all — three cases a rerun can be decided on. It costs two
+  adb calls and one `logcat`, only when a check fails, and
+  `PHONE_LIVE_TUNNEL_URL` names the server the checks ask for (default
+  `https://example.com`), which is also how the failure path is exercised on
+  purpose.
+
 ## [0.4.0] - 2026-11-15
 
 ### Added
