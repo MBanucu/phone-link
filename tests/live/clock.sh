@@ -18,6 +18,13 @@
 # first seconds — and every later burst is predicted from where the first one
 # turned out to be, which is exact to milliseconds over any run.
 #
+# A window can hold more than the burst it was opened for: on a short run both
+# calibrations happen while the recorder is still going, four seconds apart, and
+# a window wide enough to find the first burst also catches the second one. So
+# the flashes found in the window are split into runs separated by a second of
+# quiet — the same rule the phone's own record is split by — and the run with
+# this burst's number of flashes, nearest where it was expected, is the one.
+#
 # It prints one line and writes RUN_DIR/clock.txt with the mapping
 #
 #   video_seconds = offset_s + drift * (device_ns - ref_ns) / 1e9
@@ -104,10 +111,11 @@ duration=$("$ffprobe" -v error -show_entries format=duration -of csv=p=0 \
   exit 1
 }
 
-# The flashes the phone wrote down, grouped into bursts: inside a burst the
-# edges are held 200 ms apart, and a run has one burst at its start and one at
-# its end, so a second of quiet is what separates them.
-awk -F, -v gap=1000 '
+# The flashes the phone wrote down, grouped into bursts. Inside a burst the
+# edges are held 200 ms apart — a second when the phone was busy, which is why
+# the gap that ends one is 2.5 s: the run's two calibrations are four seconds
+# apart at the least, and a gap that wide is a different burst.
+awk -F, -v gap=2500 '
   NR == 1 { next }
   NF >= 3 && $1 ~ /^[0-9]+$/ {
     if (!started || $2 - last > gap) burst++
@@ -149,6 +157,44 @@ window_edges() { # window_edges START LEN -> "pts,on|off" per transition
     }' "$tmp/ffmpeg.log"
 }
 
+# The runs of flashes in a window, the way the phone's record is split: 2.5 s
+# of quiet between flashes starts a new one. Prints the run that has
+# WANT flashes and starts nearest GUESS (an empty guess means the first), and
+# leaves the sizes it saw in SIZES so a failure can say what was there.
+burst_group() { # burst_group WANT GUESS SIZES <"t,state"
+  awk -F, -v want="$1" -v guess="$2" -v sizes="$3" '
+    {
+      if (!seen || $1 - last > 2.5) {
+        runs++
+        first[runs] = $1
+        size[runs] = 0
+      }
+      seen = 1
+      last = $1
+      text[++n] = $0
+      run[n] = runs
+      size[runs]++
+    }
+    END {
+      best = 0
+      for (i = 1; i <= runs; i++) {
+        printf "%d%s", size[i], (i == runs ? ORS : " ") >sizes
+        if (size[i] != want) continue
+        spread = first[i] - guess
+        if (spread < 0) spread = -spread
+        if (!best || spread < nearest) {
+          best = i
+          nearest = spread
+        }
+      }
+      close(sizes)
+      if (!best) exit 1
+      for (j = 1; j <= n; j++) {
+        if (run[j] == best) print text[j]
+      }
+    }'
+}
+
 # The window is clipped to the file: a burst at either end of a run is half
 # outside it, and asking ffmpeg for the part before the first frame would just
 # come back empty.
@@ -169,18 +215,22 @@ for burst in $(cut -d, -f1 "$tmp/edges" | uniq); do
     >"$tmp/device-$burst"
   want=$(wc -l <"$tmp/device-$burst")
   host=$(head -1 "$tmp/device-$burst" | cut -d, -f1)
-  found=0
+  picked=no
   if [ -z "$anchor_pts" ]; then
     # The run's first burst: it is in the first seconds of the file, and how
     # many that is depends on when the recorder got going, so the window opens
     # where it is cheap and widens only when the flash is not there.
+    guess=0
     for edge in 4 12 30; do
       read -r start length <<EOF
 $(clip 0 "$edge")
 EOF
-      window_edges "$start" "$length" >"$tmp/video-$burst" || true
-      found=$(wc -l <"$tmp/video-$burst")
-      [ "$found" -eq "$want" ] && break
+      window_edges "$start" "$length" >"$tmp/raw-$burst" || true
+      if burst_group "$want" "$guess" "$tmp/sizes-$burst" \
+        <"$tmp/raw-$burst" >"$tmp/video-$burst"; then
+        picked=yes
+        break
+      fi
     done
   else
     # A later burst, placed by the first one: over the minutes between them a
@@ -193,18 +243,37 @@ EOF
 $(clip "$(awk -v g="$guess" -v r="$edge" 'BEGIN { print g - r }')" \
         "$(awk -v r="$edge" 'BEGIN { print 2 * r }')")
 EOF
-      window_edges "$start" "$length" >"$tmp/video-$burst" || true
-      found=$(wc -l <"$tmp/video-$burst")
-      [ "$found" -eq "$want" ] && break
+      window_edges "$start" "$length" >"$tmp/raw-$burst" || true
+      if burst_group "$want" "$guess" "$tmp/sizes-$burst" \
+        <"$tmp/raw-$burst" >"$tmp/video-$burst"; then
+        picked=yes
+        break
+      fi
     done
   fi
-  if [ "$found" -ne "$want" ]; then
-    printf 'burst %s: %s flashes in the phone'"'"'s record, %s in the recording\n' \
-      "$burst" "$want" "$found" >&2
-    printf '  (the phone put it near %s s of %s; did the recorder start late?)\n' \
-      "${guess:-0}" "$duration" >&2
+  if [ "$picked" = no ]; then
+    printf 'burst %s: %s flashes in the phone'"'"'s record, the recording has runs of %s\n' \
+      "$burst" "$want" "$(cat "$tmp/sizes-$burst" 2>/dev/null || printf 'nothing')" >&2
+    printf '  (a run is a set of flashes less than a second apart; the phone put\n' >&2
+    printf '   this one at %s s of %s, so did the recorder start late?)\n' \
+      "$guess" "$duration" >&2
     exit 1
   fi
+  # On/off/on/off is the same shape for every burst, so matching the states
+  # proves nothing about *which* burst was found. The time the flashes span
+  # does: the phone wrote down how long its burst lasted, and the run found in
+  # the recording has to last about as long.
+  device_span=$(awk -F, 'NR == 1 { first = $2 } END { printf "%.3f", ($2 - first) / 1000 }' \
+    "$tmp/device-$burst")
+  video_span=$(awk -F, 'NR == 1 { first = $1 } END { printf "%.3f", $1 - first }' \
+    "$tmp/video-$burst")
+  awk -v b="$burst" -v d="$device_span" -v v="$video_span" 'BEGIN {
+    spread = d - v
+    if (spread < 0) spread = -spread
+    if (spread <= 0.25) exit 0
+    printf "burst %s: %s s in the record, %s s in the recording\n", b, d, v
+    printf "  (that is not the same burst; the recorder may have started late)\n"
+    exit 1 }' || exit 1
   paste -d, "$tmp/device-$burst" "$tmp/video-$burst" |
     awk -F, '
       $3 != $5 {

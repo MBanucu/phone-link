@@ -42,6 +42,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   egress (ccmni1) reaches the internet, but that address does not answer it",
   and a green run prints nothing.
 
+### Fixed
+
+- A short run's clock fit knew about one burst of flashes. `clock.sh` split the
+  phone's record on a gap and looked for each burst in a window of the video,
+  but it took every flash in that window as belonging to the burst — so on a
+  run short enough to hold both calibrations, a 13-second recording answered 16
+  where the burst had 8, and the step failed with "burst 1: 8 flashes in the
+  phone's record, 16 in the recording". Three of the twenty-one recordings here
+  still failed that way, and it cost about half of the short runs. The video's
+  flashes are now split on a gap too, the same 2.5 s at both ends, and the run
+  with this burst's number of flashes nearest where the first burst put it is
+  the one. Splitting on the gap alone was not enough and the second attempt
+  showed why: on an older recording the phone's own flash loop stuttered, with a
+  one-second gap inside a single burst, so a 1 s threshold tore a burst in two
+  and the search then paired the *other* burst — the states match either way,
+  which is why nothing caught it and the fit came out at -985000 ppm. The
+  threshold is now 2.5 s (the calibrations are 4 s apart at the least) and the
+  matched run has to last as long as the phone's burst, within 250 ms, or the
+  step fails saying the two spans. Replaying the fitter over every recording in
+  `result-live` recovers the three failures and reproduces every other one
+  digit for digit, and the failure now says what the window held ("the recording
+  has runs of 8 8") instead of just that it could not be fitted.
+
 ## [0.4.0] - 2026-11-15
 
 ### Added
