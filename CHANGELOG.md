@@ -44,6 +44,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A run leaves nothing on the phone's card. The screen dumps `uiautomator` was
+  asked for (`/sdcard/proxy-app-ui.xml`, `/sdcard/proxy-app-shot.xml`) stayed
+  there after runs that ended cleanly, because the cleanup removed the proxies
+  it saved and not the files it wrote. They are removed now, and the run asks
+  again afterwards rather than trusting the delete — "the run leaves no screen
+  dumps on the phone's card" is a check of its own that names what is still
+  there. Verified with two dumps planted before the run: gone when it ended, one
+  green check. A wildcard delete was the tempting version and the wrong one: it
+  would take a `dbg.xml` the run never wrote, on a phone somebody else may be
+  using.
+
 - `phone-doctor`'s `[adb over wi-fi]` line can tell a phone whose wireless
   debugging is off from one that is not on the network. Both used to read
   `USB only (phone-adb-wifi)`, which is wrong advice in the first case: the

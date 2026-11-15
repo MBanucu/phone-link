@@ -337,6 +337,23 @@ cleanup() {
       >/dev/null 2>&1
   done
   sleep 1
+  # The screen dumps the run made. uiautomator writes them on the card and
+  # nothing removed them, so they outlived the run that asked for them; they
+  # are asked for again here rather than trusted to the delete, because a card
+  # that refuses the write is worth a check of its own.
+  local dumps= dump
+  for dump in /sdcard/proxy-app-ui.xml /sdcard/proxy-app-shot.xml; do
+    shell rm -f "$dump" >/dev/null 2>&1
+    if shell ls "$dump" >/dev/null 2>&1; then
+      dumps="$dumps $dump"
+    fi
+  done
+  if [ -z "$dumps" ]; then
+    ok "the run leaves no screen dumps on the phone's card"
+  else
+    bad "the run leaves no screen dumps on the phone's card"
+    printf '  still there:%s\n' "$dumps"
+  fi
   if [ -n "$screen_timeout" ]; then
     shell settings put system screen_off_timeout "$screen_timeout" >/dev/null 2>&1
   fi

@@ -4,15 +4,6 @@ Ideas taken from the user's messages, in the order they are being built.
 Delete an item once it is implemented and committed; delete the file when the
 list is empty.
 
-## Files a run leaves on the phone
-
-- [ ] `/sdcard/proxy-app-ui.xml`, `/sdcard/proxy-app-shot.xml` and a leftover
-  `dbg.xml` were still on the phone after runs that ended cleanly: the harness
-  dumps the hierarchy there and pulls it, and its cleanup removes the profiles
-  it saved but not the dumps it made. Cheap to close: cleanup deletes the dump
-  paths the run used, and the restore check at the end of a run asks for
-  `/sdcard/*.xml` the way it already asks after `dumpsys`.
-
 ## Two instances of the app at once
 
 - [ ] The live harness drives the app's screen, so the phone is busy while a run
