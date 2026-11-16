@@ -1,19 +1,24 @@
 #!/usr/bin/env bash
 # Live end-to-end test of the doctor's self-repair:
 #
-#   1. require the setup to be healthy, with USB tether up (the AP goes down),
-#   2. stock the ambulance APK so no download is needed once the AP is gone,
+#   1. require this checkout's app APK and a healthy setup, with USB tether up
+#      (the AP goes down),
+#   2. park that APK in the ambulance box, so the repair needs no network,
 #   3. drop the laptop AP,
 #   4. uninstall the proxy app,
 #   5. require phone-doctor to flag ap_address, proxy_app and proxy_request,
-#   6. run phone-doctor-fix --yes --required (AP + phone link are fixed last),
-#   7. require a clean doctor, the AP back up and the phone joined again.
+#   6. run phone-doctor-fix --yes --required: it installs the tree's build from
+#      the parked file (AP + phone link are fixed last),
+#   7. require a clean doctor, the app at this tree's version, the AP back up
+#      and the phone joined again.
 #
 #   sudo tests/live/doctor-fix-proxy.sh
 #
 # Destructive by design: the app's data is lost, and the AP is dropped until
-# the fixer restores it. Needs the phone, root, F-Droid access while stocking
-# the cache, and USB tether so the proxy can answer while the AP is down.
+# the fixer restores it. Needs the phone, root, the APK from
+# `nix develop .#android -c ./android/build.sh` (or PHONE_PROXY_APK=/path to
+# test another file), and USB tether so the proxy can answer while the AP is
+# down. Nothing is downloaded: the repair installs the file this tree built.
 # Deliberately not named *.test.sh, so `nix flake check` never runs it.
 set -u
 
@@ -57,6 +62,11 @@ serial=$(phone_serial) || {
 }
 export PHONE_SERIAL="$serial"
 
+# The app the repair installs is the one this checkout builds: `android/build.sh`
+# writes it, `phone-proxy-install` installs it, and PHONE_PROXY_APK names another
+# file to put through the same test.
+APP_APK=${PHONE_PROXY_APK:-$ROOT/android/build/phone-link-proxy.apk}
+
 TMP=$(mktemp -d)
 
 installed() {
@@ -68,15 +78,11 @@ ap_up() {
 }
 
 restore() {
-  local left apk
+  local left
   if ! installed; then
-    apk=$(phone_apk_cached 2>/dev/null || true)
-    printf 'restoring the proxy app from %s\n' "${apk:-F-Droid}" >&2
-    if [ -n "$apk" ]; then
-      "$BIN/phone-proxy-install" "$apk" >&2 || printf 'restore install failed\n' >&2
-    else
-      "$BIN/phone-proxy-install" --fdroid >&2 || printf 'restore install failed\n' >&2
-    fi
+    printf 'restoring the proxy app from %s\n' "$APP_APK" >&2
+    "$BIN/phone-proxy-install" "$APP_APK" >&2 \
+      || printf 'restore install failed\n' >&2
   fi
   if ! ap_up; then
     printf 'restoring the AP\n' >&2
@@ -96,18 +102,34 @@ restore() {
 trap 'restore; rm -rf "$TMP"' EXIT
 
 step "preconditions"
-if "$BIN/phone-fix-apk"; then
-  ok "ambulance APK is stocked"
+if [ -f "$APP_APK" ]; then
+  ok "this checkout's app APK is here ($APP_APK)"
 else
-  bad "cannot stock the ambulance APK"
+  bad "no app APK at $APP_APK"
+  if [ -n "${PHONE_PROXY_APK:-}" ]; then
+    printf 'PHONE_PROXY_APK has to name a file\n' >&2
+  else
+    printf 'build it first: nix develop .#android -c ./android/build.sh\n' >&2
+  fi
   exit 2
 fi
-apk=$(phone_apk_cached) || {
-  bad "no cached APK after stocking"
+# Parked in the ambulance box before the phone is touched, so the repair has a
+# local file to install; --refresh replaces a stale copy rather than trusting it.
+if "$BIN/phone-fix-apk" --refresh; then
+  ok "the ambulance box took the build"
+else
+  bad "cannot park the app APK in the ambulance box"
   exit 2
-}
-export PHONE_PROXY_APK=$apk
-printf 'offline APK for the repair: %s\n' "$PHONE_PROXY_APK" >&2
+fi
+parked=$PHONE_APK_CACHE/$(basename "$APP_APK")
+if cmp -s "$APP_APK" "$parked"; then
+  ok "the parked APK is byte for byte the build"
+else
+  bad "the parked APK is not the build ($parked)"
+fi
+# The repair reads PHONE_PROXY_APK first, so it installs exactly this file.
+export PHONE_PROXY_APK=$APP_APK
+printf 'APK for the repair: %s\n' "$PHONE_PROXY_APK" >&2
 
 problems=$("$doctor" --analyze 2>/dev/null || true)
 if printf '%s\n' "$problems" | grep -q '^fail '; then
@@ -219,6 +241,14 @@ if installed; then
   ok "proxy app is installed again"
 else
   bad "proxy app is still missing"
+fi
+# The doctor's own verdict, printed as "ok  proxy version  <v> (<code>), this
+# checkout's build": the app on the phone is the build that was just installed.
+if grep -qE "^ok +proxy version +.*this checkout's build" "$TMP/doctor"; then
+  ok "the app on the phone is this checkout's build"
+else
+  bad "the phone is not running this checkout's build"
+  grep 'proxy version' "$TMP/doctor" >&2 || true
 fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"

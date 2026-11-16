@@ -254,15 +254,17 @@ checks passing.
 ### Live end-to-end test
 
 `tests/live/doctor-fix-proxy.sh` breaks the setup on purpose and checks that the
-doctor repairs it: it stocks the ambulance APK, drops the laptop AP, uninstalls
-the proxy app, requires `phone-doctor` to report `ap_address`, `proxy_app` and
-`proxy_request`, runs `phone-doctor-fix --yes --required`, and requires a clean
-doctor with the AP back up and the phone joined again. The fixer restores the AP
-and the phone's link to it last, so every proxy fix runs while the phone is
-still reachable. The APK is cached before the phone is touched, so the repair
-works even when the removed proxy was the laptop's only uplink
-(`PHONE_PROXY_APK=<file>` also forces a specific APK). It reinstalls and
-reconfigures the app on exit if the repair failed.
+doctor repairs it: it parks this checkout's build
+(`android/build/phone-link-proxy.apk`, or `PHONE_PROXY_APK=<file>`) in the
+ambulance box, drops the laptop AP, uninstalls the proxy app, requires
+`phone-doctor` to report `ap_address`, `proxy_app` and `proxy_request`, runs
+`phone-doctor-fix --yes --required`, and requires a clean doctor, the AP back up,
+the phone joined again and the app at this tree's version. Nothing is downloaded:
+the repair installs the parked file, and the harness requires it to be byte for
+byte the build — which is what keeps the repair working when the removed proxy
+was the laptop's only uplink. The fixer restores the AP and the phone's link to
+it last, so every proxy fix runs while the phone is still reachable. It
+reinstalls and reconfigures the app on exit if the repair failed.
 
 ```sh
 sudo tests/live/doctor-fix-proxy.sh

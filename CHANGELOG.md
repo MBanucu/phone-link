@@ -263,6 +263,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   password. The three suites went from 542 lines of screen driving to 61 cases
   of intents and dumps.
 
+- The live doctor-fix harness repairs with this checkout's build. It stocked the
+  ambulance cache first — a download while the phone was still up — and handed
+  the repair whatever the cache happened to hold. It now requires
+  `android/build/phone-link-proxy.apk` (`PHONE_PROXY_APK=<file>` for another
+  one), parks a byte-identical copy of it in the ambulance box before it touches
+  the phone, and hands the repair that file, so `phone-doctor-fix --required`
+  installs exactly what the tree built with nothing on the network; afterwards it
+  requires the doctor to say the app is this checkout's build.
+
 - A filtered run keeps its own timing history. Full runs and `PHONE_LIVE_ONLY`
   runs write their step rows to the same file, and the same step does not cost
   the same in both — `stop` is 2.5 s in a full run and 15–16 s in a filtered one,
