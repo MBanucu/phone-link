@@ -147,6 +147,9 @@ DEVICETEST_PKG=${PROXY_DEVICETEST_PKG:-org.phonelink.proxytest}
 FLASH_EDGES=${PHONE_LIVE_FLASH_EDGES:-8}
 FLASH_PERIOD=${PHONE_LIVE_FLASH_PERIOD:-200}
 CLOCK=${PHONE_LIVE_CLOCK_SH:-$ROOT/tests/live/clock.sh}
+# The pass that gives the recording its index at the front, so the file plays
+# and seeks from its first byte instead of only after the recorder closed it.
+REMUX=${PHONE_LIVE_REMUX_SH:-$ROOT/tests/live/remux.sh}
 
 pass=0
 fail=0
@@ -393,6 +396,9 @@ app_version=""
 clock_summary=""
 clock_fit=""
 clock_failed=""
+# Whether the recording was given an index at the front (empty: not tried).
+remuxed=""
+remux_failed=""
 
 
 
@@ -488,6 +494,15 @@ cleanup() {
     fi
   elif [ -n "$clock_failed" ]; then
     bad 'the recording and the phone share a clock'
+  fi
+  # The recording is an artifact for a person as well as for the clock fit:
+  # one whose index is at the end cannot be previewed or seeked until it is
+  # closed, and a run cut short leaves no index at all.
+  if [ -n "$remuxed" ]; then
+    ok 'the recording plays from its first byte'
+  elif [ -n "$remux_failed" ]; then
+    bad 'the recording plays from its first byte' \
+      "$(head -2 "$ARTIFACTS/remux.txt" 2>/dev/null | tr '\n' ' ')"
   fi
   local total
   total=$(awk -v start="$run_start" -v end="$(now_ms)" \

@@ -15,22 +15,6 @@ list is empty.
   harness pulling the frames it wants and naming them after what they show
   (`frame-<check>-<offset>.png`) instead of a person searching for them.
 
-## A recording that can be played before the run is over
-
-- [ ] Record into something streamable. `screenrecord` writes a plain MP4 with
-  its index (`moov`) at the end, so `screen.mp4` cannot be played, seeked or
-  previewed — in a browser, a player, a mail attachment — until the run has
-  finished and the file was closed; a run that is cut short leaves a file
-  with no index at all. The pixels are already H.264, so this needs no
-  re-encoding: a remux at the end (`ffmpeg -c copy -movflags +faststart`)
-  gives a file that plays and seeks from the first byte, and
-  `-movflags frag_keyframe+empty_moov` gives a fragmented MP4 that can be
-  read while it is still being written. The cost is a second pass over
-  5–80 MB at the end of a run (seconds, no decode) and peak disk for both
-  copies; the phone's own recorder has no flag for either, so the remux has
-  to happen on the host, or the harness has to read the file out to the host
-  while the run goes on.
-
 ## The proxy app, a project of its own
 
 - [ ] Move `android/` out into its own repository, with its own build and its

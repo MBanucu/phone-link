@@ -377,6 +377,17 @@ stop_capture() {
     phone pull /sdcard/proxy-app.mp4 "$ARTIFACTS/screen.mp4" >/dev/null 2>&1
     shell rm -f /sdcard/proxy-app.mp4 >/dev/null 2>&1
     screenrecord_pid=""
+    # screenrecord puts the index at the end; the pixels are already H.264, so
+    # a copy pass moves it to the front and the file plays while it sits in the
+    # run's folder. A host without ffmpeg keeps the recording as it came, and
+    # a failed pass is a failed check, not a lost file.
+    if [ "${PHONE_LIVE_REMUX:-1}" != 0 ] && [ -f "$ARTIFACTS/screen.mp4" ]; then
+      if bash "$REMUX" "$ARTIFACTS/screen.mp4" >"$ARTIFACTS/remux.txt" 2>&1; then
+        remuxed=1
+      else
+        remux_failed=1
+      fi
+    fi
   fi
   calibrate_clock
 }

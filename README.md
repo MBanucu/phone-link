@@ -307,7 +307,17 @@ holds the phone's screen as `screen.mp4` for the length of the run and the
 screen as XML for every change the capture service recorded (`ui-index.csv`
 says when each was taken and what caused it);
 `tests/live/frames.sh result-live/<timestamp>/screen.mp4 0:42` turns any moment
-of the recording into a still. One row per step is appended to
+of the recording into a still. The recorder puts the MP4 index (`moov`) at the
+end, so the file it leaves cannot be played or seeked until the recorder has
+closed it — and a run cut short leaves no index at all. `tests/live/remux.sh`
+(which a run calls before it exits) does one copy pass with no decode to move
+the index to the front, and checks the first bytes instead of trusting the
+tool; `PHONE_LIVE_REMUX=0` keeps the raw file. Measured on the longest
+recording here: 143 MB and 379 s remuxed in 0.7 s, same duration, and the
+clock fit still passes. A live H.264 pipe from `screenrecord` would be
+readable while it is written, but raw H.264 carries no frame times, and the
+clock mapping needs them: the file is finished at the end rather than read
+live. One row per step is appended to
 `result-live/timings.csv` with its seconds and its pass/fail counts, and the
 file is never rewritten, so a run's cost can be compared across runs.
 `PHONE_LIVE_CAPTURE=0` runs without the recording and the snapshots.
