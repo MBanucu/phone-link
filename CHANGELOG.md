@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-16
+
 ### Added
 
 - The ambulance box keeps a repair kit, not just one APK. Installing the app on
@@ -859,7 +861,8 @@ with it.
 - `phone-doctor` installs under `lib/python`, where its wrapper looks for it.
 - The proxy APK cache is found when `HOME` is unset during activation.
 
-[Unreleased]: https://github.com/MBanucu/phone-link/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/MBanucu/phone-link/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/MBanucu/phone-link/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/MBanucu/phone-link/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/MBanucu/phone-link/compare/v0.3.8...v0.4.0
 [0.3.8]: https://github.com/MBanucu/phone-link/compare/v0.3.7...v0.3.8
