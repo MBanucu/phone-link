@@ -45,6 +45,8 @@ make_stub phone-proxy-start
 make_stub phone-proxy-setup
 make_stub phone-fix-apk
 make_stub phone-ap-create
+make_stub phone-ap-up
+make_stub phone-wifi-connect
 
 cat >"$STUBS/phone-proxy-install" <<'EOF'
 #!/usr/bin/env bash
@@ -92,7 +94,16 @@ if run --yes; then ok "applying fixes exits 0"; else bad "applying fixes exits 0
 grep -q 'all reported problems are fixed' "$LOG/out" && ok "re-checks and reports clean" \
   || bad "re-checks and reports clean" "$(cat "$LOG/out")"
 
-# 4. A problem without a fix script prints the manual step and exits 1.
+# 4. The proxy is started only after the AP and the phone's link are back: its
+#    listener runs on the network the phone joined, so setup sent earlier is
+#    refused by the app's own SSID gate.
+printf 'fail proxy_app x\nfail ap_address x\nfail phone_address x\nfail proxy_request x\n' >"$LOG/problems"
+rm -f "$LOG/actions"
+if run --yes; then ok "applying link-dependent fixes exits 0"; else bad "applying link-dependent fixes exits 0" "$(cat "$LOG/out")"; fi
+[ "$(awk '{print $1}' "$LOG/actions" | tr '\n' ' ')" = "phone-proxy-install phone-ap-up phone-wifi-connect phone-proxy-setup " ] \
+  && ok "starts the proxy after the AP and the link" || bad "starts the proxy after the AP and the link" "$(cat "$LOG/actions")"
+
+# 5. A problem without a fix script prints the manual step and exits 1.
 printf 'fail secrets /etc/phone-socks-secrets not readable (run with sudo)\n' >"$LOG/problems"
 rm -f "$LOG/actions"
 if run --yes; then bad "manual-only problem exits 1"; else ok "manual-only problem exits 1"; fi
@@ -100,7 +111,7 @@ grep -q 'manual:' "$LOG/out" && ok "shows the manual section" || bad "shows the 
 grep -q 'PHONE_SOCKS_PASS' "$LOG/out" && ok "explains the secrets step" || bad "explains the secrets step"
 [ -s "$LOG/actions" ] && bad "manual-only runs no fix" || ok "manual-only runs no fix"
 
-# 5. A failed fix is reported but the run continues.
+# 6. A failed fix is reported but the run continues.
 printf 'fail ip_forward 0\nwarn network_transport USB only\n' >"$LOG/problems"
 printf '#!%s\nexit 1\n' "$BASH_BIN" >"$STUBS/phone-fix-forwarding"
 chmod +x "$STUBS/phone-fix-forwarding"
@@ -110,7 +121,7 @@ grep -q 'warning: the ip_forward fix failed' "$LOG/out" && ok "warns about the f
   || bad "warns about the failed fix" "$(cat "$LOG/out")"
 grep -qx 'phone-adb-wifi' "$LOG/actions" && ok "still runs the next fix" || bad "still runs the next fix"
 
-# 6. --required fixes failures but leaves warnings alone.
+# 7. --required fixes failures but leaves warnings alone.
 make_stub phone-fix-forwarding
 printf 'fail ip_forward 0\nwarn network_transport USB only\n' >"$LOG/problems"
 rm -f "$LOG/actions"
@@ -126,14 +137,14 @@ grep -q 'no required problems to fix' "$LOG/out" && ok "warnings-only --required
   || bad "warnings-only --required says so" "$(cat "$LOG/out")"
 [ -s "$LOG/actions" ] && bad "warnings-only --required runs nothing" || ok "warnings-only --required runs nothing"
 
-# 7. A failing proxy request is repaired with phone-proxy-setup, not a bare start.
+# 8. A failing proxy request is repaired with phone-proxy-setup, not a bare start.
 printf 'fail proxy_request 192.168.77.232:1080 -> 000\n' >"$LOG/problems"
 rm -f "$LOG/actions"
 if run --yes --required; then ok "proxy_request fix exits 0"; else bad "proxy_request fix exits 0" "$(cat "$LOG/out")"; fi
 grep -qx 'phone-proxy-setup' "$LOG/actions" && ok "uses phone-proxy-setup" \
   || bad "uses phone-proxy-setup" "$(cat "$LOG/actions" 2>/dev/null)"
 
-# 8. PHONE_PROXY_APK installs from the cached file, no network needed.
+# 9. PHONE_PROXY_APK installs from the cached file, no network needed.
 printf 'fail proxy_app com.tokyoxpa3.androidproxy not installed\n' >"$LOG/problems"
 : >"$TMP/fake.apk"
 rm -f "$LOG/actions"
@@ -143,7 +154,7 @@ grep -qx "phone-proxy-install $TMP/fake.apk" "$LOG/actions" && ok "installs the 
   || bad "installs the cached APK" "$(cat "$LOG/actions" 2>/dev/null)"
 unset PHONE_PROXY_APK
 
-# 9. A missing APK is the build's business, so it is a manual step: no script
+# 10. A missing APK is the build's business, so it is a manual step: no script
 # fakes a build, and nothing is run for it.
 printf 'fail apk_cache not built (nix develop .#android -c ./android/build.sh)\n' >"$LOG/problems"
 rm -f "$LOG/actions"
@@ -154,7 +165,7 @@ grep -q 'apk_cache .*build' "$LOG/out" && ok "prints how to build it" \
   || bad "prints how to build it" "$(cat "$LOG/out")"
 [ -s "$LOG/actions" ] && bad "a manual step runs nothing" || ok "a manual step runs nothing"
 
-# 10. A proxy install names a file from the checkout's build or the ambulance
+# 11. A proxy install names a file from the checkout's build or the ambulance
 # box, without being told which, and never a download.
 printf 'fail proxy_app org.phonelink.proxy not installed\n' >"$LOG/problems"
 rm -f "$LOG/actions"
@@ -164,14 +175,14 @@ grep -Eq "phone-proxy-install (.*/android/build/phone-link-proxy\.apk|$PHONE_APK
   || bad "installs the APK the checkout or the cache names" "$(cat "$LOG/actions" 2>/dev/null)"
 grep -q -- '--fdroid' "$LOG/actions" && bad "does not download to repair" || ok "does not download to repair"
 
-# 11. A missing AP profile is created from the secret.
+# 12. A missing AP profile is created from the secret.
 printf 'warn ap_profile phonelink missing (run phone-ap-create, or hotspot mode)\n' >"$LOG/problems"
 rm -f "$LOG/actions"
 if run --yes; then ok "ap_profile fix exits 0"; else bad "ap_profile fix exits 0" "$(cat "$LOG/out")"; fi
 grep -qx 'phone-ap-create' "$LOG/actions" && ok "runs phone-ap-create" \
   || bad "runs phone-ap-create" "$(cat "$LOG/actions" 2>/dev/null)"
 
-# 12. The fixer reads the doctor beside the checkout, not the deployed one on
+# 13. The fixer reads the doctor beside the checkout, not the deployed one on
 #     PATH, and PHONE_DOCTOR still overrides both.
 run_own_doctor --which-doctor
 if grep -qx "$ROOT/bin/phone-doctor" "$LOG/out"; then
@@ -192,7 +203,7 @@ run
 grep -q "doctor: $STUBS/phone-doctor" "$LOG/out" && ok "a run names its doctor" \
   || bad "a run names its doctor" "$(cat "$LOG/out")"
 
-# 13. --help and unknown arguments.
+# 14. --help and unknown arguments.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 if run --bogus; then bad "unknown argument exits 1"; else ok "unknown argument exits 1"; fi
 

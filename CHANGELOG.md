@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `phone-doctor-fix` starts the proxy after the AP and the phone's link are
+  back. The app only listens on the network the phone joined, so a `SETUP` sent
+  while the AP was down was refused by its own SSID gate and the repair reported
+  failure over an ordering, not a fault.
+- The doctor's live self-repair test runs as `org.phonelink.proxy.test`: it
+  uninstalls and reconfigures the test build on port 18080, and requires the
+  daily app's state line to be untouched, so a run no longer costs the phone its
+  saved proxies. It also refuses to start unless the adb route survives the AP
+  drop, and `phone.app_apk()` (and the doctor's copy) install the test build
+  when the package under test is the test one.
 - The repair kit prunes itself. Nothing ever removed an APK from the ambulance
   box, so a host that followed this repository for a year would collect every
   version it ever stocked — 150 kB each, and `apk_cached()` picks by mtime, so

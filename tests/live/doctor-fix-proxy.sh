@@ -1,25 +1,28 @@
 #!/usr/bin/env bash
-# Live end-to-end test of the doctor's self-repair:
+# Live end-to-end test of the doctor's self-repair, against the test build:
 #
-#   1. require this checkout's app APK and a healthy setup, with USB tether up
-#      (the AP goes down),
+#   1. require a route that outlives the AP drop, this checkout's test APK and a
+#      healthy setup, with USB tether up,
 #   2. park that APK in the ambulance box, so the repair needs no network,
 #   3. drop the laptop AP,
-#   4. uninstall the proxy app,
+#   4. uninstall the test app (`org.phonelink.proxy.test`),
 #   5. require phone-doctor to flag ap_address, proxy_app and proxy_request,
-#   6. run phone-doctor-fix --yes --required: it installs the tree's build from
+#   6. run phone-doctor-fix --yes --required: it installs the test build from
 #      the parked file (AP + phone link are fixed last),
-#   7. require a clean doctor, the app at this tree's version, the AP back up
-#      and the phone joined again.
+#   7. require a clean doctor, the test app at this tree's version, the AP back
+#      up, the phone joined again — and the daily app exactly as it was.
 #
 #   sudo tests/live/doctor-fix-proxy.sh
 #
-# Destructive by design: the app's data is lost, and the AP is dropped until
-# the fixer restores it. Needs the phone, root, the APK from
-# `nix develop .#android -c ./android/build.sh` (or PHONE_PROXY_APK=/path to
-# test another file), and USB tether so the proxy can answer while the AP is
-# down. Nothing is downloaded: the repair installs the file this tree built.
-# Deliberately not named *.test.sh, so `nix flake check` never runs it.
+# It runs as the test package (`org.phonelink.proxy.test`, port 18080) so a run
+# never costs the phone the proxies the daily build has saved. Destructive all
+# the same: the test app's data is lost, and the AP is dropped until the fixer
+# restores it. Needs the phone, root, the APK from `nix develop .#android -c
+# ./android/build.sh` (or PHONE_PROXY_APK=/path), a USB tether so the proxy can
+# answer while the AP is down, and an adb route that is not on the AP — dropping
+# it cuts every adb call on that address. Nothing is downloaded: the repair
+# installs the file this tree built. Deliberately not named *.test.sh, so
+# `nix flake check` never runs it.
 set -u
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -30,6 +33,15 @@ export PATH="$BIN:$PATH"
 doctor=${PHONE_DOCTOR:-$BIN/phone-doctor}
 fixer=${PHONE_DOCTOR_FIX:-$BIN/phone-doctor-fix}
 ap_if=${PHONE_AP_IF:-wlp110s0}
+
+# The test build, so breaking the setup costs the phone nothing: the daily app
+# keeps its saved proxies, its listener and its port. The fixer installs the APK
+# that belongs to this package (`phone.app_apk()`), so "reinstall the app"
+# means the test one.
+export PHONE_PROXY_PKG=${PHONE_PROXY_PKG:-org.phonelink.proxy.test}
+# A spare port: the daily proxy has its own, and two listeners cannot share one.
+export PHONE_PROXY_PORT=${PHONE_PROXY_PORT:-18080}
+daily_pkg=${PHONE_DAILY_PKG:-org.phonelink.proxy}
 
 pass=0
 fail=0
@@ -62,10 +74,14 @@ serial=$(phone_serial) || {
 }
 export PHONE_SERIAL="$serial"
 
-# The app the repair installs is the one this checkout builds: `android/build.sh`
-# writes it, `phone-proxy-install` installs it, and PHONE_PROXY_APK names another
-# file to put through the same test.
-APP_APK=${PHONE_PROXY_APK:-$ROOT/android/build/phone-link-proxy.apk}
+# The app the repair installs is the one this checkout builds for the package
+# under test: `android/build.sh` writes both, and the test package comes from the
+# test build. PHONE_PROXY_APK names another file to put through the same test.
+case $PHONE_PROXY_PKG in
+  org.phonelink.proxy.test) built=$ROOT/android/build/phone-link-proxy-test.apk ;;
+  *) built=$ROOT/android/build/phone-link-proxy.apk ;;
+esac
+APP_APK=${PHONE_PROXY_APK:-$built}
 
 TMP=$(mktemp -d)
 
@@ -75,6 +91,28 @@ installed() {
 
 ap_up() {
   ip -4 -br addr show "$ap_if" 2>/dev/null | grep -qE ' [0-9]+\.[0-9]+'
+}
+
+# Whether this adb transport survives the AP going down. A bare serial is a
+# cable; a host:port one is on a network, and if that network is the AP this
+# test drops, every adb call from here on is addressed to nothing — including
+# the ones that would put things back.
+route_survives() {
+  local address
+  case $serial in
+    *:*) address=${serial%:*} ;;
+    *) return 0 ;;
+  esac
+  case $address in
+    "${PHONE_AP_SUBNET%.0/24}."*) return 1 ;;
+  esac
+  return 0
+}
+
+# The daily app's own line, so the end of the run can require it untouched.
+daily_state() {
+  adb -s "$serial" shell dumpsys activity service "$daily_pkg/.ProxyService" 2>/dev/null \
+    | tr -d '\r' | grep -m1 '^ *state ' | sed 's/^ *//'
 }
 
 restore() {
@@ -98,10 +136,26 @@ restore() {
     printf 'restoring the proxy settings and start\n' >&2
     "$BIN/phone-proxy-setup" >&2 || printf 'restore setup failed\n' >&2
   fi
+  # The test app is a fixture, not a service: leave nothing of it listening.
+  if [ "$(daily_state)" != "" ] && installed; then
+    "$BIN/phone-proxy-stop" >/dev/null 2>&1 || true
+  fi
 }
 trap 'restore; rm -rf "$TMP"' EXIT
 
 step "preconditions"
+# Before anything is dropped: this run has to be able to reach the phone
+# afterwards, or it cuts its own link and cannot put anything back.
+if route_survives; then
+  ok "the adb route is not on the AP ($serial)"
+else
+  bad "the adb route is on the AP this test drops ($serial)"
+  printf '  plug the cable (adb over USB), or run phone-adb-wifi so the phone\n' >&2
+  printf '  is reachable another way; the drop cuts every call to %s\n' \
+    "${serial%:*}" >&2
+  exit 2
+fi
+
 if [ -f "$APP_APK" ]; then
   ok "this checkout's app APK is here ($APP_APK)"
 else
@@ -131,18 +185,36 @@ fi
 export PHONE_PROXY_APK=$APP_APK
 printf 'APK for the repair: %s\n' "$PHONE_PROXY_APK" >&2
 
+# The test app has to exist to be broken on purpose; a stop of it costs nothing.
+if installed; then
+  ok "the test app is installed ($PHONE_PROXY_PKG)"
+else
+  if "$BIN/phone-proxy-install" "$APP_APK"; then
+    ok "installed the test app"
+  else
+    bad "cannot install the test app"
+    exit 1
+  fi
+fi
 problems=$("$doctor" --analyze 2>/dev/null || true)
+if printf '%s\n' "$problems" | grep -q '^fail proxy_request '; then
+  # A fresh install (or one an earlier run stopped) has no listener: set the
+  # test app up on the spare port so the run starts from a healthy setup.
+  "$BIN/phone-proxy-setup" --port "$PHONE_PROXY_PORT" >&2 \
+    || printf 'setup of the test app failed\n' >&2
+  problems=$("$doctor" --analyze 2>/dev/null || true)
+fi
 if printf '%s\n' "$problems" | grep -q '^fail '; then
-  bad "the setup already has required failures; fix it first"
+  bad "the test app already has required failures; fix it first"
   printf '%s\n' "$problems" >&2
   exit 1
 fi
-ok "doctor reports no required failures"
-if installed; then
-  ok "proxy app is installed"
+ok "doctor reports no required failures (for $PHONE_PROXY_PKG)"
+daily_before=$(daily_state)
+if [ -n "$daily_before" ]; then
+  ok "the daily app is listening before the run ($daily_before)"
 else
-  bad "proxy app is not installed; install it before this test"
-  exit 1
+  ok "the daily app is not running; nothing to preserve"
 fi
 tether=$(adb -s "$serial" shell ip -4 -o addr show rndis0 2>/dev/null \
   | tr -d '\r' | awk '{print $4}' | head -1)
@@ -238,17 +310,25 @@ else
   ok "no required failures remain"
 fi
 if installed; then
-  ok "proxy app is installed again"
+  ok "the test app is installed again"
 else
-  bad "proxy app is still missing"
+  bad "the test app is still missing"
 fi
 # The doctor's own verdict, printed as "ok  proxy version  <v> (<code>), this
 # checkout's build": the app on the phone is the build that was just installed.
 if grep -qE "^ok +proxy version +.*this checkout's build" "$TMP/doctor"; then
-  ok "the app on the phone is this checkout's build"
+  ok "the test app on the phone is this checkout's build"
 else
   bad "the phone is not running this checkout's build"
   grep 'proxy version' "$TMP/doctor" >&2 || true
+fi
+# The point of running as the test package: the app the phone lives on is
+# exactly as it was, its listener and its saved proxies included.
+daily_after=$(daily_state)
+if [ "$daily_after" = "$daily_before" ]; then
+  ok "the daily app is untouched (${daily_after:-still stopped})"
+else
+  bad "the daily app changed" "${daily_before:-stopped} -> ${daily_after:-stopped}"
 fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"

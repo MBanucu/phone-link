@@ -1,7 +1,10 @@
 """Repair the problems phone-doctor reports, one script per problem.
 
-The order is deliberate: the AP and the phone's link to it come last, because
-bringing the AP up moves the phone's address.
+The order is deliberate: the AP and the phone's link to it come after the
+things that do not need a network, because bringing the AP up moves the phone's
+address; and the proxy is started last of all, because its listener only runs on
+the network the phone joined — setup sent while the AP is down is refused by the
+app's own SSID gate, and the repair would report failure over an ordering.
 """
 
 from __future__ import annotations
@@ -27,9 +30,9 @@ PHONE_DOCTOR names another.
 """
 
 FIX_ORDER = (
-    "ip_forward ap_profile phone_unlocked phone_default proxy_app "
-    "proxy_request app_boot phone_tun tunnel_route rndis0 network_transport "
-    "ap_address phone_address https"
+    "ip_forward ap_profile phone_unlocked phone_default proxy_app app_boot "
+    "phone_tun tunnel_route rndis0 network_transport ap_address phone_address "
+    "proxy_request https"
 ).split()
 
 FIX_SCRIPTS = {

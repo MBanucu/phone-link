@@ -187,6 +187,10 @@ def app_apk() -> str | None:
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     )
     built = os.path.join(root, "android", "build", "phone-link-proxy.apk")
+    if settings.PHONE_PROXY_PKG == "org.phonelink.proxy.test":
+        # The second build of the same app: pointed at the test package, this is
+        # the APK that package comes from, not the daily one it must replace.
+        built = os.path.join(root, "android", "build", "phone-link-proxy-test.apk")
     if os.path.isfile(built):
         return built
     return apk_cached()

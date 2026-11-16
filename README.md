@@ -254,16 +254,21 @@ checks passing.
 ### Live end-to-end test
 
 `tests/live/doctor-fix-proxy.sh` breaks the setup on purpose and checks that the
-doctor repairs it: it parks this checkout's build
-(`android/build/phone-link-proxy.apk`, or `PHONE_PROXY_APK=<file>`) in the
-ambulance box, drops the laptop AP, uninstalls the proxy app, requires
-`phone-doctor` to report `ap_address`, `proxy_app` and `proxy_request`, runs
-`phone-doctor-fix --yes --required`, and requires a clean doctor, the AP back up,
-the phone joined again and the app at this tree's version. Nothing is downloaded:
-the repair installs the parked file, and the harness requires it to be byte for
-byte the build — which is what keeps the repair working when the removed proxy
-was the laptop's only uplink. The fixer restores the AP and the phone's link to
-it last, so every proxy fix runs while the phone is still reachable. It
+doctor repairs it. It runs the app's **test build**
+(`org.phonelink.proxy.test`, from `android/build/phone-link-proxy-test.apk`,
+listening on 18080) so a run never costs the phone the proxies the daily build
+has saved, and it requires the daily app's state line to be the same at the end.
+It parks this checkout's build in the ambulance box, drops the laptop AP,
+uninstalls the test app, requires `phone-doctor` to report `ap_address`,
+`proxy_app` and `proxy_request`, runs `phone-doctor-fix --yes --required`, and
+requires a clean doctor, the AP back up, the phone joined again and the app at
+this tree's version. Nothing is downloaded: the repair installs the parked file,
+and the harness requires it to be byte for byte the build — which is what keeps
+the repair working when the removed proxy was the laptop's only uplink. It
+refuses to start unless the adb route survives the AP drop (a cable, or a
+transport that is not on the AP's subnet), so a run cannot cut its own link to
+the phone. The fixer brings the AP and the phone's link up before it starts the
+proxy, because the app only listens on the network the phone joined, and
 reinstalls and reconfigures the app on exit if the repair failed.
 
 ```sh

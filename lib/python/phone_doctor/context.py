@@ -232,6 +232,9 @@ class Context:
             # missing: the check says so instead of quietly picking another.
             return Path(override)
         built = self.source_root / "android" / "build" / "phone-link-proxy.apk"
+        if self.proxy_pkg == "org.phonelink.proxy.test":
+            # The test build, for a doctor pointed at the test package.
+            built = self.source_root / "android" / "build" / "phone-link-proxy-test.apk"
         if built.is_file():
             return built
         return self.apk_cached()
