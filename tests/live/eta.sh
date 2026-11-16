@@ -30,9 +30,12 @@ declare -A ETA_MEDIAN=()
 # three is.
 ETA_SLOW_MS=${ETA_SLOW_MS:-30000}
 
-# Reads the history: for every step, the median of its last RUNS rows.
-eta_load() { # eta_load TIMINGS.csv [RUNS]
-  local file=$1 runs=${2:-5} step seconds
+# Reads the history: for every step, the median of its last RUNS rows. With
+# `full` as the third word, a run that wrote no PARTIAL row is all that counts —
+# the file the full runs write also holds the filtered runs made before they had
+# a history of their own, and those cost something else.
+eta_load() { # eta_load TIMINGS.csv [RUNS] [full]
+  local file=$1 runs=${2:-5} only=${3:-} step seconds
   ETA_MEDIAN=()
   [ -f "$file" ] || return 0
   # A tab separates the step from its number, because a step's name has spaces
@@ -41,12 +44,20 @@ eta_load() { # eta_load TIMINGS.csv [RUNS]
     [ -n "$step" ] && [ -n "$seconds" ] || continue
     ETA_MEDIAN[$step]=$(awk -v s="$seconds" 'BEGIN { printf "%.0f", s * 1000 }')
   done <<EOF
-$(awk -F, -v runs="$runs" '
+$(awk -F, -v runs="$runs" -v only="$only" '
   NR == 1 { next }
-  # TOTAL and PARTIAL are runs, not steps, and a filtered run has no step rows.
-  NF < 3 || $2 == "" || $2 == "TOTAL" || $2 == "PARTIAL" { next }
-  { n[$2]++; v[$2, n[$2]] = $3 + 0 }
+  NF < 3 || $2 == "" { next }
+  # TOTAL and PARTIAL are runs, not steps. A PARTIAL also names the runs that
+  # are not part of the full history, for as long as that history holds them.
+  $2 == "PARTIAL" { partial[$1] = 1; next }
+  $2 == "TOTAL" { next }
+  { rows++; run[rows] = $1; sname[rows] = $2; sec[rows] = $3 + 0 }
   END {
+    for (i = 1; i <= rows; i++) {
+      if (only == "full" && (run[i] in partial)) continue
+      n[sname[i]]++
+      v[sname[i], n[sname[i]]] = sec[i]
+    }
     for (step in n) {
       from = n[step] - runs + 1
       if (from < 1) from = 1
@@ -91,22 +102,37 @@ eta_fmt() { # eta_fmt MILLISECONDS
 }
 
 # The plan, one line, and ETA_PLAN_MS for the end of the run to be judged
-# against. Prices come from the history; a step with none is borrowed and marked.
+# against. Prices come from the history; a step with none is borrowed and marked
+# with a `~`, and one with nothing to borrow is a `?` rather than an invented
+# number. When the caller has built ETA_EST — the harness does, because it is
+# the one that knows which prices were borrowed — those are the prices, and
+# ETA_BORROWED names the ones to mark.
 eta_plan() { # eta_plan STEP...
-  local fallback step value total=0 line="" assumed="" part
-  fallback=$(eta_fallback)
+  local step value total=0 line="" assumed="" part borrowed have_est=""
+  declare -p ETA_EST >/dev/null 2>&1 && have_est=1
   for step in "$@"; do
-    value=${ETA_MEDIAN[$step]:-}
-    if [ -n "$value" ]; then
-      part=$(eta_fmt "$value")
-    elif [ -n "$fallback" ]; then
-      value=$fallback
+    borrowed=""
+    if [ -n "$have_est" ]; then
+      value=${ETA_EST[$step]:-0}
+      case " ${ETA_BORROWED:-} " in
+        *" $step "*) borrowed=1 ;;
+      esac
+    else
+      value=${ETA_MEDIAN[$step]:-}
+      if [ -z "$value" ]; then
+        value=$(eta_fallback)
+        [ -z "$value" ] || borrowed=1
+      fi
+    fi
+    [ -n "$value" ] || value=0
+    if [ "$value" -le 0 ]; then
+      part="?"
+      assumed="$assumed $step"
+    elif [ -n "$borrowed" ]; then
       part="~$(eta_fmt "$value")"
       assumed="$assumed $step"
     else
-      value=0
-      part="?"
-      assumed="$assumed $step"
+      part=$(eta_fmt "$value")
     fi
     total=$((total + value))
     line="$line $part $step ·"

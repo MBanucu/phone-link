@@ -236,6 +236,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A filtered run keeps its own timing history. Full runs and `PHONE_LIVE_ONLY`
+  runs write their step rows to the same file, and the same step does not cost
+  the same in both — `stop` is 2.5 s in a full run and 15–16 s in a filtered one,
+  where the app was just installed and the panel is where the preamble left it —
+  so every filtered run dragged the medians a full run was planned with, and the
+  next full run dragged them back. Filtered runs write
+  `result-live/timings-partial.csv` now and are priced from it, while the full
+  history is read as full runs only, so the filtered runs it already holds stop
+  counting: the full run's plan for `stop` went from 15.4 s to 2.5 s. The first
+  filtered run of a new history is priced from the full one and says so by
+  marking every step with a `~`, which is what the plan already used for a guess.
+
 - A run can be asked for one of its steps. `PHONE_LIVE_ONLY="card toggle,rename"`
   runs only the steps it names — by the name the log prints — instead of all
   twenty-three: a step is a function now (`card toggle` is `step_card_toggle`)

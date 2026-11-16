@@ -87,6 +87,18 @@ case $plan in
   *) bad 'the plan says so instead of inventing a number' "$plan" ;;
 esac
 
+# Prices the caller built are the plan: the harness is the one that knows which
+# steps it had to borrow for, and a borrowed price must not come out as a "?".
+declare -A ETA_EST=([panel]=5000 [rename]=9000)
+ETA_BORROWED=" rename"
+eta_plan panel rename >"$TMP/plan2"
+plan2=$(cat "$TMP/plan2")
+same "$ETA_PLAN_MS" 14000 'the prices the caller built are the plan, borrowed ones included'
+case $plan2 in
+  'plan 14.0s: 5.0s panel · ~9.0s rename ·'*) ok 'and only the borrowed one is marked' ;;
+  *) bad 'and only the borrowed one is marked' "$plan2" ;;
+esac
+
 # What the ticker reads, written by the mark at a step boundary.
 ETA_ORDER=(panel rename never-seen)
 declare -A ETA_EST=([panel]=10000 [rename]=6000 [never-seen]=9000)
@@ -131,6 +143,21 @@ case $over in
   *'over its estimate'*) ok 'a step past its estimate says so instead of claiming none is left' ;;
   *) bad 'a step past its estimate says so instead of claiming none is left' "$over" ;;
 esac
+
+# A file that holds both kinds — the full history before filtered runs had one
+# of their own — is read as full runs only when asked for, so the filtered runs
+# stop dragging the medians.
+cp "$TMP/timings.csv" "$TMP/mixed.csv"
+cat >>"$TMP/mixed.csv" <<'EOF'
+r5,panel,30.0,7,0,ok
+r5,rename,20.0,2,0,ok
+r5,PARTIAL,3.0,1,0,partial
+EOF
+eta_load "$TMP/mixed.csv"
+same "${ETA_MEDIAN[panel]:-}" 13000 'a file of both kinds mixes them by default'
+eta_load "$TMP/mixed.csv" 5 full
+same "${ETA_MEDIAN[panel]:-}" 12000 'asked for the full runs, the filtered one does not count'
+same "${ETA_MEDIAN[rename]:-}" 6000 'and neither do its other steps'
 
 # Far past its estimate: twice the usual time and half a minute over it is
 # news; twice a two-second step is not, or every step would warn.

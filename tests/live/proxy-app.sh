@@ -65,7 +65,11 @@
 # and clock.txt, which maps that clock into the recording, and the timing of each
 # step appended to result-live/timings.csv, which is never rewritten — the
 # history is what makes "is this cheap enough to run before a commit"
-# answerable. PHONE_LIVE_CAPTURE=0 skips the recording and the snapshots.
+# answerable. A filtered run keeps its own history beside it
+# (timings-partial.csv), because its steps cost something different; its estimate
+# is seeded from the full one until it has numbers of its own. The full history
+# is read as full runs only, so the filtered runs it already holds stop counting.
+# PHONE_LIVE_CAPTURE=0 skips the recording and the snapshots.
 #
 # A tunnel check that fails asks the phone whose fault it was: the route the
 # tunnel really takes (the cellular interface the app reports it is bound to,
@@ -81,7 +85,7 @@
 # proxy is saved under the name their page opens by — so a filtered run always
 # does that preamble (the `unlock` and `install` steps, then a step of its own
 # that starts one proxy on the test port and saves it), and says in the log and
-# in timings.csv that it was partial: it
+# in its own history that it was partial: it
 # writes a PARTIAL row where a full run writes TOTAL, so the
 # history can never mistake it for a run that was green all the way through.
 #
@@ -289,7 +293,13 @@ fi
 # Where this run's evidence goes, and the one file that outlives it.
 run_id=$(date -u +%Y%m%dT%H%M%SZ)
 ARTIFACTS=${PHONE_LIVE_ARTIFACTS:-$ROOT/result-live/$run_id}
-TIMINGS=${PHONE_LIVE_TIMINGS:-$ROOT/result-live/timings.csv}
+TIMINGS_FULL=${PHONE_LIVE_TIMINGS:-$ROOT/result-live/timings.csv}
+# Full runs and filtered ones keep separate histories: the same step does not
+# cost the same in both — a filtered run installs the app first, and leaves the
+# panel where its preamble put it — so one file made a full run's medians drift
+# towards filtered numbers and back as filtered runs came and went.
+TIMINGS_PARTIAL=${PHONE_LIVE_TIMINGS_PARTIAL:-${TIMINGS_FULL%.csv}-partial.csv}
+TIMINGS=$TIMINGS_FULL
 # This run's checks, one row each; beside it timings.csv, which keeps the
 # history of every run.
 CHECKS=${PHONE_LIVE_CHECKS:-$ARTIFACTS/checks.csv}
@@ -328,6 +338,7 @@ eta_state=""
 eta_planned=""
 ETA_STATE=""
 ETA_ORDER=()
+ETA_BORROWED=""
 ETA_PLAN_MS=0
 
 # --- the evidence a failed run leaves behind -----------------------------
@@ -462,8 +473,8 @@ cleanup() {
   printf 'artifacts: %s\n' "$ARTIFACTS"
   printf '\n%d passed, %d failed\n' "$pass" "$fail"
   if [ "$partial" = 1 ]; then
-    printf 'partial run: %d of %d steps (%s); no TOTAL row in timings.csv\n' \
-      "$steps_run" "${#STEPS[@]}" "$only"
+    printf 'partial run: %d of %d steps (%s); no TOTAL row in %s\n' \
+      "$steps_run" "${#STEPS[@]}" "$only" "$(basename "$TIMINGS")"
   fi
   if [ "$finished" = 1 ]; then
     # A run that reached its last step exits on what its checks said, which
@@ -1986,6 +1997,9 @@ wanted() { # wanted NAME
 
 if [ -n "$only" ]; then
   partial=1
+  # Its own history, so its medians are its own.
+  TIMINGS=$TIMINGS_PARTIAL
+  mkdir -p "$(dirname "$TIMINGS")"
   only_list=",$(printf '%s' "$only" | sed 's/^ *//; s/ *$//; s/ *, */,/g'),"
   # A name no step answers to would otherwise run nothing and still look green,
   # so the names asked for have to be exactly the steps that answer to them.
@@ -2020,12 +2034,35 @@ if [ "$eta_on" = 1 ]; then
       ETA_ORDER+=("preamble")
     fi
   done
-  eta_load "$TIMINGS" "${PHONE_LIVE_ETA_RUNS:-5}"
-  declare -A ETA_EST=()
+  # The full file is read as full runs only, so the filtered runs it holds from
+  # before they had a history of their own stop counting.
+  eta_kind=""
+  if [ "$TIMINGS" = "$TIMINGS_FULL" ]; then
+    eta_kind=full
+  fi
+  eta_load "$TIMINGS" "${PHONE_LIVE_ETA_RUNS:-5}" "$eta_kind"
   eta_borrowed=$(eta_fallback)
+  eta_seeded=0
+  if [ -z "$eta_borrowed" ] && [ "$TIMINGS" != "$TIMINGS_FULL" ]; then
+    # Nothing filtered has been timed yet: the full run's medians are the only
+    # numbers there are, and a guess is worth more than "?". They seed the plan,
+    # marked as borrowed like any other guess — this run writes to its own
+    # history, so they never move its medians.
+    eta_load "$TIMINGS_FULL" "${PHONE_LIVE_ETA_RUNS:-5}" full
+    eta_seeded=1
+    eta_borrowed=$(eta_fallback)
+  fi
+  declare -A ETA_EST=()
+  ETA_BORROWED=""
   for planned_step in "${ETA_ORDER[@]}"; do
-    ETA_EST[$planned_step]=${ETA_MEDIAN[$planned_step]:-$eta_borrowed}
-    ETA_EST[$planned_step]=${ETA_EST[$planned_step]:-0}
+    if [ -n "${ETA_MEDIAN[$planned_step]:-}" ]; then
+      ETA_EST[$planned_step]=${ETA_MEDIAN[$planned_step]}
+      [ "$eta_seeded" = 0 ] || ETA_BORROWED="$ETA_BORROWED $planned_step"
+    else
+      # Priced like the other steps, and marked as the guess it is.
+      ETA_EST[$planned_step]=${eta_borrowed:-0}
+      ETA_BORROWED="$ETA_BORROWED $planned_step"
+    fi
   done
   eta_plan "${ETA_ORDER[@]}"
   eta_planned=$ETA_PLAN_MS
