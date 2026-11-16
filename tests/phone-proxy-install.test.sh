@@ -315,5 +315,13 @@ expect_exit "--fdroid --release is rejected" 1 --fdroid --release
 expect_exit "--release with two tags is rejected" 1 --release v0.5.0 v0.4.0
 expect_exit "--replace-signer --check is rejected" 1 --replace-signer --check "$WORK/local.apk"
 
+build_out=$(run --build --release 2>&1) && bad "--build with --release exits 1" \
+  || ok "--build with --release exits 1"
+printf '%s' "$build_out" | grep -q 'drop the path and the other sources' \
+  && ok "--build says what to drop" || bad "--build says what to drop" "$build_out"
+if run --build --check >/dev/null 2>&1; then bad "--build with --check exits 1"; else
+  ok "--build with --check exits 1"
+fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

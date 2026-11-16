@@ -41,6 +41,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   new `app_release` check compares the installed name with the newest tag — a
   warning, cached for a day, and `skip` on a host that cannot ask.
 
+### Added
+
+- `phone-proxy-install --build` builds this checkout's app and installs it in one
+  step, signing with `PHONE_APP_KEYSTORE` when the environment names one. An app
+  change needed a shell detour and, worse, an uninstall: the release APK is
+  signed with the release key and `android/build.sh` signs a tree build with the
+  debug key, so adb refused in place and the way through was
+  `--replace-signer`, which takes the app's store with it. The flag says which
+  key signs the build before it starts, so an app-side change can be tried on
+  the phone the same day it is written.
+
 ### Changed
 
 - The release check refetches instead of trusting a stale answer: a cached tag

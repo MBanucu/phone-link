@@ -103,23 +103,6 @@ list is empty.
   reopened history. SQLite in `result-live/` would do: one file, no daemon,
   and `sqlite3` reads it without the project.
 
-## A build of this tree can be installed over the release
-
-- [ ] Every app change now needs an uninstall to try on the phone: the release
-  APK is signed with the release key, `android/build.sh` signs a tree build with
-  the debug key, and `adb install` refuses the mismatch — so testing a change
-  costs the app's store and the saved proxies, which is why the last three
-  app-side wishes (export/import could be compiled and unit-tested and no more)
-  have not been tried on a device. `build.sh` already signs with
-  `PHONE_APP_KEYSTORE` when the environment names one; what is missing is the
-  path of least resistance to that: `phone-proxy-install --build` should build
-  and install in one step, taking the keystore from the environment, and say
-  plainly when it is about to install a differently signed APK (`--replace-signer`
-  and what it costs) instead of letting adb fail with
-  `INSTALL_FAILED_UPDATE_INCOMPATIBLE`. Then a live harness can reinstall the
-  tree's build on the daily app without wiping it, which is what the two wishes
-  below need to be tested at all.
-
 ## The app comes back when the AP does
 
 - [ ] The app's listener stops when the network it listens on goes away and does
