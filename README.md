@@ -312,6 +312,32 @@ of the recording into a still. One row per step is appended to
 file is never rewritten, so a run's cost can be compared across runs.
 `PHONE_LIVE_CAPTURE=0` runs without the recording and the snapshots.
 
+### Asking the history a question
+
+The CSVs are the record and stay canonical — a run writes them as it goes and
+needs no database to start. `tests/live/results.py` reads them once into
+`result-live/results.sqlite3` (one file, no daemon, readable by `sqlite3`
+without this project), so the questions a flat file makes awkward are one
+query: what a step's median is for each kind of run, whether a check failed
+before, which steps got slower after a change, what a full run costs on this
+phone against that one.
+
+```sh
+tests/live/results.py              # fills result-live/results.sqlite3
+sqlite3 result-live/results.sqlite3 \
+  'select name, count(*), round(avg(seconds), 1) from steps group by name order by 3 desc'
+```
+
+It is one-way and repeatable: the CSVs are never written, importing a run again
+replaces its rows, and a schema change costs a re-import rather than the
+history. Three tables — `runs` (kind, the steps a filtered run asked for,
+started, seconds, passes, failures, device, app build, capture, and every other
+setting the run read as JSON), `steps` (run, name, position, seconds,
+pass/fail) and `checks` (run, step, verdict, claim, file, line, function, the
+instant the laptop decided it). A run writes those settings to `run.csv` in
+its own folder before the first step and again at the end; a run from before
+that file existed still imports, with what its timing rows say.
+
 What the phone did is stamped with the phone's own clock, so an action and the
 screen it changed sit on one timeline: `actions.csv` holds every tap and swipe
 with the instant the phone took it, `input.csv` the typing, which has to go

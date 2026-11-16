@@ -81,28 +81,6 @@ list is empty.
   has to show more than the open proxy's own log and say what it is when
   there is nothing in it.
 
-## Test results in something a query can read
-
-- [ ] Every run already leaves rows — a step per row with its seconds and
-  counts in `result-live/timings.csv` (and `timings-partial.csv`), a check per
-  row with its verdict, file, line and the phone's instant in `checks.csv`,
-  and the suites in `result-checks/timings.csv` — but they are flat files keyed
-  by a run id and nothing else, and the run's own settings are nowhere: which
-  build of the app, which phone, capture on or off, a filtered run and which
-  steps, whether the note explains a slow run. Questions that are cheap to ask
-  of a database are awkward of a CSV: what a step's median is for each kind of
-  run, whether a check has failed before, which steps got slower after a
-  change, what a full run costs on this device compared with that one. A small
-  relational schema would answer them — `runs` (id, kind full or filtered, the
-  steps asked for, started, seconds, pass/fail, device, app build, capture,
-  and any other setting the harness read), `steps` (run, name, position,
-  seconds, pass/fail), `checks` (run, step, verdict, claim, file, line,
-  function, decided_ms) — with the CSV left canonical and a one-way importer
-  filling the database, so a run never needs a database to start, an old file
-  can be imported again, and a schema change costs a re-import and not a
-  reopened history. SQLite in `result-live/` would do: one file, no daemon,
-  and `sqlite3` reads it without the project.
-
 ## The app comes back when the AP does
 
 - [ ] The app's listener stops when the network it listens on goes away and does

@@ -247,6 +247,46 @@ adb_link() {
   exit 2
 }
 
+# The settings this run read, beside its checks: one key,value row each, so the
+# importer can say which build and which phone, whether the recording was on,
+# and what a filtered run asked for. The CSVs stay the record — a run needs no
+# database — and this is only the part of the record a timing row has no room
+# for. Written before the first step and again when the run ends, so a run that
+# is cut short still says what it was; the last row for a key wins.
+write_run_settings() {
+  [ -n "${ARTIFACTS:-}" ] || return 0
+  local kind=full status started inside seconds
+  [ -z "${only:-}" ] || kind=filtered
+  started=$(date -u -d "@$((run_start / 1000))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)
+  if [ "${finished:-0}" = 1 ]; then
+    status=$([ "$fail" -eq 0 ] && echo ok || echo failed)
+    seconds=$(awk -v start="$run_start" -v end="$(now_ms)" \
+      'BEGIN { printf "%.1f", (end - start) / 1000 }')
+    inside=$((pass + fail))
+  else
+    status=unknown
+    inside=$((pass + fail))
+  fi
+  {
+    printf 'key,value\n'
+    printf 'kind,%s\n' "$kind"
+    [ -n "${only:-}" ] && printf 'steps_asked,"%s"\n' "${only//\"/\"\"}"
+    printf 'started,%s\n' "$started"
+    printf 'device,"%s"\n' "$serial"
+    printf 'ssid,"%s"\n' "$SSID"
+    printf 'address,%s\n' "$ADDRESS"
+    printf 'port,%s\n' "$PORT"
+    printf 'app_build,"%s"\n' "${app_version:-}"
+    printf 'capture,%s\n' "$([ "${PHONE_LIVE_CAPTURE:-1}" = 0 ] && echo 0 || echo 1)"
+    printf 'tunnel_url,"%s"\n' "$TUNNEL_URL"
+    printf 'checks,%s\n' "$inside"
+    [ "$kind" != filtered ] || printf 'status,partial\n'
+    [ "$kind" = filtered ] || printf 'status,%s\n' "$status"
+    [ -n "$seconds" ] && printf 'seconds,%s\n' "$seconds"
+    [ "$kind" = filtered ] || printf 'passed,%s\nfailed,%s\n' "$pass" "$fail"
+  } >"$ARTIFACTS/run.csv"
+}
+
 # Append-only, one row per step plus a TOTAL row: the point of the file is the
 # history, so it is never rewritten and never sorted.
 timing_row() { # timing_row STEP SECONDS PASSED FAILED STATUS
@@ -347,6 +387,8 @@ capturing=0
 screenrecord_pid=""
 snapshot_pid=""
 run_start=$(now_ms)
+# The build on the phone, read when the install step succeeds.
+app_version=""
 # How well the phone's clock and the recording agree, from the flashes.
 clock_summary=""
 clock_fit=""
@@ -469,6 +511,7 @@ cleanup() {
       "$(awk -v taken="$total" -v planned="$eta_planned" \
         'BEGIN { printf "%+.0f%%", (taken * 1000 - planned) * 100 / planned }')"
   fi
+  write_run_settings
   printf 'timings: %s\n' "$TIMINGS"
   printf 'artifacts: %s\n' "$ARTIFACTS"
   printf '\n%d passed, %d failed\n' "$pass" "$fail"
@@ -819,6 +862,11 @@ step_install() {
   stable_before=$(shell dumpsys activity service "$STABLE/$CLASS.ProxyService" 2>/dev/null)
   if phone install -r -g "$APK" >/dev/null 2>&1; then
     ok 'installs'
+    # The build the phone now runs, for the run's settings: the APK is this
+    # tree's, but the manifest's version is stamped into it at build time.
+    app_version=$(shell dumpsys package "$PKG" 2>/dev/null |
+      sed -n 's/.*versionName=//p' | head -1 | tr -d '\r')
+    [ -n "$app_version" ] || app_version=$(tr -d '[:space:]' <"$ROOT/android/version")
   else
     bad 'installs'
     printf '\n%d passed, %d failed\n' "$pass" "$fail"
@@ -2015,6 +2063,9 @@ if [ -n "$only" ]; then
   fi
   printf 'a partial run: only %s, and the preamble every step assumes\n' "$only"
 fi
+# What this run is, before it takes its first step: an interrupted run still
+# says which phone, which build and what it was asked for.
+write_run_settings
 
 # What this run should cost, priced before the first step: the steps the loop
 # below will take, each at the median of its last runs. A filtered run pays for

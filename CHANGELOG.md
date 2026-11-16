@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A live run's history is a database as well as a pile of CSVs. The rows were
+  there — `timings.csv` with a step per row and its seconds, `checks.csv` with a
+  verdict per check — but flat files keyed by a run id and nothing else, so
+  "what does this step cost on this phone", "did this check fail before" and
+  "which step got slower" were shell one-liners over the whole history or not
+  asked at all, and the run's own settings (the build, the phone, capture on or
+  off, what a filtered run asked for) were nowhere. Every run now writes those
+  settings to `run.csv` before its first step and again when it ends, and
+  `tests/live/results.py` fills `result-live/results.sqlite3` with `runs`,
+  `steps` and `checks` from the CSVs. The CSVs stay canonical and the import is
+  one-way and repeatable, so a run needs no database to start, an interrupted
+  run still imports what it reached, and a schema change costs a re-import
+  rather than the history. `tests/results.test.sh` covers it without a phone;
+  measured against this checkout's own history, the 89 runs import as 384
+  steps and 1 577 checks, with the filtered runs that predate their own timing
+  file read as filtered and not as green full runs.
+
 ## [0.9.2] - 2026-11-16
 
 ## [0.9.1] - 2026-11-16
