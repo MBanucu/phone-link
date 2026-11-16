@@ -396,18 +396,22 @@ def binary(action: Action) -> str:
 
 
 def doctor_bin() -> str | None:
+    """The doctor to read problems from.
+
+    The doctor beside this package wins over the one on PATH: a checkout's
+    fixer run against the deployed doctor fixes what an older set of checks saw
+    — or nothing at all — which reads as "the doctor is broken". A store
+    install keeps every script under share/phone-link/bin, so this also finds
+    its own doctor when PATH has none (a flake check, the GUI).
+    """
     override = os.environ.get("PHONE_DOCTOR")
     if override:
         return override
-    found = shutil.which("phone-doctor")
-    if found:
-        return found
-    # The store install keeps every script under share/phone-link/bin, so a
-    # store-path call (a flake check, or the GUI without a shell PATH) still
-    # finds the doctor next to this package.
     root = Path(__file__).resolve().parents[3]
     candidate = root / "bin" / "phone-doctor"
-    return str(candidate) if candidate.is_file() else None
+    if candidate.is_file():
+        return str(candidate)
+    return shutil.which("phone-doctor")
 
 
 def plan(

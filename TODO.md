@@ -167,15 +167,3 @@ list is empty.
   not: keep the newest N and drop older ones once the box holds more than, say,
   three times N, and say which it dropped — the point of the kit is a few
   versions to fall back on, not a museum.
-
-## The fixer's doctor is not the doctor you ran
-
-- [ ] `phone-doctor-fix` reads its problem list from `PHONE_DOCTOR` or the
-  doctor on the system path — the deployed one — not from the checkout it was
-  run out of. On a host whose flake is ahead of the last `nixos-rebuild` that
-  means the fixer sees an older set of checks: `./bin/phone-doctor` reported
-  `fail app_boot` while `./bin/phone-doctor-fix --required` said there was
-  nothing to fix, and the fix only happened once `PHONE_DOCTOR` was set by hand.
-  It should use the doctor beside itself when it is run from a checkout, and say
-  which one it used, so "the doctor says X" and "the fixer fixed X" are about
-  the same program.

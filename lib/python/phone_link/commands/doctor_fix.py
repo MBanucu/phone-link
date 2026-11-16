@@ -13,7 +13,7 @@ import sys
 from .. import actions, phone, settings
 from ..shell import capture, die, log, run
 
-USAGE = """usage: phone-doctor-fix [--yes] [--dry-run] [--required]
+USAGE = """usage: phone-doctor-fix [--yes] [--dry-run] [--required] [--which-doctor]
 
 Runs phone-doctor --analyze, then the fix script for each problem it reports,
 in dependency order, and re-checks afterwards. --yes skips the confirmation;
@@ -21,7 +21,9 @@ in dependency order, and re-checks afterwards. --yes skips the confirmation;
 fixes required failures. Problems without a fix script are printed with the
 manual step. PHONE_PROXY_APK=/path/app.apk installs the proxy from that file
 instead of the APK this checkout builds, which keeps the repair working when
-the network it restores is itself down.
+the network it restores is itself down. --which-doctor prints the phone-doctor
+the problems are read from and exits: the one beside this checkout, unless
+PHONE_DOCTOR names another.
 """
 
 FIX_ORDER = (
@@ -119,6 +121,7 @@ def phone_doctor_fix(args: list[str]) -> int:
     assume_yes = False
     dry_run = False
     required = False
+    which_doctor = False
     for value in args:
         if value == "--yes":
             assume_yes = True
@@ -126,6 +129,8 @@ def phone_doctor_fix(args: list[str]) -> int:
             dry_run = True
         elif value == "--required":
             required = True
+        elif value == "--which-doctor":
+            which_doctor = True
         elif value in ("-h", "--help"):
             print(USAGE, end="", file=sys.stderr)
             return 0
@@ -134,6 +139,12 @@ def phone_doctor_fix(args: list[str]) -> int:
             die(f"unknown argument: {value}")
 
     doctor = _doctor()
+    if which_doctor:
+        # The path alone, for scripts and for asking "which doctor is this?"
+        # without running it: both can be on a machine at once.
+        print(doctor)
+        return 0
+    log(f"doctor: {doctor}")
     problems = capture([doctor, "--analyze"])
     lines = problems.splitlines()
     if required:

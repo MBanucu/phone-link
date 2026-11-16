@@ -59,7 +59,14 @@ mkdir -p "$PHONE_APK_CACHE"
 : >"$PHONE_APK_CACHE/com.tokyoxpa3.androidproxy-test.apk"
 
 run() {
-  "$BASH_BIN" "$SCRIPT" "$@" >"$LOG/out" 2>&1
+  PHONE_DOCTOR=$STUBS/phone-doctor "$BASH_BIN" "$SCRIPT" "$@" >"$LOG/out" 2>&1
+}
+
+# Without PHONE_DOCTOR the fixer reads problems from the doctor beside it — the
+# checkout's — not the one first on PATH, which is the deployed copy.
+run_own_doctor() {
+  env -u PHONE_DOCTOR PATH="$STUBS:$PATH" "$BASH_BIN" "$SCRIPT" "$@" \
+    >"$LOG/out" 2>&1
 }
 
 # 1. Nothing reported: nothing to do.
@@ -164,7 +171,28 @@ if run --yes; then ok "ap_profile fix exits 0"; else bad "ap_profile fix exits 0
 grep -qx 'phone-ap-create' "$LOG/actions" && ok "runs phone-ap-create" \
   || bad "runs phone-ap-create" "$(cat "$LOG/actions" 2>/dev/null)"
 
-# 12. --help and unknown arguments.
+# 12. The fixer reads the doctor beside the checkout, not the deployed one on
+#     PATH, and PHONE_DOCTOR still overrides both.
+run_own_doctor --which-doctor
+if grep -qx "$ROOT/bin/phone-doctor" "$LOG/out"; then
+  ok "the checkout's doctor is chosen over the one on PATH"
+else
+  bad "the checkout's doctor is chosen over the one on PATH" "$(cat "$LOG/out")"
+fi
+run --which-doctor
+if grep -qx "$STUBS/phone-doctor" "$LOG/out"; then
+  ok "PHONE_DOCTOR overrides it"
+else
+  bad "PHONE_DOCTOR overrides it" "$(cat "$LOG/out")"
+fi
+# A real run says which doctor it used, so a fixer that saw an older set of
+# checks is not mistaken for a broken doctor.
+: >"$LOG/problems"
+run
+grep -q "doctor: $STUBS/phone-doctor" "$LOG/out" && ok "a run names its doctor" \
+  || bad "a run names its doctor" "$(cat "$LOG/out")"
+
+# 13. --help and unknown arguments.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 if run --bogus; then bad "unknown argument exits 1"; else ok "unknown argument exits 1"; fi
 

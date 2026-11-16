@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `phone-doctor-fix` reads its problems from the doctor beside it, not the one
+  first on PATH. On a host whose checkout is ahead of the last activation the
+  two are different programs, so the fixer reported "no required problems to
+  fix" while `./bin/phone-doctor` printed `fail app_boot` — the failure was in a
+  check the deployed doctor did not have. The doctor next to the package now
+  wins over PATH (a store install finds its own the same way), `PHONE_DOCTOR`
+  still overrides both, `--which-doctor` prints the choice without running
+  anything, and every run names the doctor it used.
+
 ## [0.6.0] - 2026-11-16
 
 ### Added
