@@ -53,8 +53,9 @@ def _tree_version(ctx: Context) -> tuple[str, str]:
         text = ""
     if re.fullmatch(r"\d+\.\d+\.\d+", text):
         parts = [int(part) for part in text.split(".")]
-        code = f"{parts[0]}{parts[1]:02d}{parts[2]:02d}"
-        return text, code
+        # The same number build.sh's awk prints, and dumpsys reads back without
+        # its leading zeros: 0.9.0 is 900, not 00900.
+        return text, str(parts[0] * 10000 + parts[1] * 100 + parts[2])
     try:
         manifest = ctx.proxy_manifest.read_text()
     except OSError:
