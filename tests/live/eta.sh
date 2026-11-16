@@ -25,6 +25,11 @@ set -u
 # Steps and what they usually cost, in milliseconds, filled by eta_load.
 declare -A ETA_MEDIAN=()
 
+# How far past its estimate a step has to be before it is worth a word, on top
+# of twice its usual time: a two-second step at five is not news, a minute at
+# three is.
+ETA_SLOW_MS=${ETA_SLOW_MS:-30000}
+
 # Reads the history: for every step, the median of its last RUNS rows.
 eta_load() { # eta_load TIMINGS.csv [RUNS]
   local file=$1 runs=${2:-5} step seconds
@@ -151,23 +156,46 @@ eta_mark() { # eta_mark NAME STARTED_MS
   return 0
 }
 
+# Whether a step is worth a word: twice its estimate and ETA_SLOW_MS over it,
+# so a small step that took a moment longer is not a warning and a step that has
+# hung is.
+eta_slow() { # eta_slow ESTIMATE ELAPSED -> true when the step is the news
+  local cur=${1:-0} elapsed=${2:-0}
+  [ "$cur" -gt 0 ] || return 1
+  [ "$elapsed" -ge $((cur * 2)) ] || return 1
+  [ $((elapsed - cur)) -ge "$ETA_SLOW_MS" ]
+}
+
 # One line every few seconds until it is killed: the step it is in, how long
 # that step has been running, what it usually takes and what is left. A step
 # that has outlived its estimate says so, because a run stuck on one step would
-# otherwise read as a run with nothing left to do.
+# otherwise read as a run with nothing left to do — and a step that has really
+# run away says it once, as a warning, rather than looking like a slow tick.
 eta_ticker() { # eta_ticker STATE SECONDS
   local state=$1 every=$2 step cur after started rest elapsed left note word
+  local last="" warned=""
   while :; do
     sleep "$every"
     [ -s "$state" ] || continue
     IFS=$'\t' read -r step cur after started rest <"$state" || continue
     [ -n "$step" ] || continue
+    if [ "$step" != "$last" ]; then
+      last=$step
+      warned=""
+    fi
     elapsed=$(($(date +%s%3N) - started))
     left=$(eta_left "$cur" "$after" "$elapsed")
     note=""
     [ "$cur" -le 0 ] || [ "$elapsed" -le "$cur" ] || note=", over its estimate"
     word=steps
     [ "$rest" = 1 ] && word=step
+    if [ -z "$warned" ] && eta_slow "$cur" "$elapsed"; then
+      warned=1
+      printf 'slow %s %s in, usually %s (%s×, %s over)\n' \
+        "$step" "$(eta_fmt "$elapsed")" "$(eta_fmt "$cur")" \
+        "$(awk -v e="$elapsed" -v c="$cur" 'BEGIN { printf "%.1f", e / c }')" \
+        "$(eta_fmt "$((elapsed - cur))")"
+    fi
     printf 'eta %s left  (%s %s in, usually %s%s; %s %s after)\n' \
       "$(eta_fmt "$left")" "$step" "$(eta_fmt "$elapsed")" "$(eta_fmt "$cur")" \
       "$note" "$rest" "$word"

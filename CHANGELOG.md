@@ -17,7 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is in, how long that step has been running, what it usually takes and what the
   run has left. A step that outlives its estimate makes the rest of the run look
   slower rather than pinning the number at zero, which is what a run stuck on one
-  step would otherwise read as, and the last line compares the two: the first
+  step would otherwise read as; a step that runs away — twice its usual time and
+  half a minute over it — gets a `slow` line of its own, once, so a hang does not
+  look like a number that keeps growing; and the last line compares the two: the first
   full run planned 6m59s and took 7m01s (+1%). A filtered run is priced as the
   steps it asked for, not as all of them. The arithmetic is `tests/live/eta.sh`,
   plain bash and awk, and `tests/eta.test.sh` covers it without a phone;

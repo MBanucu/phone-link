@@ -89,8 +89,10 @@
 # seconds names the step it is in, how long that step has been running, what it
 # usually takes and what the run has left. A step that outlives its estimate
 # makes the whole run look slower instead of leaving a number that stopped
-# moving, and the last line says what the run really took, which is what the
-# next plan is judged against. PHONE_LIVE_ETA=0 turns it off;
+# moving, and a step that runs away — twice its usual time and half a minute
+# over it — says so in a line of its own, once, so a hang is not just a number
+# that keeps growing. The last line says what the run really took, which is what
+# the next plan is judged against. PHONE_LIVE_ETA=0 turns it off;
 # PHONE_LIVE_ETA_EVERY (seconds) and PHONE_LIVE_ETA_RUNS (how many runs a median
 # is taken over) are the knobs.
 set -u

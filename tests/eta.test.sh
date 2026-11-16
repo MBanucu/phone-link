@@ -110,7 +110,7 @@ printf 'x' >/dev/null
 sleep 2
 kill "$ticker" 2>/dev/null
 wait "$ticker" 2>/dev/null
-line=$(head -1 "$TMP/ticks")
+line=$(grep '^eta ' "$TMP/ticks" | head -1)
 case $line in
   eta\ *\ left\ *\(rename\ *) ok 'the ticker says what is left and where the run is' ;;
   *) bad 'the ticker says what is left and where the run is' "$line" ;;
@@ -131,6 +131,43 @@ case $over in
   *'over its estimate'*) ok 'a step past its estimate says so instead of claiming none is left' ;;
   *) bad 'a step past its estimate says so instead of claiming none is left' "$over" ;;
 esac
+
+# Far past its estimate: twice the usual time and half a minute over it is
+# news; twice a two-second step is not, or every step would warn.
+if eta_slow 30000 60000; then ok 'a step twice its estimate and half a minute over is news'
+else bad 'a step twice its estimate and half a minute over is news'; fi
+if eta_slow 30000 59999; then bad 'a second short of that is not'; else ok 'a second short of that is not'; fi
+if eta_slow 2000 5000; then bad 'a small step at twice its time is not news'; else ok 'a small step at twice its time is not news'; fi
+if eta_slow 0 999999; then bad 'a step nothing priced cannot be late'; else ok 'a step nothing priced cannot be late'; fi
+ETA_SLOW_MS=500
+if eta_slow 2000 5000; then ok 'how far over counts is a setting, not a constant'
+else bad 'how far over counts is a setting, not a constant'; fi
+ETA_SLOW_MS=30000
+
+# And the ticker says it once, as a warning, then keeps ticking: a step that has
+# run away is the news, not a number that has stopped moving.
+ETA_EST[panel]=2000
+declare -A ETA_EST_SAVE=()
+ETA_STATE=$TMP/state
+ETA_SLOW_MS=500
+eta_mark panel "$(($(date +%s%3N) - 4000))"
+eta_ticker "$TMP/state" 1 >"$TMP/ticks3" 2>&1 &
+ticker=$!
+sleep 3
+kill "$ticker" 2>/dev/null
+wait "$ticker" 2>/dev/null
+ETA_SLOW_MS=30000
+warns=$(grep -c '^slow panel' "$TMP/ticks3")
+same "$warns" 1 'a step that ran away is said once, not on every tick'
+warning=$(grep '^slow panel' "$TMP/ticks3")
+# The numbers grow with the clock, so the claim is the shape of the line: the
+# step, its usual time, the ratio and the time over it.
+if printf '%s' "$warning" | grep -Eq \
+  '^slow panel [0-9.]+s in, usually 2\.0s \([0-9.]+×, [0-9.]+s over\)$'; then
+  ok 'and says how far past its estimate it is, in time and in ratio'
+else
+  bad 'and says how far past its estimate it is, in time and in ratio' "$warning"
+fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
