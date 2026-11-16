@@ -684,8 +684,29 @@ panel_checked() { # panel_checked ID -> yes|no
 
 # The profile page is split into segments now, so a control is looked for on
 # the segment that holds it rather than by scrolling the whole page.
+#
+# The tab is tapped, not assumed: a tap that lands while the page is redrawing
+# is swallowed, and then everything after it is looking at the previous page —
+# which is how a scroll for `save_service` timed out on a Service page that was
+# never shown. Each try asks the page it wanted for the first control on it,
+# from the top, and taps again if the page did not change.
 panel_tab() { # panel_tab listener|service|log
-  ui_tap_id "tab_$1"
+  local page=$1 anchor attempt
+  case $page in
+    listener) anchor=port ;;
+    service) anchor=auto_start ;;
+    log) anchor=traffic ;;
+    *) return 1 ;;
+  esac
+  for attempt in 1 2 3; do
+    ui_tap_id "tab_$page" || true
+    sequence 'scroll-top' || true
+    if ui_dump | grep -q "id/$anchor\""; then
+      return 0
+    fi
+    wait_change 500
+  done
+  return 1
 }
 
 # The panel's auto_start checkbox reflects what the configuration holds.
@@ -1281,7 +1302,12 @@ step_plain_save() {
   else
     bad 'Save writes the form to the open proxy'
   fi
-  panel_tab service
+  if panel_tab service; then
+    ok 'the Service segment opens from the field the keyboard raised'
+  else
+    bad 'the Service segment opens from the field the keyboard raised'
+    panel_where
+  fi
   panel_tap auto_start
   want=off
   if [ "$(panel_checked auto_start)" = yes ]; then want=on; fi

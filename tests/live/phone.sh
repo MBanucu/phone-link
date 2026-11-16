@@ -628,7 +628,11 @@ ui_text_seek() { # ui_text_seek ID, scrolling down until the line is on screen
 panel_tap() { # panel_tap ID, scrolling down until the control is on screen
   # The Log page is the tall one: its Clear button sits under a long log, and
   # the phone scrolls after it for as long as that takes.
-  sequence "tap-scroll id=$1 12000; wait-quiet 250"
+  sequence "tap-scroll id=$1 12000; wait-quiet 250" && return 0
+  # A scroll can come back without the control when it ran while the page was
+  # still redrawing; one more try costs a second, a lost step a minute.
+  settle
+  sequence "scroll-top; tap-scroll id=$1 12000; wait-quiet 250"
 }
 
 # Tile clicks are ignored while the keyguard is up, and uiautomator cannot

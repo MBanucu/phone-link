@@ -56,6 +56,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The plain-Save step no longer scrolls a page it never opened. After the port
+  was typed and the keyboard put away, the step tapped the Service tab and then
+  scrolled for `save_service`; a tab tap is dispatched while the page is still
+  redrawing and was sometimes swallowed, so the scroll ran on the Listener page,
+  found nothing in its twelve seconds, and the step failed with the save that
+  depended on it — twice, and with nothing wrong with the app. `panel_tab` now
+  asks the page it wanted for the first control on it, from the top, and taps
+  again if the page did not change; `panel_tap` retries a scroll that came back
+  without its control; and the plain-Save step checks that the Service segment
+  opened instead of letting the next scroll find out for it. Measured on the
+  phone: `PHONE_LIVE_ONLY="plain Save"` twice, 12 checks each, green, with
+  `PASS the Service segment opens from the field the keyboard raised`.
+
 - The daily proxy coming back when the AP does is checked, not assumed. The
   doctor's live run dropped the laptop AP, and its last step then ran
   `phone-proxy-setup` to start the daily app again — which made a pass

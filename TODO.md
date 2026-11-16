@@ -34,13 +34,3 @@ list is empty.
   none of it — a signed APK on a release is installable and updatable from
   the phone — and is worth having from the first tag whatever else happens.
 
-## The scroll that sometimes cannot find Save
-
-- [ ] `plain Save` failed once while the one-step runs were being built, and
-  once at 02:46 before that, on `tap-scroll id=save_service 12000`: after
-  the port was typed and the keyboard put away, the scroll for the service
-  switch row timed out, and the check that saves the switches failed with
-  it. Nothing about the app was wrong; the step's own navigation was. It is
-  a minute's run now, with `PHONE_LIVE_ONLY="plain Save"`, which is what
-  makes it worth chasing.
-

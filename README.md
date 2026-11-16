@@ -392,9 +392,16 @@ The run fails if the fit is worse than 10 ms. The recording's start is not
 written anywhere, which is why it is measured rather than assumed.
 
 The steps themselves wait on the phone rather than on the clock: after a tap the
-harness asks the service to answer once the screen has stopped changing, and
-where a step knows what it caused — a dialog, a menu item, a card that should
-say `Running` — it waits for exactly that, so a quick phone is not made to wait
+harness asks the service to answer once the screen has stopped changing, and the
+page tabs are verified rather than assumed — a tab tap that landed while the
+page was redrawing was swallowed, and the scroll after it looked for
+`save_service` on a Service page that had never been opened (that is the
+`tap-scroll id=save_service` timeout the wishlist carried). `panel_tab` asks the
+page it wanted for the first control on it, from the top, and taps again if the
+page did not change; a `panel_tap` that comes back without its control gets one
+more try. Where a step knows what it caused — a dialog, a menu item, a card that
+should say `Running` — it waits for exactly that, so a quick phone is not made
+to wait
 for a second and a busy one is not failed by it. The same run that first used
 this took 324 s against 377 s of fixed sleeps, and the steps that wait for a
 dialog gained the most (the info marks, `Save` and `new proxy` steps each lost
