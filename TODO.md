@@ -145,12 +145,18 @@ list is empty.
   one, and a small file under its own external directory for a stopped one, or
   an `ACTION_REPORT` the doctor can start for one line of output.
 
-## The doctor says when a newer release is out
+## The doctor can tell which release it is running
 
-- [ ] `phone-doctor` checks the app against this checkout's build but not
-  against the newest release, so a phone running a three-week-old APK passes
-  every check. It should read the latest tag once (the same GitHub call
-  `phone-proxy-install --release` makes, cached for a day) and warn when the
-  installed version is older — with the `/releases` page's own line as the
-  detail, so `--analyze` stays scriptable. A warning, never a failure: a phone
-  that is working is working.
+- [ ] `phone-doctor` checks the app against this checkout's build but has no way
+  to know which *release* the phone came from: `android/AndroidManifest.xml`
+  says `versionCode="1"` and `versionName="0.1.0"` and has never changed, so
+  `dumpsys package` answers `0.1.0 (1)` for the APK of every release there has
+  been — the newest one included. A phone three releases behind passes every
+  check, and `phone-proxy-install --release` has nothing to compare. The build
+  should stamp the project's version into the manifest at build time
+  (`versionName` the flake version, `versionCode` a number that only goes up —
+  the commit count or `major*10000 + minor*100 + patch`), `android/build.sh`
+  writing a generated manifest so the tracked one stays a template; then the
+  doctor can read the latest tag once a day (cached, three seconds, a warning
+  and never a failure) and say when a newer release exists. Until the app can be
+  dated, the check would warn about every install.
