@@ -22,6 +22,18 @@ phone() { adb -s "$serial" "$@"; }
 
 shell() { phone shell "$@"; }
 
+# The phone's monotonic clock in nanoseconds, the one actions.csv, input.csv and
+# the capture index are stamped with. Read when a step starts and when one
+# fails, so a failure can later be shown from the recording it happened in.
+device_ns() {
+  local seconds
+  seconds=$(shell cut -d' ' -f1 /proc/uptime 2>/dev/null | tr -d '\r')
+  case $seconds in
+    '' | *[!0-9.]*) return 1 ;;
+  esac
+  awk -v t="$seconds" 'BEGIN { printf "%.0f", t * 1e9 }'
+}
+
 # uiautomator serves one dump at a time; a dump that arrives while another is
 # running can fail outright rather than queue, and a failed one costs a step a
 # retry, so the snapshots and the steps share this lock. A lock that outlives

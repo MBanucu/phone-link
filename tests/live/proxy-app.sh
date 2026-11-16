@@ -150,6 +150,9 @@ CLOCK=${PHONE_LIVE_CLOCK_SH:-$ROOT/tests/live/clock.sh}
 # The pass that gives the recording its index at the front, so the file plays
 # and seeks from its first byte instead of only after the recorder closed it.
 REMUX=${PHONE_LIVE_REMUX_SH:-$ROOT/tests/live/remux.sh}
+# The frames a failed check gets out of that recording, named after what they
+# show; `--plan` needs no ffmpeg and is what the hermetic test reads.
+PICTURES=${PHONE_LIVE_PICTURES:-$ROOT/tests/live/pictures.py}
 
 pass=0
 fail=0
@@ -178,8 +181,14 @@ checks_row() { # checks_row VERDICT CLAIM FUNCTION FILE LINE
 failure_context() {
   [ "$capture_dumps" = 1 ] || return 0
   local clock actions captures
-  # One string: adb joins its arguments, and the space would be lost.
-  clock=$(shell "cut -d' ' -f1 /proc/uptime" 2>/dev/null)
+  if [ -n "${failure_ns:-}" ]; then
+    # The instant the check was decided, read once when it failed and reused
+    # here instead of asking the phone the same question twice.
+    clock=$(awk -v ns="$failure_ns" 'BEGIN { printf "%.2f", ns / 1e9 }')
+  else
+    # One string: adb joins its arguments, and the space would be lost.
+    clock=$(shell "cut -d' ' -f1 /proc/uptime" 2>/dev/null)
+  fi
   actions=$(shell tail -n 3 "$CAPTURE_DIR/actions.csv" 2>/dev/null | tr '\n' '|')
   captures=$(shell tail -n 2 "$CAPTURE_DIR/ui-index.csv" 2>/dev/null | tr '\n' '|')
   if [ -n "${last_check:-}" ]; then
@@ -206,8 +215,25 @@ bad() {
   step_fail=$((step_fail + 1))
   printf 'FAIL %s\n' "$*"
   checks_row fail "$*" "${FUNCNAME[1]}" "${BASH_SOURCE[1]}" "${BASH_LINENO[0]}"
+  record_failure
   failure_context
   last_check="FAIL $*"
+}
+
+# A failure while a recording is being made is a place in that recording, and
+# the run already has the clock mapping to find it: the step's start, the
+# instant the check was decided and the step's end go to failures.csv, which
+# pictures.py turns into frames once the run is over and the mapping is fitted.
+record_failure() {
+  [ -n "${screenrecord_pid:-}" ] || return 0
+  # Only while a step is running: the epilogue's checks (the clock fit, the
+  # pictures themselves) are not moments inside a step.
+  [ -n "$step_name" ] || return 0
+  local ns
+  ns=$(device_ns) || return 0
+  failure_ns=$ns
+  failure_count=$((failure_count + 1))
+  step_failure_rows="$step_failure_rows $failure_count,$ns"
 }
 
 # Milliseconds since the epoch, for the per-step timings.
@@ -301,11 +327,21 @@ timing_row() { # timing_row STEP SECONDS PASSED FAILED STATUS
 
 flush_step() {
   [ -n "$step_name" ] || return 0
-  local seconds
+  local seconds end_ns row
   seconds=$(awk -v start="$step_start" -v end="$(now_ms)" \
     'BEGIN { printf "%.1f", (end - start) / 1000 }')
   timing_row "$step_name" "$seconds" "$step_pass" "$step_fail" \
     "$([ "$step_fail" -eq 0 ] && echo ok || echo failed)"
+  if [ -n "${step_failure_rows:-}" ]; then
+    # The step is over: its end is the last instant its frames may show. One
+    # adb call, paid only by a step that failed.
+    end_ns=$(device_ns 2>/dev/null || printf '0')
+    for row in $step_failure_rows; do
+      printf '%s,%s,%s,%s,%s\n' "${row%%,*}" "$step_name" \
+        "${step_start_ns:-0}" "${row#*,}" "$end_ns" >>"$FAILURES"
+    done
+    step_failure_rows=""
+  fi
   step_name=""
   step_pass=0
   step_fail=0
@@ -315,6 +351,13 @@ step() {
   flush_step
   step_name=$1
   step_start=$(now_ms)
+  # The phone's clock at the start of the step, for a frame of what the step
+  # began with if one of its checks fails. A run without a recording pays
+  # nothing for it.
+  step_start_ns=""
+  if [ -n "${screenrecord_pid:-}" ]; then
+    step_start_ns=$(device_ns 2>/dev/null || true)
+  fi
   printf '\n== %s\n' "$*"
   eta_mark "$1" "$step_start"
 }
@@ -356,6 +399,10 @@ printf 'start_ns,end_ns,kind,what\n' >"$ARTIFACTS/input.csv"
 # only on failure, so a green run leaves no rows.
 UPLINK=${PHONE_LIVE_UPLINK:-$ARTIFACTS/uplink.csv}
 printf 'decided_ms,port,ping_ip,ping_host,egress,verdict\n' >"$UPLINK"
+# Where a failed check says which instant of the run to look at; pictures.py
+# reads it once the clock mapping is fitted.
+FAILURES=$ARTIFACTS/failures.csv
+printf 'check,step,start_ns,fail_ns,end_ns\n' >"$FAILURES"
 
 # How to look at and drive the phone lives in its own file; this one decides
 # what the phone showed means.
@@ -392,6 +439,11 @@ snapshot_pid=""
 run_start=$(now_ms)
 # The build on the phone, read when the install step succeeds.
 app_version=""
+# The failures whose frames the run will pull, and how the run counts them.
+failure_count=0
+failure_ns=""
+step_start_ns=""
+step_failure_rows=""
 # How well the phone's clock and the recording agree, from the flashes.
 clock_summary=""
 clock_fit=""
@@ -503,6 +555,22 @@ cleanup() {
   elif [ -n "$remux_failed" ]; then
     bad 'the recording plays from its first byte' \
       "$(head -2 "$ARTIFACTS/remux.txt" 2>/dev/null | tr '\n' ' ')"
+  fi
+  # A failed check brings the frames that explain it: the start of its step, the
+  # moment it was decided, the end of the step, and the actions and captures in
+  # between, pulled out of the recording through the clock mapping. Only a
+  # failure that happened while a recording was being made has a row to plan
+  # from, and a run without a mapping has nothing to find them with.
+  if [ -f "$FAILURES" ] && [ "$(wc -l <"$FAILURES")" -gt 1 ] &&
+    [ -f "$ARTIFACTS/clock.txt" ]; then
+    if pictures_out=$(python3 "$PICTURES" "$ARTIFACTS" \
+      2>"$ARTIFACTS/pictures.log"); then
+      frames=$(printf '%s\n' "$pictures_out" | grep -c . || true)
+      ok "the failed checks bring their own pictures ($frames frames)"
+    else
+      bad 'the failed checks bring their own pictures' \
+        "$(tail -1 "$ARTIFACTS/pictures.log" 2>/dev/null)"
+    fi
   fi
   local total
   total=$(awk -v start="$run_start" -v end="$(now_ms)" \

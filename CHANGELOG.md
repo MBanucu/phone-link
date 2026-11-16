@@ -26,22 +26,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   steps and 1 577 checks, with the filtered runs that predate their own timing
   file read as filtered and not as green full runs.
 
+- A failed check brings its own pictures. The run kept the recording and the
+  clock mapping but left the searching to a person: after a failed step someone
+  had to know where in a five-minute video the check was decided. Every failure
+  now records the instant it happened, on the phone's own clock, beside its
+  step's start and end; once the mapping is fitted, `tests/live/pictures.py`
+  pulls the frame at each of those and one just before every action the harness
+  took and one just after every change the capture service recorded, into the
+  run's folder next to the XML, named after what they show
+  (`frame-<check>-<offset>.png`). The run reports how many as a check of its
+  own. One decode pass over the failed step's part of the video is the cost —
+  measured on a 16 s step with 54 frames of the 379 s recording, 94 s;
+  `tests/pictures.test.sh` covers the plan with no phone and no ffmpeg, and a
+  green run pays nothing.
+
 ### Changed
 
 - A run's recording plays and seeks from its first byte. `screenrecord` writes
-the MP4 index at the end, so `screen.mp4` could not be played, seeked or
-previewed until the recorder closed it, and a run that was cut short left a
-file with no index at all — the one artifact a person reaches for first was
-the one that was least usable. A run now gives it one copy pass with no
-decode before it exits (`tests/live/remux.sh`), moves the index to the front
-and reopens the first bytes to check that it did, failing a check rather than
-keeping a file it cannot vouch for; `PHONE_LIVE_REMUX=0` keeps the raw
-recording. Measured on the longest recording in `result-live`: 143 MB and
-379 s remuxed in 0.7 s, duration unchanged, clock fit still 1.5 ms. Reading
-the file while the run goes on was the other half of the idea and is not
-what this does: the only way to get frames as they happen is the phone's raw
-H.264 pipe, and raw H.264 carries no timestamps, which is exactly what the
-clock fit maps. The index moves after the run instead.
+  the MP4 index at the end, so `screen.mp4` could not be played, seeked or
+  previewed until the recorder closed it, and a run that was cut short left a
+  file with no index at all — the one artifact a person reaches for first was
+  the one that was least usable. A run now gives it one copy pass with no
+  decode before it exits (`tests/live/remux.sh`), moves the index to the front
+  and reopens the first bytes to check that it did, failing a check rather than
+  keeping a file it cannot vouch for; `PHONE_LIVE_REMUX=0` keeps the raw
+  recording. Measured on the longest recording in `result-live`: 143 MB and
+  379 s remuxed in 0.7 s, duration unchanged, clock fit still 1.5 ms. Reading
+  the file while the run goes on was the other half of the idea and is not
+  what this does: the only way to get frames as they happen is the phone's raw
+  H.264 pipe, and raw H.264 carries no timestamps, which is exactly what the
+  clock fit maps. The index moves after the run instead.
 
 ## [0.9.2] - 2026-11-16
 

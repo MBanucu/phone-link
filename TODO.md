@@ -4,17 +4,6 @@ Ideas taken from the user's messages, in the order they are being built.
 Delete an item once it is implemented and committed; delete the file when the
 list is empty.
 
-## A failure brings its own pictures
-
-- [ ] When a check fails, pull the frames that explain it out of the recording
-  by itself: the start of the step, the moment of the check, and the end of
-  the step, plus one before every action the harness took and one after
-  every change the accessibility capture recorded, into the run's folder
-  next to the XML. The clock mapping it needs is here: every instant the
-  phone writes down is in `clock.txt`'s timeline, so the work is the
-  harness pulling the frames it wants and naming them after what they show
-  (`frame-<check>-<offset>.png`) instead of a person searching for them.
-
 ## The proxy app, a project of its own
 
 - [ ] Move `android/` out into its own repository, with its own build and its

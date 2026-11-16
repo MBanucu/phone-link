@@ -317,7 +317,20 @@ recording here: 143 MB and 379 s remuxed in 0.7 s, same duration, and the
 clock fit still passes. A live H.264 pipe from `screenrecord` would be
 readable while it is written, but raw H.264 carries no frame times, and the
 clock mapping needs them: the file is finished at the end rather than read
-live. One row per step is appended to
+live.
+
+A failed check leaves the frames that explain it, next to the run's XML:
+`tests/live/pictures.py` plans them from the step's start, the moment the check
+was decided and the step's end, plus one just before every action the harness
+took and one just after every change the capture service recorded, and pulls
+them out of `screen.mp4` through `clock.txt`, named after what they show
+(`frame-<check>-<offset>.png`). The run says how many it pulled as a check of
+its own. It costs one decode pass over the failed step's part of the video —
+`PHONE_LIVE_FRAME_BEFORE`/`PHONE_LIVE_FRAME_AFTER` move the two gaps — and a
+green run pays nothing. Measured on an artificial 16 s step with 54 frames out
+of the 379 s recording: 94 s; real steps are seconds and cost seconds.
+
+One row per step is appended to
 `result-live/timings.csv` with its seconds and its pass/fail counts, and the
 file is never rewritten, so a run's cost can be compared across runs.
 `PHONE_LIVE_CAPTURE=0` runs without the recording and the snapshots.
