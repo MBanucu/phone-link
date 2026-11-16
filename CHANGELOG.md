@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The repair kit prunes itself. Nothing ever removed an APK from the ambulance
+  box, so a host that followed this repository for a year would collect every
+  version it ever stocked — 150 kB each, and `apk_cached()` picks by mtime, so
+  the museum would slowly push the newest aside. Once the kit holds more than
+  three times the size asked for, it is trimmed back to that size, oldest
+  first, and the run names what it dropped.
+
 - `phone-doctor-fix` reads its problems from the doctor beside it, not the one
   first on PATH. On a host whose checkout is ahead of the last activation the
   two are different programs, so the fixer reported "no required problems to

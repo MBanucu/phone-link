@@ -185,6 +185,25 @@ else
 fi
 if run --releases two; then bad "a word after --releases is rejected"; else ok "a word after --releases is rejected"; fi
 
+# 13. The kit is pruned: past three times the size asked for, the oldest go and
+#     the run says which.
+rm -f "$PHONE_APK_CACHE"/*.apk
+for version in 1 2 3 4; do
+  printf 'kit %s\n' "$version" >"$PHONE_APK_CACHE/v0.$version.0-phone-link-proxy-0.1.0.apk"
+  touch -d "2026-11-0$version 00:00" "$PHONE_APK_CACHE/v0.$version.0-phone-link-proxy-0.1.0.apk"
+done
+run --releases 1
+left=$(ls "$PHONE_APK_CACHE" | grep -c '^v0\.' || true)
+[ "$left" = 1 ] && ok "a big kit is pruned back to what was asked for" \
+  || bad "a big kit is pruned back to what was asked for" "$(ls "$PHONE_APK_CACHE")"
+if [ -e "$PHONE_APK_CACHE/v0.1.0-phone-link-proxy-0.1.0.apk" ]; then
+  bad "the oldest is what goes first"
+else
+  ok "the oldest is what goes first"
+fi
+grep -q 'dropped 4 old release APK' "$LOG/out" && ok "the run says what it dropped" \
+  || bad "the run says what it dropped" "$(cat "$LOG/out")"
+
 # 6. --help.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 

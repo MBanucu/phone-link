@@ -157,13 +157,3 @@ list is empty.
   bring back proxies that cannot connect. The file holds passwords, so the
   export should say that plainly and the app should not put it anywhere by
   itself.
-
-## The repair kit stops at five
-
-- [ ] `phone-fix-apk --releases` keeps the newest five releases by default, and
-  nothing prunes the box: a host that has followed this repository for a year
-  collects every version it ever stocked, each 150 kB, with the newest first in
-  `apk_cached()`'s mtime order. Fine at this size, worth a rule before it is
-  not: keep the newest N and drop older ones once the box holds more than, say,
-  three times N, and say which it dropped — the point of the kit is a few
-  versions to fall back on, not a museum.

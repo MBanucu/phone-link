@@ -73,8 +73,10 @@ is not here: a build is a file, so keeping one is a copy.
 repository (5 when no number is given) — several versions to fall back on when
 the app the phone needs is not the one this tree builds. Each is checked against
 the .sha256 the release carries and named after its tag, so two releases of the
-same app version do not overwrite each other. --refresh does it too, since
-activation runs that; --check only lists what the box holds.
+same app version do not overwrite each other. Old ones are dropped once the
+kit holds more than three times N, oldest first, and the run says which.
+--refresh does it too, since activation runs that; --check only lists what the
+box holds.
 """
 
 
@@ -735,6 +737,37 @@ def _stock_releases(limit: int) -> int:
     return kept
 
 
+def _prune_kit(limit: int) -> list[str]:
+    """Drop old release APKs once the kit has grown past three times its size.
+
+    The kit is for falling back a version or two; every release this host has
+    ever seen is a museum, and `apk_cached()` picks by mtime, so the ones worth
+    keeping are the ones just downloaded. Nothing is dropped while the box is
+    small, and what went is named.
+    """
+    if limit <= 0:
+        return []
+    kit = sorted(
+        (
+            path
+            for path in glob.glob(os.path.join(settings.PHONE_APK_CACHE, "*.apk"))
+            if os.path.basename(path).startswith("v")
+        ),
+        key=os.path.getmtime,
+        reverse=True,
+    )
+    if len(kit) <= 3 * limit:
+        return []
+    dropped: list[str] = []
+    for path in kit[limit:]:
+        try:
+            os.unlink(path)
+        except OSError:
+            continue
+        dropped.append(os.path.basename(path))
+    return dropped
+
+
 def phone_fix_apk(args: list[str]) -> int:
     """Stock the ambulance box with a proxy APK that works offline."""
     if any(value in ("-h", "--help") for value in args):
@@ -795,4 +828,7 @@ def phone_fix_apk(args: list[str]) -> int:
     if limit:
         kept = _stock_releases(limit)
         log(f"repair kit: {kept} release APK(s) in {settings.PHONE_APK_CACHE}")
+        dropped = _prune_kit(limit)
+        if dropped:
+            log(f"dropped {len(dropped)} old release APK(s): {', '.join(dropped)}")
     return 0
