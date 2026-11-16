@@ -21,16 +21,22 @@ list is empty.
   scripts, the GUI.
 
   Then the distribution, which is most of the work: an AAB for Google Play
-  beside the APK (a tag already publishes a signed APK —
-  `.github/workflows/release.yml` with the keystore as a repository secret), a
-  `fastlane` metadata tree with description, screenshots and per-version
-  changelogs, and the stores themselves. F-Droid first: it is the natural
-  home for a dependency-free FOSS app that already builds from source with
-  no Gradle, and its inclusion policy fits; IzzyOnDroid is the faster front
-  door while F-Droid's own review and build queue is worked through. Google
-  Play needs an account, a target-API level to keep up with and Google's app
-  signing; Amazon Appstore, Huawei AppGallery and Samsung Galaxy Store take
-  the same APK with more paperwork. GitHub Releases plus Obtainium needs
-  none of it — a signed APK on a release is installable and updatable from
-  the phone — and is worth having from the first tag whatever else happens.
+  beside the APK, a `fastlane` metadata tree with description, screenshots and
+  per-version changelogs, and the stores themselves. F-Droid first: it is the
+  natural home for a dependency-free FOSS app that already builds from source
+  with no Gradle, and its inclusion policy fits; IzzyOnDroid is the faster
+  front door while F-Droid's own review and build queue is worked through.
+  Google Play needs an account, a target-API level to keep up with and Google's
+  app signing; Amazon Appstore, Huawei AppGallery and Samsung Galaxy Store take
+  the same APK with more paperwork.
+
+  Left here because it is not an agent's to finish: creating the repository is
+  a decision, and a store listing needs an identity (an F-Droid app id, a Play
+  account, the signing key) that this checkout cannot create. What was
+  buildable here is done: a `v*` tag already publishes a signed APK and its
+  `.sha256` (`.github/workflows/release.yml`), so the GitHub Releases plus
+  Obtainium path the wish names installs and updates on the phone today, and
+  the doctor's `app_release` check compares the installed build with the newest
+  tag. What waits on the repository: the move itself, the AAB beside the APK,
+  the fastlane metadata and the store listings.
 
