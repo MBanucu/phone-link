@@ -29,8 +29,11 @@
 #      New proxy button, which has to save it and open it,
 #  10c. save ten proxies and require New proxy to stay reachable under them
 #      and to save an eleventh,
-#  10b. require the open proxy's own log to show the traffic counters, the
-#      events it caused and their port, and Clear to empty the list,
+#  10f. require `Save as…` to copy the form under a new name without touching
+#      the proxy it was copied from and to open the copy, and to ask first when
+#      the name is taken — Cancel leaves that name alone, OK replaces it,
+#  10g. require `All events` to say what it is when the log is empty, and then
+#      to show another proxy's start that the open proxy's own log does not,
 #  10e. delete a running proxy over adb and from the menu, and require the
 #      port to close both ways with the other proxy still serving,
 #  10d. the page's own checks, run by an instrumentation inside the proxy's
@@ -284,7 +287,7 @@ adb_link() {
 # is cut short still says what it was; the last row for a key wins.
 write_run_settings() {
   [ -n "${ARTIFACTS:-}" ] || return 0
-  local kind=full status started inside seconds
+  local kind=full status=unknown started="" inside=0 seconds=""
   [ -z "${only:-}" ] || kind=filtered
   started=$(date -u -d "@$((run_start / 1000))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)
   if [ "${finished:-0}" = 1 ]; then
@@ -484,6 +487,7 @@ cleanup() {
   # puts in the shade — one notification per name, every run.
   local leftover
   for leftover in harness-panel harness-save harness-one harness-new \
+    harness-saveas harness-saveas-new harness-events-a harness-events-b \
     inside-a inside-b gone-a gone-b harness-tile-a harness-tile-b \
     harness-tile-c; do
     case $saved in
@@ -1294,6 +1298,98 @@ step_plain_save() {
 
 }
 
+# --- save as
+step_save_as() {
+  step 'save as'
+  # Save as… copies what the form holds under another name: the proxy it was
+  # copied from keeps its settings, and the copy opens. A name that is already
+  # taken asks first, because saving over it is a decision; Cancel leaves it.
+  start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
+  sleep 2
+  save_profile harness-saveas
+  open_panel
+  if panel_open harness-saveas; then
+    ok 'the card opens the proxy to copy'
+  else
+    bad 'the card opens the proxy to copy'
+    panel_where
+  fi
+  panel_tab listener
+  panel_tap port
+  if ! sequence 'text 18097; wait-quiet 250; keyboard-off; wait-quiet 300'; then
+    bad 'the form takes another port to copy'
+    panel_where
+  fi
+  if menu_pick 'Save as…' &&
+    sequence 'wait class=android.widget.EditText 2000; text harness-saveas-new; tap-id button1 3000; wait id=back 3000; wait-quiet 250'; then
+    ok 'Save as asks for a name'
+  else
+    bad 'Save as asks for a name'
+    panel_where
+  fi
+  saved_lines=$(shell dumpsys activity service "$SERVICE" 2>/dev/null |
+    sed -n '/  saved  /,$p')
+  case $saved_lines in
+    *"\"harness-saveas\" — port $PORT"*)
+      ok 'the proxy it was copied from is left alone' ;;
+    *) bad 'the proxy it was copied from is left alone' ;;
+  esac
+  case $saved_lines in
+    *"\"harness-saveas-new\" — port 18097"*)
+      ok 'the copy is saved under its new name' ;;
+    *) bad 'the copy is saved under its new name' ;;
+  esac
+  if [ "$(ui_text header_title)" = harness-saveas-new ]; then
+    ok 'and the copy is the proxy that opened'
+  else
+    bad 'and the copy is the proxy that opened' "got '$(ui_text header_title)'"
+  fi
+  # The same name again: it must ask before replacing what is there.
+  if menu_pick 'Save as…' &&
+    sequence 'wait class=android.widget.EditText 2000; text harness-saveas; tap-id button1 3000; wait id=alertTitle 3000; wait-quiet 250'; then
+    ok 'Save as asks before taking a name that is in use'
+  else
+    bad 'Save as asks before taking a name that is in use'
+    panel_where
+  fi
+  if ui_text alertTitle | grep -q 'Overwrite harness-saveas'; then
+    ok 'and says which name it would replace'
+  else
+    bad 'and says which name it would replace' "$(ui_text alertTitle)"
+  fi
+  ui_tap_id button2
+  saved_lines=$(shell dumpsys activity service "$SERVICE" 2>/dev/null |
+    sed -n '/  saved  /,$p')
+  case $saved_lines in
+    *"\"harness-saveas\" — port $PORT"*)
+      ok 'Cancel leaves the name it would have replaced alone' ;;
+    *) bad 'Cancel leaves the name it would have replaced alone' ;;
+  esac
+  # And once more with OK: the answer is yes, so the old settings go.
+  if menu_pick 'Save as…' &&
+    sequence 'wait class=android.widget.EditText 2000; text harness-saveas; tap-id button1 3000; wait id=alertTitle 3000; wait-quiet 250' &&
+    ui_tap_id button1; then
+    settle
+    saved_lines=$(shell dumpsys activity service "$SERVICE" 2>/dev/null |
+      sed -n '/  saved  /,$p')
+    case $saved_lines in
+      *"\"harness-saveas\" — port 18097"*)
+        ok 'OK replaces the name with the form' ;;
+      *) bad 'OK replaces the name with the form' ;;
+    esac
+    if [ "$(ui_text header_title)" = harness-saveas ]; then
+      ok 'and opens the proxy it replaced'
+    else
+      bad 'and opens the proxy it replaced' "got '$(ui_text header_title)'"
+    fi
+  else
+    bad 'the overwrite can be accepted'
+    panel_where
+  fi
+  delete_profile_by_adb harness-saveas
+  delete_profile_by_adb harness-saveas-new
+}
+
 # --- card toggle
 step_card_toggle() {
   step 'card toggle'
@@ -1452,6 +1548,60 @@ step_info_marks() {
   fi
   delete_profile_by_adb harness-info
 
+}
+
+# --- all events
+step_all_events() {
+  step 'all events'
+  # The app's ring holds everything this process has seen; a proxy's page shows
+  # only its own. All events is the difference, and an empty ring says what it
+  # is instead of opening on nothing.
+  shell am force-stop "$PKG" >/dev/null 2>&1
+  open_panel
+  if menu_pick 'All events' &&
+    wait_for 'Nothing has happened yet in this session' 3000; then
+    ok 'an empty log says what it is'
+  else
+    bad 'an empty log says what it is'
+    panel_where
+  fi
+  back >/dev/null 2>&1
+  settle
+  # Two proxies, one of them started on a port of its own: that start is an
+  # event the other proxy's page must not show.
+  start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
+  sleep 2
+  save_profile harness-events-a
+  save_profile harness-events-b
+  shell am start-foreground-service -n "$SERVICE" -a "$START" \
+    --es profile harness-events-b --ei port 18098 >/dev/null 2>&1
+  sleep 3
+  open_panel
+  if panel_open harness-events-a; then
+    ok 'a proxy opens on its own log'
+  else
+    bad 'a proxy opens on its own log'
+    panel_where
+  fi
+  panel_tab log
+  wait_for 'id/traffic"' 3000 || true
+  page_dump=$(ui_dump)
+  if printf '%s' "$page_dump" | grep -q '18098'; then
+    bad 'a proxy log keeps to its own proxy'
+  else
+    ok 'a proxy log keeps to its own proxy'
+  fi
+  if menu_pick 'All events' && wait_for '18098' 3000; then
+    ok 'All events shows what another proxy did'
+  else
+    bad 'All events shows what another proxy did'
+    panel_where
+  fi
+  back >/dev/null 2>&1
+  settle
+  shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
+  delete_profile_by_adb harness-events-a
+  delete_profile_by_adb harness-events-b
 }
 
 # --- new proxy
@@ -2077,10 +2227,10 @@ step_tile() {
 STEPS=(
   'unlock' 'install' 'panel' 'auto start' 'header warning' 'panel state'
   'allowed network' 'anonymous from the panel' 'unrelated SSID'
-  'predicate bypass' 'profiles over adb' 'plain Save' 'card toggle' 'rename'
-  'info marks' 'new proxy' 'ten proxies' 'several at once'
-  'deleting a proxy while it runs' 'the page from the inside' 'proxy log'
-  'stop' 'tile'
+  'predicate bypass' 'profiles over adb' 'plain Save' 'save as' 'card toggle'
+  'rename' 'info marks' 'all events' 'new proxy' 'ten proxies'
+  'several at once' 'deleting a proxy while it runs' 'the page from the inside'
+  'proxy log' 'stop' 'tile'
 )
 
 step_function() { # step_function 'card toggle' -> step_card_toggle

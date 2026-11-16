@@ -44,13 +44,3 @@ list is empty.
   a minute's run now, with `PHONE_LIVE_ONLY="plain Save"`, which is what
   makes it worth chasing.
 
-## The rest of the menu
-
-- [ ] `Save as` and `All events` are the two menu items no step has ever
-  pressed; `Delete` was in the same state until the delete-while-running
-  step. Both are cheap to write now that the panel helpers exist: Save as
-  with a new name has to leave the old proxy alone and open the new one, and
-  Save as onto an existing name has to ask before overwriting; All events
-  has to show more than the open proxy's own log and say what it is when
-  there is nothing in it.
-

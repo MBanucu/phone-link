@@ -302,9 +302,14 @@ requires an unknown name to start nothing, removes it again with
 write the form (a toggled auto-start switch included) into that proxy, requires
 a card's own button to start and stop its proxy and to say so, requires
 `Rename` in the menu and `RENAME_PROFILE` over adb to move a proxy to a new
-name, requires the info marks and `About this app` to open their dialogs,
-requires that proxy's own log to show this run's counters, its events and their
-port and `Clear` to empty them, stops it, then
+name, requires `Save as…` to copy the form under a new name and open the copy
+without touching the proxy it was copied from, and to ask before taking a name
+that is already saved (Cancel leaves it, OK replaces it), requires the info
+marks and `About this app` to open their dialogs, requires `All events` to say
+what it is when the log is empty and then to show another proxy's start that
+the open proxy's own log does not, requires that proxy's own log to show this
+run's counters, its events and their port and `Clear` to empty them, stops it,
+then
 starts and stops it again from the Quick Settings tile (skipped when the phone stays locked, since the shade
 ignores clicks there) and uninstalls. It leaves the vendored proxy alone
 (`KEEP_APP=1` keeps the new app installed, `PROXY_APP_PORT` picks another port).

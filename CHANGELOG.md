@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The live run presses the two menu items no step had ever pressed. `Save
+  as…` was the one way to copy a proxy that the run never used, so a name typed
+  into it, a copy that opens in place of its source, the question asked before
+  replacing a name, and both answers to it were unverified; `All events` was the
+  one view no check opened, so whether it showed more than the open proxy's own
+  log — or said anything when there was nothing — was a guess. The steps now
+  require a copy under a new name that leaves the source alone and opens the
+  copy, a second `Save as…` onto an existing name that asks which name it would
+  replace, Cancel leaving that name untouched and OK replacing it with the form,
+  and an empty log that says so before an `All events` that shows another
+  proxy's start which the open proxy's own page does not. Measured on the phone:
+  `PHONE_LIVE_ONLY="save as,all events"` is 70.2 s and 22 checks, green, and the
+  first full run to use them still has to write their medians.
+
 - A live run's history is a database as well as a pile of CSVs. The rows were
   there — `timings.csv` with a step per row and its seconds, `checks.csv` with a
   verdict per check — but flat files keyed by a run id and nothing else, so
