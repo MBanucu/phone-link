@@ -35,11 +35,31 @@ def _installed(ctx: Context) -> bool:
     return any(line.startswith("package:") for line in text.splitlines())
 
 
+def _state_file(ctx: Context) -> dict[str, str]:
+    """The few facts the app keeps for when its service is not running.
+
+    It writes them on every change to its store, under its own external
+    directory, because a stopped service prints nothing for `dumpsys activity
+    service` — and a stopped service is what a broken phone looks like. No
+    credentials are in the file; it is the switches and the port.
+    """
+    path = f"/sdcard/Android/data/{_app(ctx)}/files/state.txt"
+    text = ctx.adb("shell", "cat", path)
+    facts: dict[str, str] = {}
+    for line in text.splitlines():
+        key, _, value = line.partition(" ")
+        if key.strip():
+            facts[key.strip()] = value.strip()
+    return facts
+
+
 def _auto_start(ctx: Context) -> str:
-    """The app's stored auto_start, which its service prints for dumpsys."""
+    """The app's stored auto_start: from the service, or from its state file."""
     text = ctx.adb("shell", "dumpsys", "activity", "service", _service(ctx))
     match = re.search(r"auto-start\s+(true|false)", text)
-    return match.group(1) if match else ""
+    if match:
+        return match.group(1)
+    return _state_file(ctx).get("auto_start", "")
 
 
 def _whitelisted(ctx: Context) -> bool:
@@ -94,7 +114,8 @@ def check(ctx: Context) -> list[Result]:
                 "app_boot",
                 "restarts at boot",
                 "allowlist yes, but "
-                + ("auto_start could not be read (service not running)"
+                + ("auto_start could not be read (neither the service nor its "
+                   "state file answered)"
                    if not auto_start else "background location could not be read"),
             )
         )

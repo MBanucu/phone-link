@@ -133,6 +133,10 @@ Or straight from the checkout: `./bin/phone-net-status`.
 `phone-doctor` is a Python package under `lib/python/phone_doctor`, with one
 module per symptom group (`flake`, `host`, `phone`, `secrets`, `proxy`,
 `tunnel`, `tether`, `internet`, `adb_wifi`); `bin/phone-doctor` only resolves it.
+The app checks read the service's `dumpsys` while it runs, and the app's own
+`files/state.txt` when it does not: a stopped service prints nothing, which is
+exactly the state a broken phone is in, and `auto_start` is the fact the boot
+check needs.
 `lib/phone-net.sh` remains for the live harness in `tests/live`.
 
 `lib/python/phone_link/commands` holds the CLI half: one function per `bin/`

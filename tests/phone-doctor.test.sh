@@ -51,6 +51,10 @@ case "${args[0]:-}" in
       "dumpsys package "*) cat "$LOG/dumpsys" ;;
       "dumpsys deviceidle whitelist") cat "$LOG/whitelist" ;;
       "dumpsys activity service "*) cat "$LOG/service_dump" ;;
+      # The app's own facts, for a service that is not running: the doctor
+      # reads them from the file under the app's external directory.
+      "cat /sdcard/Android/data/"*)
+        cat "$LOG/app_state" 2>/dev/null ;;
       "getprop ro.build.version.sdk") cat "$LOG/sdk" ;;
     esac
     ;;
@@ -145,6 +149,8 @@ fresh_state() {
   printf 'nameserver 1.1.1.1\nnameserver 9.9.9.9\n' >"$LOG/resolv.conf"
   printf '    versionCode=1 minSdk=26 targetSdk=34\n    versionName=0.1.0\n    ACCESS_BACKGROUND_LOCATION: granted=true\n' >"$LOG/dumpsys"
   printf '      auto-start  true\n' >"$LOG/service_dump"
+  printf 'auto_start true\nadb_wifi true\nport 1080\nssid PhoneLink\nany_network false\nin_use \n' \
+    >"$LOG/app_state"
   printf 'user,org.phonelink.proxy,10332\n' >"$LOG/whitelist"
   printf '35\n' >"$LOG/sdk"
   # The version the tree would build, and the APK a reinstall would use: both
@@ -259,6 +265,25 @@ printf '      auto-start  false\n' >"$LOG/service_dump"
 if run; then bad "auto_start off exits 1"; else ok "auto_start off exits 1"; fi
 grep -q 'FAIL  restarts at boot.*auto_start is off' "$LOG/out" && ok "names the switch" \
   || bad "names the switch" "$(cat "$LOG/out")"
+
+# 12b. A stopped service prints nothing; the app's own state file answers the
+# question the check needs, instead of the check degrading to "could not read".
+fresh_state
+: >"$LOG/service_dump"
+if run; then ok "a stopped app still passes its boot check"; else bad "a stopped app still passes its boot check" "$(cat "$LOG/out")"; fi
+grep -q 'ok    restarts at boot.*auto_start on' "$LOG/out" \
+  && ok "reads auto_start from the state file" \
+  || bad "reads auto_start from the state file" "$(cat "$LOG/out")"
+# And the file's answer is the truth, not a default: off is a failure.
+printf 'auto_start false\n' >"$LOG/app_state"
+if run; then bad "a stopped app with auto_start off exits 1"; else ok "a stopped app with auto_start off exits 1"; fi
+grep -q 'FAIL  restarts at boot.*auto_start is off' "$LOG/out" \
+  && ok "and names the switch it read" || bad "and names the switch it read" "$(cat "$LOG/out")"
+# Neither the service nor the file: the old warning, saying what was missing.
+: >"$LOG/app_state"
+if run; then ok "no answer still exits 0"; else bad "no answer still exits 0" "$(cat "$LOG/out")"; fi
+grep -q 'warn  restarts at boot.*state file answered' "$LOG/out" \
+  && ok "says both places were asked" || bad "says both places were asked" "$(cat "$LOG/out")"
 
 # 13. An APK that is not there is a required failure, and the one named is the
 # one the repair would hand to adb.

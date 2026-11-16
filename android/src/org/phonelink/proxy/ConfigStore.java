@@ -3,7 +3,12 @@ package org.phonelink.proxy;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.util.Log;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -87,6 +92,48 @@ final class ConfigStore {
 
     static void setAutoStart(Context context, boolean enabled) {
         prefs(context).edit().putBoolean(KEY_AUTO_START, enabled).apply();
+        publishState(context);
+    }
+
+    /**
+     * The few facts a check needs while the service is not running.
+     *
+     * <p>{@code dumpsys activity service} prints nothing for a stopped service,
+     * which is exactly the state a broken proxy is in, so the doctor could not
+     * read {@code auto_start} — the one switch that decides whether the proxy
+     * comes back — when it mattered most. These lines are rewritten on every
+     * change to the store, under the app's own external directory, where adb
+     * can read them without the app running. They are the facts a check asks
+     * about, and no credentials: a file on shared storage is not where a
+     * password goes.
+     */
+    static void publishState(Context context) {
+        StringBuilder text = new StringBuilder();
+        ProxyConfig config = load(context);
+        String inUse = inUse(context);
+        text.append("auto_start ").append(autoStart(context)).append('\n');
+        text.append("adb_wifi ").append(adbWireless(context)).append('\n');
+        text.append("port ").append(config.port).append('\n');
+        text.append("ssid ").append(config.ssid).append('\n');
+        text.append("any_network ").append(config.anyNetwork).append('\n');
+        text.append("in_use ").append(inUse == null ? "" : inUse).append('\n');
+        File dir = context.getExternalFilesDir(null);
+        if (dir == null) {
+            return;
+        }
+        // Written beside the real file and moved over it, so a reader catching
+        // the write never sees half a line.
+        File file = new File(dir, "state.txt");
+        File temp = new File(dir, "state.txt.new");
+        try (FileOutputStream out = new FileOutputStream(temp)) {
+            out.write(text.toString().getBytes(StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            Log.w("phone-link-proxy", "cannot write the state file", e);
+            return;
+        }
+        if (!temp.renameTo(file)) {
+            temp.delete();
+        }
     }
 
     /**
@@ -101,6 +148,7 @@ final class ConfigStore {
 
     static void setAdbWireless(Context context, boolean enabled) {
         prefs(context).edit().putBoolean(KEY_ADB_WIFI, enabled).apply();
+        publishState(context);
     }
 
     /** Stored values, unvalidated: the panel uses them to fill its fields. */
@@ -125,6 +173,7 @@ final class ConfigStore {
                 .putString(KEY_SSID, config.ssid)
                 .putBoolean(KEY_ANY_NETWORK, config.anyNetwork)
                 .apply();
+        publishState(context);
     }
 
     // -- saved configurations -------------------------------------------
@@ -183,6 +232,7 @@ final class ConfigStore {
                 .putBoolean(profileKey(name, KEY_AUTO_START), autoStart)
                 .putBoolean(profileKey(name, KEY_ADB_WIFI), adbWireless)
                 .apply();
+        publishState(context);
     }
 
     /** Whether the saved configuration wants the service to survive a reboot. */
@@ -206,6 +256,7 @@ final class ConfigStore {
 
     static void setProfileTile(Context context, String name, boolean on) {
         prefs(context).edit().putBoolean(profileKey(name, KEY_TILE), on).apply();
+        publishState(context);
     }
 
     /** What a click on the tile starts while it is off. */
@@ -215,6 +266,7 @@ final class ConfigStore {
 
     static void setTileStart(Context context, TileScope scope) {
         prefs(context).edit().putString(KEY_TILE_START, scope.name()).apply();
+        publishState(context);
     }
 
     /** What a click on the tile stops while it is on. */
@@ -224,6 +276,7 @@ final class ConfigStore {
 
     static void setTileStop(Context context, TileScope scope) {
         prefs(context).edit().putString(KEY_TILE_STOP, scope.name()).apply();
+        publishState(context);
     }
 
     /**
@@ -236,6 +289,7 @@ final class ConfigStore {
 
     static void setTileCycle(Context context, List<TileScope> cycle) {
         prefs(context).edit().putString(KEY_TILE_CYCLE, TileCycle.format(cycle)).apply();
+        publishState(context);
     }
 
     /** The proxies the tile starts and stops, by name; empty means none bound. */
@@ -294,6 +348,7 @@ final class ConfigStore {
                 .remove(profileKey(name, KEY_ADB_WIFI))
                 .remove(profileKey(name, KEY_TILE))
                 .apply();
+        publishState(context);
     }
 
     // -- leaving and coming back ----------------------------------------
@@ -377,6 +432,7 @@ final class ConfigStore {
 
     static void setSelectedProfile(Context context, String name) {
         prefs(context).edit().putString(KEY_SELECTED_PROFILE, name).apply();
+        publishState(context);
     }
 
     /**
@@ -390,6 +446,7 @@ final class ConfigStore {
 
     static void setInUse(Context context, String name) {
         prefs(context).edit().putString(KEY_IN_USE, name).apply();
+        publishState(context);
     }
 
     /**

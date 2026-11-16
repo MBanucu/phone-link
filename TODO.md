@@ -66,14 +66,3 @@ list is empty.
   a run that drops and restores the AP ends with the daily app listening on the
   port it had, without a command being run to put it there.
 
-## The doctor can read a stopped app
-
-- [ ] `phone-doctor` can only read the app's stored settings while its service
-  is running — `auto_start` comes from `dumpsys activity service`, and a stopped
-  service prints nothing — so the `app_boot` check degrades to "allowlist yes,
-  but auto_start could not be read" exactly when the app is not listening, which
-  is the state a broken phone is in. The app should publish the few facts a
-  check needs (`auto_start`, the listening port, the SSID it gates on) where adb
-  can read them without the service: `dumpsys activity service` for a running
-  one, and a small file under its own external directory for a stopped one, or
-  an `ACTION_REPORT` the doctor can start for one line of output.

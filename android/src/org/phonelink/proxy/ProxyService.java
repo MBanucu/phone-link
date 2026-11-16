@@ -77,6 +77,10 @@ public final class ProxyService extends Service implements Port.Host {
     public void onCreate() {
         super.onCreate();
         ports = new Ports(this);
+        // The few facts the doctor reads when this service is not running: a
+        // stopped app prints nothing for `dumpsys activity service`, which is
+        // the state it is in when a phone is broken.
+        ConfigStore.publishState(this);
         notifications = getSystemService(NotificationManager.class);
         PowerManager power = getSystemService(PowerManager.class);
         wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "phone-link-proxy:egress");

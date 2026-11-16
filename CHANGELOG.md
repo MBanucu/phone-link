@@ -40,6 +40,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tests/pictures.test.sh` covers the plan with no phone and no ffmpeg, and a
   green run pays nothing.
 
+### Fixed
+
+- `phone-doctor` can read the app while its service is stopped. `auto_start`
+  came from `dumpsys activity service`, which prints nothing for a stopped
+  service — so `app_boot` degraded to "allowlist yes, but auto_start could not be
+  read" exactly when the app was not listening, which is the state a broken
+  phone is in, and the one fact that decides whether it comes back at boot went
+  unread. Every change to the app's store now rewrites
+  `/sdcard/Android/data/<package>/files/state.txt` with the few facts a check
+  asks for (`auto_start`, `adb_wifi`, the port, the SSID it gates on,
+  `any_network`, the proxy in use), and the check falls back to that file when
+  the dump has nothing. No credentials are in it. Covered by three cases in
+  `tests/phone-doctor.test.sh`: a stopped app that will come back is a pass, one
+  with `auto_start` off fails naming the switch, and neither place answering is
+  still the old warning.
+
 ### Changed
 
 - A run's recording plays and seeks from its first byte. `screenrecord` writes

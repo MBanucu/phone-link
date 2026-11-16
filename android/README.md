@@ -521,7 +521,12 @@ adb shell dumpsys activity service org.phonelink.proxy/.ProxyService
 
 A stopped service has no record to dump, so there the panel is the way in, or
 `adb shell am start -n org.phonelink.proxy/.MainActivity --ez help true` opens
-the same dialog on the phone.
+the same dialog on the phone. The few facts a check needs while the service is
+stopped are still readable: every change to the store rewrites
+`/sdcard/Android/data/org.phonelink.proxy/files/state.txt`, one `key value`
+line each — `auto_start`, `adb_wifi`, `port`, `ssid`, `any_network`, `in_use` —
+so `phone-doctor` can answer "will the proxy come back" for a phone whose
+service is not running. The file holds no credentials.
 
 Measured on the phone (Android 15): with the switch on, `settings put global
 adb_wifi_enabled 0` plus the phone re-joining `PhoneLink` ends with
