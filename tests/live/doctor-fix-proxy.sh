@@ -37,11 +37,19 @@ ap_if=${PHONE_AP_IF:-wlp110s0}
 # The test build, so breaking the setup costs the phone nothing: the daily app
 # keeps its saved proxies, its listener and its port. The fixer installs the APK
 # that belongs to this package (`phone.app_apk()`), so "reinstall the app"
-# means the test one.
-export PHONE_PROXY_PKG=${PHONE_PROXY_PKG:-org.phonelink.proxy.test}
-# A spare port: the daily proxy has its own, and two listeners cannot share one.
-export PHONE_PROXY_PORT=${PHONE_PROXY_PORT:-18080}
+# means the test one. `lib/phone-net.sh` has already filled in the daily package
+# by the time this runs, so the value is set, not defaulted — PHONE_LIVE_PKG
+# names another package for a like-for-like run, and the daily one is refused.
 daily_pkg=${PHONE_DAILY_PKG:-org.phonelink.proxy}
+live_pkg=${PHONE_LIVE_PKG:-org.phonelink.proxy.test}
+if [ "$live_pkg" = "$daily_pkg" ]; then
+  printf 'refusing to break the daily app: this harness runs %s\n' \
+    org.phonelink.proxy.test >&2
+  exit 2
+fi
+export PHONE_PROXY_PKG=$live_pkg
+# A spare port: the daily proxy has its own, and two listeners cannot share one.
+export PHONE_PROXY_PORT=${PHONE_LIVE_PORT:-18080}
 
 pass=0
 fail=0
@@ -113,6 +121,10 @@ route_survives() {
 daily_state() {
   adb -s "$serial" shell dumpsys activity service "$daily_pkg/.ProxyService" 2>/dev/null \
     | tr -d '\r' | grep -m1 '^ *state ' | sed 's/^ *//'
+}
+
+daily_path() {
+  adb -s "$serial" shell pm path "$daily_pkg" 2>/dev/null | tr -d '\r' | head -1
 }
 
 restore() {
@@ -196,6 +208,9 @@ else
     exit 1
   fi
 fi
+# The battery allowlist is kept per package, so the test app needs its own entry
+# before it can count as a healthy setup.
+"$BIN/phone-proxy-boot" >&2 || printf 'adding the test app to the allowlist failed\n' >&2
 problems=$("$doctor" --analyze 2>/dev/null || true)
 if printf '%s\n' "$problems" | grep -q '^fail proxy_request '; then
   # A fresh install (or one an earlier run stopped) has no listener: set the
@@ -211,6 +226,8 @@ if printf '%s\n' "$problems" | grep -q '^fail '; then
 fi
 ok "doctor reports no required failures (for $PHONE_PROXY_PKG)"
 daily_before=$(daily_state)
+daily_apk_before=$(daily_path)
+daily_port=$(printf '%s\n' "$daily_before" | sed -n 's/.*listening on [0-9.]*:\([0-9][0-9]*\).*/\1/p')
 if [ -n "$daily_before" ]; then
   ok "the daily app is listening before the run ($daily_before)"
 else
@@ -322,13 +339,25 @@ else
   bad "the phone is not running this checkout's build"
   grep 'proxy version' "$TMP/doctor" >&2 || true
 fi
-# The point of running as the test package: the app the phone lives on is
-# exactly as it was, its listener and its saved proxies included.
-daily_after=$(daily_state)
-if [ "$daily_after" = "$daily_before" ]; then
-  ok "the daily app is untouched (${daily_after:-still stopped})"
+# The point of running as the test package: the app the phone lives on was never
+# uninstalled, so its saved proxies are still there. Its listener is a different
+# matter — dropping the AP takes the network it listens on with it, so it is
+# started again and has to come back on the port it had.
+daily_apk_after=$(daily_path)
+if [ -n "$daily_apk_after" ] && [ "$daily_apk_after" = "$daily_apk_before" ]; then
+  ok "the daily app was never uninstalled ($daily_apk_after)"
 else
-  bad "the daily app changed" "${daily_before:-stopped} -> ${daily_after:-stopped}"
+  bad "the daily app's install changed" "${daily_apk_before:-gone} -> ${daily_apk_after:-gone}"
+fi
+if [ -n "$daily_port" ]; then
+  PHONE_PROXY_PKG=$daily_pkg "$BIN/phone-proxy-setup" --port "$daily_port" >&2 \
+    || printf 'restarting the daily proxy failed\n' >&2
+  daily_after=$(daily_state)
+  case $daily_after in
+    *"listening on 0.0.0.0:$daily_port"*)
+      ok "the daily app is back on port $daily_port" ;;
+    *) bad "the daily app is not back on port $daily_port" "${daily_after:-stopped}" ;;
+  esac
 fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"

@@ -383,7 +383,10 @@ def phone_proxy_boot(args: list[str]) -> int:
     check_only = "--check" in args
     serial = _serial()
     package = settings.PHONE_APP_PKG
-    service = f"{package}/.ProxyService"
+    # The class keeps the app's own namespace: `.ProxyService` would be resolved
+    # against the manifest package, which a renamed (test, vendored) build does
+    # not share with the Java classes.
+    service = f"{package}/{settings.PHONE_APP_NAMESPACE}.ProxyService"
     log(f"phone: {serial}")
 
     installed = _shell(serial, "pm", "path", package)
@@ -893,6 +896,24 @@ def phone_proxy_install(args: list[str]) -> int:
             )
             return
         log("granted WRITE_SECURE_SETTINGS: the app can turn wireless debugging back on")
+        # The device-idle allowlist is kept by package and goes away with the
+        # uninstall, so an app put back is not yet the app that came back after
+        # a reboot. Put the entry back with the install rather than leaving it
+        # to a step somebody has to remember.
+        argv = [
+            "adb",
+            "-s",
+            serial,
+            "shell",
+            "cmd",
+            "deviceidle",
+            "whitelist",
+            f"+{package}",
+        ]
+        if status(argv) == 0:
+            log("on the battery allowlist: the app can come back after a reboot")
+        else:
+            log("warning: cannot add the app to the battery allowlist (run phone-proxy-boot)")
 
     if mode == "status":
         return show_status()

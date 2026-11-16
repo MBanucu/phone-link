@@ -103,43 +103,6 @@ list is empty.
   reopened history. SQLite in `result-live/` would do: one file, no daemon,
   and `sqlite3` reads it without the project.
 
-## The doctor's live test leaves the daily proxy alone
-
-- [ ] `tests/live/doctor-fix-proxy.sh` breaks the setup on the one app the phone
-  lives on: it uninstalls `org.phonelink.proxy`, so a run costs the phone the
-  proxies it had saved and reconfiguring afterwards. The app's own harness
-  already solved this — `tests/live/proxy-app.sh` drives
-  `org.phonelink.proxy.test` out of `phone-link-proxy-test.apk` and never
-  touches the daily build — and the doctor's harness only needs the same
-  package. What stands in the way is the repair, not the driver: the doctor
-  reads `PHONE_PROXY_PKG`, but `phone-proxy-install` installs whatever
-  application id the APK carries and `app_apk()` hands it the production build,
-  so "reinstall the app" would put the daily proxy back and leave the test one
-  gone — a repair of a package the check it was fixing was not measuring. The
-  fix should install the APK that matches `PHONE_PROXY_PKG` (the test build for
-  the test package, the tree's build otherwise), the harness should run as the
-  test package and install it first, and the daily app should still be
-  listening on its own port at the end, which the run can require.
-
-## The live doctor test needs a route that survives itself
-
-- [ ] `tests/live/doctor-fix-proxy.sh` is the one live test that takes the
-  wireless route away from under itself: step 3 drops the laptop AP, and the
-  phone's adb rides on it (`adb devices` has a single `192.168.77.232:<port>`
-  transport here), so from that step to the AP coming back — the uninstall, the
-  doctor's complaints, `phone-doctor-fix --yes --required`, and the exit trap
-  that is supposed to put everything back — every adb call is addressed to a
-  transport that no longer answers. What it checks before dropping is the USB
-  *tether* (`rndis0` has an address), which is not the same thing: adb can be
-  up only over Wi-Fi with the tether sitting there, and the run then cuts its
-  own link and cannot restore anything. It should require a route that outlives
-  the drop before it drops anything — an adb transport that is a USB serial
-  rather than a `host:port` one, or the phone answering at the tether address —
-  and skip with the reason (cable, `phone-adb-wifi`) when neither is there, the
-  way `tests/live/proxy-app.sh` already refuses to start on a link it cannot
-  reach. `phone.sh`'s `adb_link` recovery is the other half of this: mDNS finds
-  a rotated wireless port, but not a phone that left the network.
-
 ## The saved proxies can leave and come back
 
 - [ ] Every proxy the panel holds — its name, port, SSID, user and password,
@@ -157,3 +120,37 @@ list is empty.
   bring back proxies that cannot connect. The file holds passwords, so the
   export should say that plainly and the app should not put it anywhere by
   itself.
+
+## The app comes back when the AP does
+
+- [ ] The app's listener stops when the network it listens on goes away and does
+  not start again by itself: the doctor's harness drops the laptop AP, the phone
+  leaves the SSID, and the daily proxy sits at `stopped` until something runs
+  `phone-proxy-setup` again. `auto_start` is documented as "come back after a
+  reboot and stay up (the SSID still gates the port)", so the app should treat a
+  network that comes back as a start: listen for the connectivity change and
+  bind the port again when the saved SSID is the one the phone joined. Done when
+  a run that drops and restores the AP ends with the daily app listening on the
+  port it had, without a command being run to put it there.
+
+## The doctor can read a stopped app
+
+- [ ] `phone-doctor` can only read the app's stored settings while its service
+  is running — `auto_start` comes from `dumpsys activity service`, and a stopped
+  service prints nothing — so the `app_boot` check degrades to "allowlist yes,
+  but auto_start could not be read" exactly when the app is not listening, which
+  is the state a broken phone is in. The app should publish the few facts a
+  check needs (`auto_start`, the listening port, the SSID it gates on) where adb
+  can read them without the service: `dumpsys activity service` for a running
+  one, and a small file under its own external directory for a stopped one, or
+  an `ACTION_REPORT` the doctor can start for one line of output.
+
+## The doctor says when a newer release is out
+
+- [ ] `phone-doctor` checks the app against this checkout's build but not
+  against the newest release, so a phone running a three-week-old APK passes
+  every check. It should read the latest tag once (the same GitHub call
+  `phone-proxy-install --release` makes, cached for a day) and warn when the
+  installed version is older — with the `/releases` page's own line as the
+  detail, so `--analyze` stays scriptable. A warning, never a failure: a phone
+  that is working is working.

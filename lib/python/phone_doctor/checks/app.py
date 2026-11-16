@@ -15,28 +15,39 @@ from ..model import Result, fail, ok, warn
 
 SECTION = "[app]"
 
-APP = "org.phonelink.proxy"
-SERVICE = f"{APP}/.ProxyService"
+def _app(ctx: Context) -> str:
+    """The app under test: PHONE_PROXY_PKG names another one (the test build)."""
+    return ctx.proxy_pkg
+
+
+def _service(ctx: Context) -> str:
+    """The service component, with the class's own namespace.
+
+    `.ProxyService` is resolved against the manifest package, which is not the
+    app's Java package in a renamed build — `org.phonelink.proxy.test` would
+    look for a `ProxyService` class of its own and find nothing.
+    """
+    return f"{_app(ctx)}/{ctx.get('PHONE_APP_NAMESPACE', 'org.phonelink.proxy')}.ProxyService"
 
 
 def _installed(ctx: Context) -> bool:
-    text = ctx.adb("shell", "pm", "path", APP)
+    text = ctx.adb("shell", "pm", "path", _app(ctx))
     return any(line.startswith("package:") for line in text.splitlines())
 
 
 def _auto_start(ctx: Context) -> str:
     """The app's stored auto_start, which its service prints for dumpsys."""
-    text = ctx.adb("shell", "dumpsys", "activity", "service", SERVICE)
+    text = ctx.adb("shell", "dumpsys", "activity", "service", _service(ctx))
     match = re.search(r"auto-start\s+(true|false)", text)
     return match.group(1) if match else ""
 
 
 def _whitelisted(ctx: Context) -> bool:
-    return f",{APP}," in ctx.adb("shell", "dumpsys", "deviceidle", "whitelist")
+    return f",{_app(ctx)}," in ctx.adb("shell", "dumpsys", "deviceidle", "whitelist")
 
 
 def _background_location(ctx: Context) -> str:
-    text = ctx.adb("shell", "dumpsys", "package", APP)
+    text = ctx.adb("shell", "dumpsys", "package", _app(ctx))
     match = re.search(r"ACCESS_BACKGROUND_LOCATION: granted=(true|false)", text)
     return match.group(1) if match else ""
 
@@ -54,7 +65,7 @@ def check(ctx: Context) -> list[Result]:
             )
         ]
 
-    results: list[Result] = [ok("app_installed", "phone-link app", APP)]
+    results: list[Result] = [ok("app_installed", "phone-link app", _app(ctx))]
 
     auto_start = _auto_start(ctx)
     whitelisted = _whitelisted(ctx)

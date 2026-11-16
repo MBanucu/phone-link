@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   saved proxies. It also refuses to start unless the adb route survives the AP
   drop, and `phone.app_apk()` (and the doctor's copy) install the test build
   when the package under test is the test one.
+- `phone-doctor`'s app checks (`app_installed`, `app_boot`) follow the package
+  under test instead of `org.phonelink.proxy`. The module hardcoded it, so a
+  doctor pointed at the test build read the daily app's allowlist and the test
+  app's listener — and reported "not on the battery allowlist" about an app that
+  was on it. The service component now carries the app's own class namespace,
+  because `.ProxyService` resolves against the manifest package, which a renamed
+  build does not share with the Java classes.
+- `phone-proxy-install` puts the app back on the battery allowlist. The entry is
+  kept by package name and goes away with the uninstall, so an uninstall and
+  reinstall quietly lost "comes back after a reboot" until somebody remembered
+  `phone-proxy-boot`.
 - The repair kit prunes itself. Nothing ever removed an APK from the ambulance
   box, so a host that followed this repository for a year would collect every
   version it ever stocked — 150 kB each, and `apk_cached()` picks by mtime, so
