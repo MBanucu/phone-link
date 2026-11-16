@@ -80,3 +80,21 @@ list is empty.
   Save as onto an existing name has to ask before overwriting; All events
   has to show more than the open proxy's own log and say what it is when
   there is nothing in it.
+
+## The doctor looks at our app, not the 5G proxy
+
+- [ ] `phone-doctor`, `phone-net.sh`, and the proxy helpers still name
+  `com.tokyoxpa3.androidproxy`, the third-party app from F-Droid: the doctor
+  asks it for its version, compares that with F-Droid's `suggestedVersionCode`
+  and offers `phone-proxy-install --fdroid`, and the tunnel and forwarding
+  checks drive it by its old adb interface. The app this repo builds is now
+  the phone's proxy, so the doctor should look at that one instead: presence
+  and version from this checkout's build (`android/build.sh` writes the APK
+  `phone-proxy-install` already deploys) rather than from a store, "up to
+  date" measured against the tree instead of F-Droid, and the checks that
+  talk to it going through the interface it actually has — the service dump
+  and a request through the listener — with the fix still being a reinstall
+  from the tree. `PHONE_PROXY_PKG` stays the override, with
+  `org.phonelink.proxy` as its default, so one variable still says which app
+  the tools mean. The old app's uninstall and data-clear steps must not stop
+  working for whoever still runs it.
