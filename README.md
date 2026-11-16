@@ -265,8 +265,11 @@ has saved, and it requires the daily app's state line to be the same at the end.
 It parks this checkout's build in the ambulance box, drops the laptop AP,
 uninstalls the test app, requires `phone-doctor` to report `ap_address`,
 `proxy_app` and `proxy_request`, runs `phone-doctor-fix --yes --required`, and
-requires a clean doctor, the AP back up, the phone joined again and the app at
-this tree's version. Nothing is downloaded: the repair installs the parked file,
+requires a clean doctor, the AP back up, the phone joined again, the app at
+this tree's version, and the daily app listening on the port it had *without* a
+command being run to start it — the phone rejoins the SSID on its own, and the
+listener follows the network back. Nothing is downloaded: the repair installs
+the parked file,
 and the harness requires it to be byte for byte the build — which is what keeps
 the repair working when the removed proxy was the laptop's only uplink. It
 refuses to start unless the adb route survives the AP drop (a cable, or a

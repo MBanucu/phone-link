@@ -42,6 +42,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The daily proxy coming back when the AP does is checked, not assumed. The
+  doctor's live run dropped the laptop AP, and its last step then ran
+  `phone-proxy-setup` to start the daily app again — which made a pass
+  indistinguishable from a listener that had never come back. That run now
+  waits a minute for the app to be listening on the port it had, with nothing
+  run to put it there, and only restarts it after the check fails, to leave the
+  phone as it was found. The app already followed the network back: measured on
+  this phone, dropping the AP pauses the listener within 10 s (`not listening:
+  the default network is not Wi-Fi`) and restoring it re-binds `0.0.0.0:1081`
+  on its own 25 s later, and the repaired run ends `PASS the daily app came back
+  on port 1081 by itself` (26 passed, 0 failed).
+
 - `phone-doctor` can read the app while its service is stopped. `auto_start`
   came from `dumpsys activity service`, which prints nothing for a stopped
   service — so `app_boot` degraded to "allowlist yes, but auto_start could not be

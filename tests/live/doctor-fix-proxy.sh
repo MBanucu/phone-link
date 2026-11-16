@@ -10,7 +10,9 @@
 #   6. run phone-doctor-fix --yes --required: it installs the test build from
 #      the parked file (AP + phone link are fixed last),
 #   7. require a clean doctor, the test app at this tree's version, the AP back
-#      up, the phone joined again — and the daily app exactly as it was.
+#      up, the phone joined again — and the daily app listening on the port it
+#      had, without a command being run to start it: the network came back, so
+#      the listener did too.
 #
 #   sudo tests/live/doctor-fix-proxy.sh
 #
@@ -349,14 +351,31 @@ if [ -n "$daily_apk_after" ] && [ "$daily_apk_after" = "$daily_apk_before" ]; th
 else
   bad "the daily app's install changed" "${daily_apk_before:-gone} -> ${daily_apk_after:-gone}"
 fi
+# Dropping the AP takes the network the daily app listens on with it. When the
+# AP returns the app has to be listening on the port it had *without* anything
+# being run to put it there — the phone rejoins the SSID on its own and the
+# listener is supposed to follow it back. The wait is a minute, because the
+# phone's own rejoin is most of it. The command below runs only after the check
+# has failed, and only to leave a phone that did not come back the way it was
+# found.
 if [ -n "$daily_port" ]; then
-  PHONE_PROXY_PKG=$daily_pkg "$BIN/phone-proxy-setup" --port "$daily_port" >&2 \
-    || printf 'restarting the daily proxy failed\n' >&2
-  daily_after=$(daily_state)
+  daily_after=""
+  for _ in $(seq 1 30); do
+    daily_after=$(daily_state)
+    case $daily_after in
+      *"listening on 0.0.0.0:$daily_port"*) break ;;
+    esac
+    sleep 2
+  done
   case $daily_after in
     *"listening on 0.0.0.0:$daily_port"*)
-      ok "the daily app is back on port $daily_port" ;;
-    *) bad "the daily app is not back on port $daily_port" "${daily_after:-stopped}" ;;
+      ok "the daily app came back on port $daily_port by itself" ;;
+    *)
+      bad "the daily app is not back on port $daily_port without a command" \
+        "${daily_after:-stopped}"
+      PHONE_PROXY_PKG=$daily_pkg "$BIN/phone-proxy-setup" --port "$daily_port" >&2 \
+        || printf 'putting the daily proxy back failed\n' >&2
+      ;;
   esac
 fi
 

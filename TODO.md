@@ -54,15 +54,3 @@ list is empty.
   has to show more than the open proxy's own log and say what it is when
   there is nothing in it.
 
-## The app comes back when the AP does
-
-- [ ] The app's listener stops when the network it listens on goes away and does
-  not start again by itself: the doctor's harness drops the laptop AP, the phone
-  leaves the SSID, and the daily proxy sits at `stopped` until something runs
-  `phone-proxy-setup` again. `auto_start` is documented as "come back after a
-  reboot and stay up (the SSID still gates the port)", so the app should treat a
-  network that comes back as a start: listen for the connectivity change and
-  bind the port again when the saved SSID is the one the phone joined. Done when
-  a run that drops and restores the AP ends with the daily app listening on the
-  port it had, without a command being run to put it there.
-
