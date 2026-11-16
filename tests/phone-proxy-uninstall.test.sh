@@ -82,7 +82,7 @@ out=$(run --check)
 rc=$?
 [ "$rc" = 0 ] && ok "--check exits 0" || bad "--check exits 0" "exit $rc"
 case $out in
-  *"would run: adb -s TESTPHONE uninstall com.tokyoxpa3.androidproxy"*)
+  *"would run: adb -s TESTPHONE uninstall org.phonelink.proxy"*)
     ok "--check shows the uninstall command"
     ;;
   *) bad "--check shows the uninstall command" "$out" ;;
@@ -106,7 +106,7 @@ esac
 
 installed
 expect_exit "--yes uninstalls" 0 --yes
-if grep -q -- "-s TESTPHONE uninstall com.tokyoxpa3.androidproxy" "$LOG/adb.log"; then
+if grep -q -- "-s TESTPHONE uninstall org.phonelink.proxy" "$LOG/adb.log"; then
   ok "uninstall argv is -s SERIAL uninstall PKG"
 else
   bad "uninstall argv is -s SERIAL uninstall PKG" "$(grep uninstall "$LOG/adb.log" | tail -1)"
@@ -119,11 +119,21 @@ fi
 
 installed
 expect_exit "--keep-data --yes keeps data" 0 --keep-data --yes
-if grep -q -- "-s TESTPHONE shell cmd package uninstall -k com.tokyoxpa3.androidproxy" "$LOG/adb.log"; then
+if grep -q -- "-s TESTPHONE shell cmd package uninstall -k org.phonelink.proxy" "$LOG/adb.log"; then
   ok "keep-data argv is -s SERIAL shell cmd package uninstall -k PKG"
 else
   bad "keep-data argv is -s SERIAL shell cmd package uninstall -k PKG" "$(grep -i uninstall "$LOG/adb.log" | tail -1)"
 fi
+
+# The vendored app is still removable by naming it.
+installed
+if PHONE_PROXY_PKG=com.tokyoxpa3.androidproxy run --yes >/dev/null 2>&1; then
+  ok "the vendored app is still removable"
+else
+  bad "the vendored app is still removable"
+fi
+grep -q -- "-s TESTPHONE uninstall com.tokyoxpa3.androidproxy" "$LOG/adb.log" \
+  && ok "names the vendored package" || bad "names the vendored package"
 
 # Idempotent: when the app is absent the script succeeds and does nothing.
 : > "$LOG/adb.log"

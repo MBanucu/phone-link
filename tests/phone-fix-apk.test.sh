@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Hermetic tests for bin/phone-fix-apk: stub phone-proxy-install, use a
-# temporary cache directory. No network, no root.
+# Hermetic tests for bin/phone-fix-apk: a stand-in build, a temporary cache
+# directory. No network, no root, no phone.
 set -u
 
 BASH_BIN=$(command -v bash)
@@ -10,7 +10,8 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
 export PHONE_APK_CACHE=$TMP/cache
-mkdir -p "$LOG" "$STUBS"
+mkdir -p "$LOG" "$STUBS" "$TMP/build"
+export PHONE_PROXY_APK=$TMP/build/phone-link-proxy.apk
 
 pass=0
 fail=0
@@ -23,17 +24,6 @@ bad() {
   printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
 }
 
-cat >"$STUBS/phone-proxy-install" <<'EOF'
-#!/usr/bin/env bash
-printf 'phone-proxy-install %s\n' "$*" >>"$LOG/actions"
-mkdir -p "$PHONE_APK_DIR"
-: >"$PHONE_APK_DIR/com.tokyoxpa3.androidproxy-1.7.4-24.apk"
-EOF
-
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS"/*
-chmod +x "$STUBS"/*
-export PATH="$STUBS:$PATH"
-
 run() {
   "$BASH_BIN" "$SCRIPT" "$@" >"$LOG/out" 2>&1
 }
@@ -42,37 +32,50 @@ run_no_home() {
   env -u HOME -u XDG_CACHE_HOME "$BASH_BIN" "$SCRIPT" "$@" >"$LOG/out" 2>&1
 }
 
-# 1. Empty cache: --check reports it without downloading.
+printf 'build one\n' >"$PHONE_PROXY_APK"
+
+# 1. Empty cache: --check reports it without copying anything.
 rm -rf "$PHONE_APK_CACHE"
 if run --check; then bad "empty --check exits 1"; else ok "empty --check exits 1"; fi
-[ -e "$LOG/actions" ] && bad "empty --check downloads nothing" || ok "empty --check downloads nothing"
+[ -e "$PHONE_APK_CACHE" ] && bad "empty --check copies nothing" || ok "empty --check copies nothing"
 
-# 2. Empty cache: the fix downloads into the ambulance box.
+# 2. Empty cache: the fix puts this checkout's build in the ambulance box.
 if run; then ok "stocks an empty cache"; else bad "stocks an empty cache" "$(cat "$LOG/out")"; fi
-grep -q 'phone-proxy-install --fdroid --check' "$LOG/actions" \
-  && ok "asks F-Droid for the APK" || bad "asks F-Droid for the APK" "$(cat "$LOG/actions" 2>/dev/null)"
-ls "$PHONE_APK_CACHE"/*.apk >/dev/null 2>&1 && ok "leaves an APK in the cache" \
-  || bad "leaves an APK in the cache"
+cmp -s "$PHONE_PROXY_APK" "$PHONE_APK_CACHE/phone-link-proxy.apk" \
+  && ok "leaves the build in the cache" || bad "leaves the build in the cache" "$(ls -l "$PHONE_APK_CACHE" 2>&1)"
+grep -q "ambulance APK ready: $PHONE_APK_CACHE/phone-link-proxy.apk" "$LOG/out" \
+  && ok "says where it is" || bad "says where it is" "$(cat "$LOG/out")"
 
-# 3. Stocked cache: no download.
-rm -f "$LOG/actions"
+# 3. Stocked cache: a second run costs nothing.
+rm -f "$PHONE_APK_CACHE/phone-link-proxy.apk"
+printf 'old copy\n' >"$PHONE_APK_CACHE/phone-link-proxy.apk"
 if run; then ok "stocked cache exits 0"; else bad "stocked cache exits 0" "$(cat "$LOG/out")"; fi
-[ -s "$LOG/actions" ] && bad "stocked cache downloads nothing" || ok "stocked cache downloads nothing"
+grep -q 'ambulance APK already stocked' "$LOG/out" && ok "leaves the copy alone" \
+  || bad "leaves the copy alone" "$(cat "$LOG/out")"
+grep -qx 'old copy' "$PHONE_APK_CACHE/phone-link-proxy.apk" && ok "the old copy is untouched" \
+  || bad "the old copy is untouched"
 if run --check; then ok "stocked --check exits 0"; else bad "stocked --check exits 0"; fi
 
-# 4. --refresh downloads again.
-rm -f "$LOG/actions"
+# 4. --refresh replaces it with the current build.
+printf 'newer build\n' >"$PHONE_PROXY_APK"
 if run --refresh; then ok "--refresh exits 0"; else bad "--refresh exits 0" "$(cat "$LOG/out")"; fi
-grep -q 'phone-proxy-install --fdroid --check' "$LOG/actions" \
-  && ok "--refresh downloads" || bad "--refresh downloads"
+grep -qx 'newer build' "$PHONE_APK_CACHE/phone-link-proxy.apk" && ok "--refresh replaces the copy" \
+  || bad "--refresh replaces the copy" "$(cat "$PHONE_APK_CACHE/phone-link-proxy.apk" 2>&1)"
 
 # 5. Activation runs without HOME: the ambulance box is still found.
-rm -f "$LOG/actions"
 if run_no_home --check; then ok "works without HOME"; else bad "works without HOME" "$(cat "$LOG/out")"; fi
 grep -q 'unbound variable' "$LOG/out" && bad "works without HOME: no unbound variable" \
   || ok "works without HOME: no unbound variable"
-[ -s "$LOG/actions" ] && bad "works without HOME downloads nothing" \
-  || ok "works without HOME downloads nothing"
+
+# 5a. A named APK that is not there is named, not substituted.
+rm -f "$PHONE_APK_CACHE"/*.apk
+if PHONE_PROXY_APK=$TMP/gone.apk run; then
+  bad "a missing named APK exits 1"
+else
+  ok "a missing named APK exits 1"
+fi
+grep -q "not a file: $TMP/gone.apk" "$LOG/out" && ok "names the file it wanted" \
+  || bad "names the file it wanted" "$(cat "$LOG/out")"
 
 # 6. --help.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi

@@ -62,7 +62,7 @@ def launch(serial: str) -> None:
             "shell",
             "monkey",
             "-p",
-            os.environ.get("PHONE_PROXY_PKG") or "com.tokyoxpa3.androidproxy",
+            os.environ.get("PHONE_PROXY_PKG") or "org.phonelink.proxy",
             "-c",
             "android.intent.category.LAUNCHER",
             "1",
@@ -82,7 +82,7 @@ def dump(serial: str, path: str) -> bool:
         if os.path.getsize(path) <= 0:
             return False
         with open(path, encoding="utf-8") as handle:
-            if (os.environ.get("PHONE_PROXY_PKG") or "com.tokyoxpa3.androidproxy") not in handle.read():
+            if (os.environ.get("PHONE_PROXY_PKG") or "org.phonelink.proxy") not in handle.read():
                 return False
     except OSError:
         return False

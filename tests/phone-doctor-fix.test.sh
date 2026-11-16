@@ -136,19 +136,26 @@ grep -qx "phone-proxy-install $TMP/fake.apk" "$LOG/actions" && ok "installs the 
   || bad "installs the cached APK" "$(cat "$LOG/actions" 2>/dev/null)"
 unset PHONE_PROXY_APK
 
-# 9. An empty ambulance cache is stocked before the proxy is reinstalled.
-printf 'fail apk_cache none cached (run phone-fix-apk)\n' >"$LOG/problems"
+# 9. A missing APK is the build's business, so it is a manual step: no script
+# fakes a build, and nothing is run for it.
+printf 'fail apk_cache not built (nix develop .#android -c ./android/build.sh)\n' >"$LOG/problems"
 rm -f "$LOG/actions"
-if run --yes --required; then ok "ambulance fix exits 0"; else bad "ambulance fix exits 0" "$(cat "$LOG/out")"; fi
-grep -qx 'phone-fix-apk' "$LOG/actions" && ok "runs phone-fix-apk" \
-  || bad "runs phone-fix-apk" "$(cat "$LOG/actions" 2>/dev/null)"
+if run --yes --required; then bad "a missing APK is not fixed by a script"; else
+  ok "a missing APK is not fixed by a script"
+fi
+grep -q 'apk_cache .*build' "$LOG/out" && ok "prints how to build it" \
+  || bad "prints how to build it" "$(cat "$LOG/out")"
+[ -s "$LOG/actions" ] && bad "a manual step runs nothing" || ok "a manual step runs nothing"
 
-# 10. A proxy install uses the cached APK without PHONE_PROXY_APK.
-printf 'fail proxy_app com.tokyoxpa3.androidproxy not installed\n' >"$LOG/problems"
+# 10. A proxy install names a file from the checkout's build or the ambulance
+# box, without being told which, and never a download.
+printf 'fail proxy_app org.phonelink.proxy not installed\n' >"$LOG/problems"
 rm -f "$LOG/actions"
-if run --yes --required; then ok "cached proxy install exits 0"; else bad "cached proxy install exits 0" "$(cat "$LOG/out")"; fi
-grep -q "phone-proxy-install $PHONE_APK_CACHE/" "$LOG/actions" \
-  && ok "installs from the ambulance box" || bad "installs from the ambulance box" "$(cat "$LOG/actions" 2>/dev/null)"
+if run --yes --required; then ok "proxy reinstall exits 0"; else bad "proxy reinstall exits 0" "$(cat "$LOG/out")"; fi
+grep -Eq "phone-proxy-install (.*/android/build/phone-link-proxy\.apk|$PHONE_APK_CACHE/.*\.apk)$" "$LOG/actions" \
+  && ok "installs the APK the checkout or the cache names" \
+  || bad "installs the APK the checkout or the cache names" "$(cat "$LOG/actions" 2>/dev/null)"
+grep -q -- '--fdroid' "$LOG/actions" && bad "does not download to repair" || ok "does not download to repair"
 
 # 11. A missing AP profile is created from the secret.
 printf 'warn ap_profile phonelink missing (run phone-ap-create, or hotspot mode)\n' >"$LOG/problems"

@@ -64,9 +64,11 @@ USAGE_INSTALL = """usage: phone-proxy-install [APK...]
        phone-proxy-install --status
        phone-proxy-install --check APK
 
-Installs or updates the phone's SOCKS proxy app over adb (-r -g), optionally
-fetching F-Droid's suggested version first, pulls the installed APK off the
-phone for later reinstalls, or reports what is installed.
+Installs or updates the phone's SOCKS proxy app over adb (-r -g) — with no
+argument, the APK this checkout builds (`android/build.sh` writes it) — pulls
+the installed APK off the phone for later reinstalls, or reports what is
+installed. --fdroid fetches the vendored proxy from F-Droid instead, for a
+phone that still runs it.
 
 --fdroid caches downloads in $PHONE_APK_DIR, defaulting to
 $XDG_CACHE_HOME/phone-link (or ~/.cache/phone-link), named
@@ -648,6 +650,11 @@ def phone_proxy_install(args: list[str]) -> int:
         return 0
 
     def find_apk() -> str | None:
+        # This checkout's build is what the phone should be running, so it wins
+        # over a stray APK in the current directory.
+        built = phone.app_apk()
+        if built:
+            return built
         # The current directory, the usual download spots, then the
         # repository's apk/ folder; prefer a file whose name says "proxy".
         script_dir = Path(__file__).resolve().parents[3] / "bin"
@@ -762,7 +769,7 @@ def phone_proxy_install(args: list[str]) -> int:
         builds — a third-party proxy has no business holding it, and the grant
         fails harmlessly for one that does not declare it.
         """
-        if package != settings.PHONE_APP_PKG:
+        if not package.startswith(settings.PHONE_APP_NAMESPACE):
             return
         argv = [
             "adb",
@@ -795,7 +802,11 @@ def phone_proxy_install(args: list[str]) -> int:
     else:
         found = find_apk()
         if not found:
-            die("no APK found; pass one, or fetch it with --fdroid")
+            die(
+                "no APK found: build this checkout's app with "
+                "nix develop .#android -c ./android/build.sh, pass an APK, "
+                "or fetch the vendored one with --fdroid"
+            )
         local_apks = [found]
 
     for apk in local_apks:

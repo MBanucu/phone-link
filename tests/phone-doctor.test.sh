@@ -92,7 +92,6 @@ sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/systemctl"
 cat >"$STUBS/curl" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
-  *api/v1/packages*) cat "$LOG/fdroid_json" ;;
   *--socks5-hostname*) printf '%s' "$(cat "$LOG/proxy_code")" ;;
   *) printf '%s' "$(cat "$LOG/internet_code")" ;;
 esac
@@ -118,6 +117,7 @@ export PATH="$STUBS:$PATH"
 export PHONE_SECRETS=$TMP/secrets
 export PHONE_DOCTOR_RESOLV=$LOG/resolv.conf
 export PHONE_APK_CACHE=$TMP/cache
+export PHONE_PROXY_MANIFEST=$TMP/manifest.xml PHONE_PROXY_APK=$TMP/app.apk
 export PHONE_NIXOS_DIR=$TMP/nixos PHONE_FLAKE_SRC=$TMP/no-src
 printf 'PHONE_SOCKS_PASS=pass\nPHONE_PIN=1234\nPHONE_AP_PASS=pass\n' >"$PHONE_SECRETS"
 chmod 600 "$PHONE_SECRETS"
@@ -137,13 +137,14 @@ fresh_state() {
   printf '200' >"$LOG/proxy_code"
   printf '200' >"$LOG/internet_code"
   printf 'nameserver 1.1.1.1\nnameserver 9.9.9.9\n' >"$LOG/resolv.conf"
-  printf '    versionCode=24 minSdk=26 targetSdk=34\n    versionName=1.7.4\n    ACCESS_BACKGROUND_LOCATION: granted=true\n' >"$LOG/dumpsys"
+  printf '    versionCode=1 minSdk=26 targetSdk=34\n    versionName=0.1.0\n    ACCESS_BACKGROUND_LOCATION: granted=true\n' >"$LOG/dumpsys"
   printf '      auto-start  true\n' >"$LOG/service_dump"
   printf 'user,org.phonelink.proxy,10332\n' >"$LOG/whitelist"
   printf '35\n' >"$LOG/sdk"
-  printf '{"packageName":"com.tokyoxpa3.androidproxy","suggestedVersionCode":24,"packages":[{"versionName":"1.7.4","versionCode":24}]}' >"$LOG/fdroid_json"
-  mkdir -p "$PHONE_APK_CACHE"
-  : >"$PHONE_APK_CACHE/com.tokyoxpa3.androidproxy-test.apk"
+  # The version the tree would build, and the APK a reinstall would use: both
+  # are files here so the test says what a checkout says and nothing else.
+  printf '    android:versionCode="1"\n    android:versionName="0.1.0">\n' >"$TMP/manifest.xml"
+  : >"$TMP/app.apk"
   : >"$LOG/avahi"
   : >"$LOG/connected"
   : >"$LOG/connect_ok"
@@ -253,19 +254,31 @@ if run; then bad "auto_start off exits 1"; else ok "auto_start off exits 1"; fi
 grep -q 'FAIL  restarts at boot.*auto_start is off' "$LOG/out" && ok "names the switch" \
   || bad "names the switch" "$(cat "$LOG/out")"
 
-# 13. An empty ambulance box is a required failure.
+# 13. An APK that is not there is a required failure, and the one named is the
+# one the repair would hand to adb.
 fresh_state
-rm -f "$PHONE_APK_CACHE"/*.apk
-if run; then bad "empty ambulance exits 1"; else ok "empty ambulance exits 1"; fi
-grep -q 'FAIL  ambulance apk' "$LOG/out" && ok "fails the ambulance check" \
-  || bad "fails the ambulance check" "$(cat "$LOG/out")"
+export PHONE_PROXY_APK=$TMP/missing.apk
+if run; then bad "missing APK exits 1"; else ok "missing APK exits 1"; fi
+grep -q "FAIL  app apk.*$TMP/missing.apk is not there" "$LOG/out" && ok "fails the app apk check" \
+  || bad "fails the app apk check" "$(cat "$LOG/out")"
+export PHONE_PROXY_APK=$TMP/app.apk
+fresh_state
+if run; then ok "the named APK passes"; else bad "the named APK passes" "$(cat "$LOG/out")"; fi
+grep -q "ok    app apk.*$TMP/app.apk" "$LOG/out" && ok "passes with the APK it was given" \
+  || bad "passes with the APK it was given" "$(cat "$LOG/out")"
 
-# 12. The installed proxy version is compared with F-Droid.
+# 12. The installed proxy version is compared with this checkout's manifest.
 fresh_state
-printf '{"suggestedVersionCode":25,"packages":[{"versionName":"1.8.0","versionCode":25}]}' >"$LOG/fdroid_json"
-if run; then ok "outdated proxy still exits 0"; else bad "outdated proxy still exits 0"; fi
-grep -q 'warn  proxy version.*1.7.4 (24) < 1.8.0 (25)' "$LOG/out" \
-  && ok "warns about the update" || bad "warns about the update" "$(cat "$LOG/out")"
+if run; then ok "the tree's build exits 0"; else bad "the tree's build exits 0"; fi
+grep -q "ok    proxy version.*0.1.0 (1), this checkout's build" "$LOG/out" \
+  && ok "accepts the build this checkout makes" || bad "accepts the build this checkout makes" \
+  "$(cat "$LOG/out")"
+fresh_state
+printf '    versionCode=24 minSdk=26 targetSdk=34\n    versionName=1.7.4\n    ACCESS_BACKGROUND_LOCATION: granted=true\n' >"$LOG/dumpsys"
+if run; then ok "an older app still exits 0"; else bad "an older app still exits 0"; fi
+grep -q "warn  proxy version.*1.7.4 (24) is not this checkout's 0.1.0 (1); run phone-proxy-install" \
+  "$LOG/out" && ok "says which build the tree makes" || bad "says which build the tree makes" \
+  "$(cat "$LOG/out")"
 grep -q 'ok    proxy compat.*minSdk 26 <= phone SDK 35' "$LOG/out" \
   && ok "checks the SDK compatibility" || bad "checks the SDK compatibility" "$(cat "$LOG/out")"
 

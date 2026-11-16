@@ -20,18 +20,17 @@ in dependency order, and re-checks afterwards. --yes skips the confirmation;
 --dry-run only lists what would run; --required ignores warnings and only
 fixes required failures. Problems without a fix script are printed with the
 manual step. PHONE_PROXY_APK=/path/app.apk installs the proxy from that file
-instead of downloading from F-Droid, which keeps the repair working when the
-network it restores is itself down.
+instead of the APK this checkout builds, which keeps the repair working when
+the network it restores is itself down.
 """
 
 FIX_ORDER = (
-    "apk_cache ip_forward ap_profile phone_unlocked phone_default proxy_app "
+    "ip_forward ap_profile phone_unlocked phone_default proxy_app "
     "proxy_request app_boot phone_tun tunnel_route rndis0 network_transport "
     "ap_address phone_address https"
 ).split()
 
 FIX_SCRIPTS = {
-    "apk_cache": "phone-fix-apk",
     "ip_forward": "phone-fix-forwarding",
     "ap_profile": "phone-ap-create",
     "ap_address": "phone-ap-up",
@@ -56,7 +55,13 @@ MANUAL_HINTS = {
     "resolver": "pin /etc/resolv.conf via phoneLink.manageResolver and rebuild",
     "secrets": "write the secrets file with PHONE_SOCKS_PASS and PHONE_PIN (root, mode 600)",
     "ap_pass": "add PHONE_AP_PASS to the secrets file",
-    "proxy_version": "refresh the ambulance box, then run phone-proxy-install --fdroid",
+    "apk_cache": (
+        "build this checkout's app: nix develop .#android -c ./android/build.sh"
+    ),
+    "proxy_version": (
+        "reinstall this checkout's build: phone-proxy-install "
+        "(or phone-doctor-fix --yes)"
+    ),
     "proxy_compat": "the installed app does not fit this phone; pick a compatible APK",
     "app_installed": (
         "install this repository's app: phone-proxy-install <apk> "
@@ -78,13 +83,8 @@ def _describe(problem: str) -> str:
     script = FIX_SCRIPTS[problem]
     if problem != "proxy_app":
         return script
-    override = os.environ.get("PHONE_PROXY_APK")
-    if override:
-        return f"{script} {override}"
-    cached = phone.apk_cached()
-    if cached:
-        return f"{script} {cached}"
-    return f"{script} --fdroid"
+    apk = phone.app_apk()
+    return f"{script} {apk}" if apk else script
 
 
 def _manual(problem: str) -> str:
@@ -102,13 +102,13 @@ def _run_cmd(name: str, *args: str) -> int:
 def _run_fix(problem: str) -> int:
     if problem == "proxy_app":
         # Offline reinstall: the network may be the thing this fix restores.
-        apk = os.environ.get("PHONE_PROXY_APK") or phone.apk_cached()
+        apk = phone.app_apk()
         if apk:
             if not os.path.isfile(apk):
-                log(f"error: proxy APK is not a file: {apk}")
+                log(f"error: app APK is not a file: {apk}")
                 return 1
             return _run_cmd("phone-proxy-install", apk)
-        return _run_cmd("phone-proxy-install", "--fdroid")
+        return _run_cmd("phone-proxy-install")
     if problem in ("phone_tun", "tunnel_route"):
         return _run_cmd("phone-fix-tunnel")
     return _run_cmd(FIX_SCRIPTS[problem])

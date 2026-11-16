@@ -82,7 +82,7 @@ if run --check; then
 else
   bad "--check exits 0" "$(cat "$LOG/out")"
 fi
-grep -q 'would run: adb -s XPLO2EEA0001541 shell pm clear com.tokyoxpa3.androidproxy' "$LOG/out" \
+grep -q 'would run: adb -s XPLO2EEA0001541 shell pm clear org.phonelink.proxy' "$LOG/out" \
   && ok "--check shows the exact command" || bad "--check shows the exact command" "$(cat "$LOG/out")"
 [ ! -f "$LOG/clear.log" ] && ok "--check clears nothing" || bad "--check clears nothing"
 [ -f "$LOG/data" ] && ok "--check keeps the data" || bad "--check keeps the data"
@@ -103,12 +103,21 @@ if run --yes; then
 else
   bad "--yes exits 0" "$(cat "$LOG/out")"
 fi
-grep -q 'pm clear com.tokyoxpa3.androidproxy' "$LOG/clear.log" \
+grep -q 'pm clear org.phonelink.proxy' "$LOG/clear.log" \
   && ok "--yes runs pm clear for the pinned serial" || bad "--yes runs pm clear for the pinned serial"
-grep -q 'cleared com.tokyoxpa3.androidproxy data' "$LOG/out" \
+grep -q 'cleared org.phonelink.proxy data' "$LOG/out" \
   && ok "clearing is reported" || bad "clearing is reported" "$(cat "$LOG/out")"
 grep -q 'tunnel stops within 5 s' "$LOG/out" && ok "tunnel side effect is stated" \
   || bad "tunnel side effect is stated"
+
+# 4a. The vendored app is still clearable by naming it.
+if PHONE_PROXY_PKG=com.tokyoxpa3.androidproxy run --yes; then
+  ok "the vendored app is still clearable"
+else
+  bad "the vendored app is still clearable" "$(cat "$LOG/out")"
+fi
+grep -q 'pm clear com.tokyoxpa3.androidproxy' "$LOG/clear.log" \
+  && ok "names the vendored package" || bad "names the vendored package" "$(cat "$LOG/clear.log" 2>/dev/null)"
 
 # 5. Clearing again is harmless.
 if run --yes; then

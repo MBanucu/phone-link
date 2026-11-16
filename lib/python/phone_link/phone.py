@@ -171,6 +171,27 @@ def ap_declarative() -> bool:
         return False
 
 
+def app_apk() -> str | None:
+    """The APK a reinstall would use, and the one the app is measured against.
+
+    An explicit file wins, then this checkout's build — the APK `android/build.sh`
+    writes and `phone-proxy-install` installs — then whatever the ambulance box
+    holds, which is what a repair falls back on when the tree is not here.
+    """
+    override = os.environ.get("PHONE_PROXY_APK")
+    if override:
+        # Named explicitly, so it is the answer even when it is missing: the
+        # caller says which file is not there rather than installing another.
+        return override
+    root = os.path.dirname(  # .../lib/python/phone_link -> the checkout
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    )
+    built = os.path.join(root, "android", "build", "phone-link-proxy.apk")
+    if os.path.isfile(built):
+        return built
+    return apk_cached()
+
+
 def apk_cached() -> str | None:
     """Newest proxy APK in the ambulance box or a user cache, if any."""
     directories = [settings.PHONE_APK_CACHE]

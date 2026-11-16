@@ -236,6 +236,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The doctor looks at our app, not the 5G proxy. Every doctor line about the
+  proxy measured the vendored F-Droid app: presence was `pm path
+  com.tokyoxpa3.androidproxy`, the version was whatever F-Droid's API
+  suggested, "up to date" compared the two, and the fix reinstalled from the
+  ambulance cache or a download. It now measures the app this checkout builds —
+  presence from `android/AndroidManifest.xml` (or `PHONE_PROXY_MANIFEST`) and
+  the installed app's `versionName`/`versionCode` from `dumpsys package`, so
+  "up to date" means "this tree", and a reinstall is `phone-proxy-install` with
+  this checkout's build. There is one notion of "the APK" now:
+  `PHONE_PROXY_APK`, then `android/build/phone-link-proxy.apk`, then the
+  ambulance cache, shared by the doctor, the installer and the repair — so a
+  named file that is missing is a required failure instead of a silent fallback.
+  `PHONE_PROXY_PKG` still overrides the package and now defaults to
+  `org.phonelink.proxy`; `phone-proxy-uninstall` and `phone-proxy-data-clear`
+  still work on the vendored app by naming it, `phone-proxy-install --fdroid`
+  still installs it, and `phone-fix-apk` copies the build into the cache
+  instead of downloading (a build is a file; nothing to fetch).
+  `phone-proxy-start`, `phone-proxy-stop` and `phone-proxy-setup` talk to the
+  app's own adb interface — `am start-foreground-service` with
+  `org.phonelink.proxy.action.START`/`STOP` and the configuration as extras,
+  `dumpsys activity service` for what it is doing — instead of unlocking,
+  tapping and typing on its settings screen, so a start is one adb call and a
+  `--check` is one dump. `phone-proxy-setup --check` also sends one request
+  through the listener, because the app prints its configuration but never its
+  password. The three suites went from 542 lines of screen driving to 61 cases
+  of intents and dumps.
+
 - A filtered run keeps its own timing history. Full runs and `PHONE_LIVE_ONLY`
   runs write their step rows to the same file, and the same step does not cost
   the same in both — `stop` is 2.5 s in a full run and 15–16 s in a filtered one,

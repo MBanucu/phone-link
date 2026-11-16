@@ -1,251 +1,234 @@
-"""The proxy app's screen-driven commands: start, stop and configure it.
+"""The proxy app's commands: start, stop and configure it over adb.
 
-The app is not debuggable and its service is not exported, so its own settings
-screen is driven with uiautomator. Everything here needs the phone unlocked.
+The app in `android/` answers its own intents and prints what it is doing for
+`dumpsys activity service`, so nothing here needs the screen, the keyguard or
+uiautomator: a start is `am start-foreground-service START` with the
+configuration as extras, a stop is `STOP`, and `--check` reads the dump.
+
+The one thing that cannot be read back is the password — the app prints its
+configuration but never a secret — so a setup verifies it the only way that
+means anything: a request through the listener.
 """
 
 from __future__ import annotations
 
-import os
 import re
-import shutil
 import sys
-import tempfile
 import time
+import urllib.parse
 
-from .. import phone, settings, ui
-from ..shell import capture, die, log, must, run, status
+from .. import phone, settings
+from ..shell import capture, die, log, status
+
+# The class keeps its package whatever id the app is installed under, the way
+# the harness names it: only the package half of the component follows
+# PHONE_PROXY_PKG.
+CLASS = "org.phonelink.proxy"
+SERVICE = f"{settings.PHONE_PROXY_PKG}/{CLASS}.ProxyService"
+START = f"{CLASS}.action.START"
+STOP = f"{CLASS}.action.STOP"
 
 USAGE_START = """usage: phone-proxy-start [--check]
 
-Opens the proxy app and taps Start, then waits until it reports running.
---check only reports whether the proxy is running.
+Starts the proxy app's listener over adb, then waits until the service says it
+is listening. --check only reports whether it is running.
 """
 
 USAGE_STOP = """usage: phone-proxy-stop [--check]
 
-Opens the proxy app and taps Stop, then waits until it reports stopped.
---check only reports whether the proxy is running.
+Stops the proxy app's listener over adb, then waits until the service is gone.
+--check only reports whether it is running.
 """
 
 USAGE_SETUP = """usage: phone-proxy-setup [--check] [--port N] [--user NAME] [--no-auto-start]
 
-Sets the proxy port, username and password (from the secrets file), enables
-"start after reboot" unless --no-auto-start is given, then starts the proxy
-and verifies a request through it. --check only reports the current settings.
+Starts the proxy on the given port with the credentials from the secrets file,
+turns auto-start on unless --no-auto-start is given, and verifies a request
+through the listener. --check only reports the current settings.
 """
-
-FIELDS = 3
 
 
 def _installed(serial: str) -> bool:
-    output = capture(["adb", "-s", serial, "shell", "pm", "path", settings.PHONE_PROXY_PKG])
+    output = capture(
+        ["adb", "-s", serial, "shell", "pm", "path", settings.PHONE_PROXY_PKG]
+    )
     return any(line.startswith("package:") for line in output.splitlines())
 
 
-def _open_app(serial: str, path: str, *, unlock: str | None) -> bool:
-    """Open the app and dump its hierarchy, retrying while the phone wakes."""
-    ui.launch(serial)
-    for _ in range(10):
-        if ui.dump(serial, path):
-            return True
+def _dump(serial: str) -> str:
+    return capture(
+        ["adb", "-s", serial, "shell", "dumpsys", "activity", "service", SERVICE]
+    )
+
+
+def _field(dump: str, name: str) -> str:
+    """The service's own line for `name`, from the block it prints last.
+
+    The dump starts with the app's help text and ends with what it is doing, so
+    the last match is the live answer rather than an example in the help.
+    """
+    matches = re.findall(rf"^[ \t]+{name}[ \t]+(.+)$", dump, re.M)
+    return matches[-1].strip() if matches else ""
+
+
+def _state(serial: str) -> str:
+    return _field(_dump(serial), "state")
+
+
+def _running(state: str) -> bool:
+    return "listening on" in state
+
+
+def _gated(state: str) -> bool:
+    """The service is up and answering, but nothing is listening.
+
+    That is the app's SSID gate: a proxy whose network is not this one stays
+    running and waits, which is the difference between "off" and "not on this
+    network" the app prints in the same line.
+    """
+    return bool(state) and not _running(state)
+
+
+def _send(serial: str, action: str, *extras: str) -> None:
+    status(
+        [
+            "adb",
+            "-s",
+            serial,
+            "shell",
+            "am",
+            "start-foreground-service",
+            "-n",
+            SERVICE,
+            "-a",
+            action,
+            *extras,
+        ]
+    )
+
+
+def _wait(serial: str, wanted, seconds: int) -> str:
+    """Poll the service's own view of itself until it agrees, or time runs out."""
+    state = _state(serial)
+    deadline = time.time() + seconds
+    while not wanted(state) and time.time() < deadline:
         time.sleep(1)
-        status(["adb", "-s", serial, "shell", "input", "keyevent", "KEYCODE_WAKEUP"])
-        if unlock:
-            run([unlock])
-        ui.launch(serial)
-    return False
+        state = _state(serial)
+    return state
+
+
+def _check_flag(args: list[str], usage: str) -> bool:
+    check_only = False
+    for value in args:
+        if value == "--check":
+            check_only = True
+        elif value in ("-h", "--help"):
+            print(usage, end="", file=sys.stderr)
+            sys.exit(0)
+        else:
+            print(usage, end="", file=sys.stderr)
+            die(f"unknown argument: {value}")
+    return check_only
 
 
 def phone_proxy_start(args: list[str]) -> int:
-    """Start the proxy by tapping the app's own Start button."""
-    check_only = False
-    for value in args:
-        if value == "--check":
-            check_only = True
-        elif value in ("-h", "--help"):
-            print(USAGE_START, end="", file=sys.stderr)
-            return 0
-        else:
-            print(USAGE_START, end="", file=sys.stderr)
-            die(f"unknown argument: {value}")
-
+    """Start the listener, or say whether it is listening."""
+    check_only = _check_flag(args, USAGE_START)
     serial = phone.phone_serial()
     if not serial:
         die("no phone attached (see adb devices)")
     if not _installed(serial):
         die(f"{settings.PHONE_PROXY_PKG} is not installed; run phone-proxy-install first")
 
-    directory = tempfile.mkdtemp()
-    try:
-        path = os.path.join(directory, "ui.xml")
-        if check_only and ui.keyguard(serial):
-            die("phone is locked; run phone-unlock, then this again")
-
-        unlock = None
-        if not check_only:
-            unlock = ui.unlock_bin()
-            if not unlock:
-                die("phone-unlock not found next to this script or in PATH")
-            must([unlock])
-
-        if not _open_app(serial, path, unlock=unlock):
-            if check_only and ui.keyguard(serial):
-                die("phone is locked; run phone-unlock, then this again")
-            die("cannot read the app UI (unlock with phone-unlock and install the app)")
-
-        if ui.button(path, "Stop Proxy Service"):
-            log("proxy is already running")
-            return 0
-        if check_only:
-            log("proxy is stopped")
-            return 1
-
-        start = ui.button(path, "Start 5G Proxy")
-        if not start:
-            die("cannot find the Start button in the app UI")
-        log("tapping Start")
-        status(["adb", "-s", serial, "shell", "input", "tap", str(start[0]), str(start[1])])
-
-        line = ""
-        for _ in range(25):
-            time.sleep(1)
-            if not ui.dump(serial, path):
-                continue
-            if ui.button(path, "Stop Proxy Service"):
-                log("proxy started")
-                return 0
-            line = ui.status_line(path)
-            if "Failed to Start" in line:
-                die(f"proxy failed to start: {line}")
-            found = ui.blocker(path)
-            if found:
-                status(
-                    ["adb", "-s", serial, "shell", "input", "tap",
-                     str(found[0]), str(found[1])]
-                )
-        die(f"proxy did not start (last status: {line or 'unknown'})")
+    state = _state(serial)
+    if _running(state):
+        log(f"proxy is already listening ({state})")
+        return 0
+    if check_only:
+        log(f"proxy is not listening ({state or 'stopped'})")
         return 1
-    finally:
-        shutil.rmtree(directory, ignore_errors=True)
+
+    log("starting the proxy over adb")
+    _send(serial, START)
+    # The gate is deterministic, so a "not listening" answer is the final word
+    # rather than something to wait out.
+    state = _wait(serial, lambda each: _running(each) or _gated(each), 15)
+    if _running(state):
+        log(f"proxy started ({state})")
+        return 0
+    if _gated(state):
+        die(
+            f"proxy is not listening: {state} — its SSID gate does not match "
+            "this network, or it is waiting for one"
+        )
+    die(f"proxy did not start ({state or 'the service gave no state'})")
+    return 1
 
 
 def phone_proxy_stop(args: list[str]) -> int:
-    """Stop the proxy by tapping the app's own Stop button."""
-    check_only = False
-    for value in args:
-        if value == "--check":
-            check_only = True
-        elif value in ("-h", "--help"):
-            print(USAGE_STOP, end="", file=sys.stderr)
-            return 0
-        else:
-            print(USAGE_STOP, end="", file=sys.stderr)
-            die(f"unknown argument: {value}")
-
+    """Stop the listener, or say whether it is running."""
+    check_only = _check_flag(args, USAGE_STOP)
     serial = phone.phone_serial()
     if not serial:
         die("no phone attached (see adb devices)")
     if not _installed(serial):
         die(f"{settings.PHONE_PROXY_PKG} is not installed; run phone-proxy-install first")
 
-    directory = tempfile.mkdtemp()
-    try:
-        path = os.path.join(directory, "ui.xml")
-        if check_only and ui.keyguard(serial):
-            die("phone is locked; run phone-unlock, then this again")
-
-        unlock = None
-        if not check_only:
-            unlock = ui.unlock_bin()
-            if not unlock:
-                die("phone-unlock not found next to this script or in PATH")
-            must([unlock])
-
-        if not _open_app(serial, path, unlock=unlock):
-            if check_only and ui.keyguard(serial):
-                die("phone is locked; run phone-unlock, then this again")
-            die("cannot read the app UI (unlock with phone-unlock and install the app)")
-
-        stop = ui.button(path, "Stop Proxy Service")
-        if not stop:
-            log("proxy is not running")
-            return 0
-        if check_only:
-            log("proxy is running")
-            return 1
-
-        log("tapping Stop")
-        status(["adb", "-s", serial, "shell", "input", "tap", str(stop[0]), str(stop[1])])
-
-        for _ in range(20):
-            time.sleep(1)
-            if not ui.dump(serial, path):
-                continue
-            if ui.button(path, "Start 5G Proxy"):
-                log("proxy stopped")
-                return 0
-        die("proxy did not stop (still showing Stop)")
+    state = _state(serial)
+    if not state:
+        log("proxy is not running")
+        return 0
+    if check_only:
+        log(f"proxy is running ({state})")
         return 1
-    finally:
-        shutil.rmtree(directory, ignore_errors=True)
+
+    log("stopping the proxy over adb")
+    _send(serial, STOP)
+    state = _wait(serial, lambda each: not each, 5)
+    if state:
+        die(f"proxy did not stop ({state})")
+    log("proxy stopped")
+    return 0
 
 
-class _State:
-    """The app's settings screen, read field by field."""
-
-    def __init__(self, path: str) -> None:
-        edits: list[tuple[int, int, int, str]] = []
-        checks: list[tuple[int, int, str, str]] = []
-        buttons: list[tuple[int, int, str]] = []
-        statuses: list[str] = []
-        for css, text, x, y, node in ui.nodes(path):
-            package = node.get("package") or ""
-            if package == settings.PHONE_PROXY_PKG:
-                if css == "EditText":
-                    # uiautomator reports the hint of an empty field as its text.
-                    if text == "Empty = auth disabled":
-                        text = ""
-                    edits.append((y, x, y, text))
-                elif css == "CheckBox":
-                    checks.append(
-                        (x, y, "true" if node.get("checked") == "true" else "false", text)
-                    )
-                elif css == "TextView" and any(word in text for word in ui.STATUS_WORDS):
-                    statuses.append(text)
-            # Buttons from every package, so permission and battery dialogs are
-            # visible too.
-            if css == "Button":
-                buttons.append((x, y, text))
-
-        self.fields = sorted(edits)
-        self.checkbox = next(
-            (item for item in checks if "automatically" in item[3].lower()), None
-        )
-        self.button = next(
-            (item for item in buttons if re.search("Start|Stop", item[2])), None
-        )
-        self.status = statuses[0] if statuses else ""
-        self.running = bool(self.button and "Stop" in self.button[2])
-
-    @property
-    def valid(self) -> bool:
-        return (
-            len(self.fields) >= FIELDS
-            and self.checkbox is not None
-            and self.button is not None
-        )
-
-    def values(self) -> tuple[str, str, str]:
-        return tuple(field[3] for field in self.fields[:FIELDS])  # type: ignore[return-value]
+def _request(address: str, port: str, user: str, password: str) -> str:
+    """What one request through the listener answers."""
+    credentials = urllib.parse.quote(user, safe="")
+    secret = urllib.parse.quote(password, safe="")
+    code = capture(
+        [
+            "curl",
+            "-4",
+            "-s",
+            "-m",
+            "20",
+            "--socks5-hostname",
+            f"{credentials}:{secret}@{address}:{port}",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
+            "https://example.com",
+        ],
+        timeout=30,
+    ).strip()
+    return code or "000"
 
 
-def _bullet_count(text: str) -> int:
-    return text.count("\u2022")
+def _settings(dump: str) -> tuple[str, str, str]:
+    """Port, user and auto-start as the service prints them."""
+    using = _field(dump, "using")
+    port = re.search(r"\bport (\d+)", using)
+    user = re.search(r"\buser (\S+)", using)
+    return (
+        port.group(1) if port else "",
+        user.group(1) if user else "",
+        _field(dump, "auto-start"),
+    )
 
 
 def phone_proxy_setup(args: list[str]) -> int:
-    """Write the port, credentials and auto-start through the app's screen."""
+    """Start the proxy with the secrets file's credentials, and verify it."""
     port = str(settings.PHONE_PROXY_PORT)
     user = settings.PHONE_PROXY_USER
     auto_start = True
@@ -279,16 +262,14 @@ def phone_proxy_setup(args: list[str]) -> int:
         die(f"port must be numeric: {port}")
     if not 1 <= int(port) <= 65535:
         die(f"port out of range: {port}")
-    # `adb shell input text` types these literally; anything exotic gets
-    # mangled.
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", user):
-        die(f"username must match [A-Za-z0-9._-]+: {user}")
+    if not user:
+        die("username cannot be empty")
 
     password = phone.proxy_pass()
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", password):
+    if not password:
         die(
-            "password must match [A-Za-z0-9._-]+ "
-            "(adb input text cannot type it safely)"
+            "no PHONE_SOCKS_PASS in the secrets file (run with sudo, or set "
+            "PHONE_SECRETS)"
         )
 
     serial = phone.phone_serial()
@@ -297,223 +278,87 @@ def phone_proxy_setup(args: list[str]) -> int:
     if not _installed(serial):
         die(f"{settings.PHONE_PROXY_PKG} is not installed; run phone-proxy-install first")
 
-    directory = tempfile.mkdtemp()
-    try:
-        path = os.path.join(directory, "ui.xml")
+    want_auto = "true" if auto_start else "false"
 
-        unlock = None
-        if not check_only:
-            unlock = ui.unlock_bin()
-            if not unlock:
-                die("phone-unlock not found next to this script or in PATH")
-            must([unlock])
-            # Grant what the app would otherwise stop and ask for in a dialog:
-            # the notification permission and the Doze exemption.
-            status(
-                [
-                    "adb", "-s", serial, "shell", "pm", "grant",
-                    settings.PHONE_PROXY_PKG,
-                    "android.permission.POST_NOTIFICATIONS",
-                ]
-            )
-            status(
-                [
-                    "adb", "-s", serial, "shell", "cmd", "deviceidle", "whitelist",
-                    f"+{settings.PHONE_PROXY_PKG}",
-                ]
-            )
-
-        # --check is read-only and does not unlock, so fail fast instead of
-        # timing out on every dump of a keyguard-covered screen.
-        if check_only and ui.keyguard(serial):
-            die("phone is locked; run phone-unlock, then this again")
-
-        state: _State | None = None
-
-        def snapshot() -> bool:
-            nonlocal state
-            if not ui.dump(serial, path):
-                return False
-            state = _State(path)
-            return state.valid
-
-        def dismiss_blockers() -> bool:
-            for _ in range(3):
-                if not snapshot():
-                    return False
-                found = ui.blocker(path)
-                if not found:
-                    return False
-                log("dismissing a dialog to continue")
-                status(
-                    ["adb", "-s", serial, "shell", "input", "tap",
-                     str(found[0]), str(found[1])]
-                )
-                time.sleep(2)
-            return True
-
-        def recover_ui() -> None:
-            status(
-                ["adb", "-s", serial, "shell", "input", "keyevent", "KEYCODE_WAKEUP"]
-            )
-            if unlock:
-                run([unlock])
-            ui.launch(serial)
-            time.sleep(1)
-
-        ui.launch(serial)
-        dismiss_blockers()
-        loaded = False
-        for _ in range(10):
-            loaded = snapshot()
-            if loaded:
-                break
-            time.sleep(1)
-            dismiss_blockers()
-            recover_ui()
-        if not loaded or state is None:
-            if check_only and ui.keyguard(serial):
-                die("phone is locked; run phone-unlock, then this again")
-            die("cannot read the app UI (unlock with phone-unlock and install the app)")
-
-        current_port, current_user, current_pass = state.values()
-        assert state.checkbox is not None and state.button is not None
-        check_x, check_y, checked, _ = state.checkbox
-        button_x, button_y, _ = state.button
-        want_checked = "true" if auto_start else "false"
-
-        if check_only:
-            chars = _bullet_count(current_pass)
-            sys.stderr.write(f"port       {current_port or '?'} (want {port})\n")
-            sys.stderr.write(
-                f"username   {current_user or '<empty>'} (want {user})\n"
-            )
-            sys.stderr.write(f"password   {chars} chars (want {len(password)})\n")
-            sys.stderr.write(f"auto-start {checked} (want {want_checked})\n")
-            sys.stderr.write(
-                f"proxy      {'running' if state.running else 'stopped'} "
-                "(want running)\n"
-            )
-            return (
-                0
-                if current_port == port
-                and current_user == user
-                and chars == len(password)
-                and checked == want_checked
-                and state.running
-                else 1
-            )
-
-        # A changed port only takes effect on a restart; auth is applied live.
-        if state.running and current_port != port:
-            log(f"stopping the running proxy to apply port {port}")
-            status(
-                ["adb", "-s", serial, "shell", "input", "tap",
-                 str(button_x), str(button_y)]
-            )
-            for _ in range(10):
-                time.sleep(1)
-                if not snapshot():
-                    continue
-                assert state.button is not None
-                button_x, button_y, _ = state.button
-                if not state.running:
-                    break
-
-        # Replacing a field: tap it, move to the end, delete a generous number
-        # of characters, then type the value.
-        keystrokes = ["KEYCODE_MOVE_END", *(["67"] * 64)]
-
-        def set_field(field: tuple[int, int, int, str], value: str) -> None:
-            _, x, y, _ = field
-            status(["adb", "-s", serial, "shell", "input", "tap", str(x), str(y)])
-            status(
-                ["adb", "-s", serial, "shell", "input", "keyevent", *keystrokes]
-            )
-            status(["adb", "-s", serial, "shell", "input", "text", value])
-
-        set_field(state.fields[0], port)
-        set_field(state.fields[1], user)
-        set_field(state.fields[2], password)
-
-        # Hide the keyboard so the rest of the screen is addressable again.
-        status(["adb", "-s", serial, "shell", "input", "keyevent", "KEYCODE_BACK"])
-        time.sleep(1)
-        if not snapshot():
-            recover_ui()
-            if not snapshot():
-                die("lost the app UI after typing the settings")
-
-        assert state.checkbox is not None and state.button is not None
-        check_x, check_y, checked, _ = state.checkbox
-        button_x, button_y, _ = state.button
-        current_port, current_user, current_pass = state.values()
-
-        if checked != want_checked:
-            status(
-                ["adb", "-s", serial, "shell", "input", "tap",
-                 str(check_x), str(check_y)]
-            )
-            time.sleep(1)
-            if not snapshot():
-                die("lost the app UI after toggling auto-start")
-            assert state.checkbox is not None and state.button is not None
-            checked = state.checkbox[2]
-            button_x, button_y, _ = state.button
-            current_port, current_user, current_pass = state.values()
-
-        chars = _bullet_count(current_pass)
-        if (
-            current_port != port
-            or current_user != user
-            or chars != len(password)
-            or checked != want_checked
-        ):
-            die(
-                "settings did not stick "
-                f"(port {current_port}, user '{current_user}', {chars} password "
-                f"chars, auto-start {checked})"
-            )
-        log(
-            f"settings written: port {port}, user {user}, "
-            f"password {len(password)} chars, auto-start {want_checked}"
+    if check_only:
+        dump = _dump(serial)
+        state = _field(dump, "state")
+        current_port, current_user, current_auto = _settings(dump)
+        running = _running(state)
+        sys.stderr.write(f"port       {current_port or '?'} (want {port})\n")
+        sys.stderr.write(f"username   {current_user or '<empty>'} (want {user})\n")
+        sys.stderr.write(f"auto-start {current_auto or '?'} (want {want_auto})\n")
+        sys.stderr.write(
+            f"proxy      {'listening' if running else (state or 'stopped')} "
+            "(want listening)\n"
         )
-
-        def start_and_wait() -> None:
-            status(
-                ["adb", "-s", serial, "shell", "input", "tap",
-                 str(button_x), str(button_y)]
-            )
-            for _ in range(25):
-                time.sleep(1)
-                if not snapshot():
-                    if dismiss_blockers():
-                        continue
-                    recover_ui()
-                    continue
-                assert state.button is not None
-                if state.running:
-                    return
-                if "Failed to Start" in state.status:
-                    die(f"proxy failed to start: {state.status}")
-                # "Continue Anyway" on the battery dialog starts the proxy by
-                # itself.
-                if dismiss_blockers():
-                    continue
-            die(f"proxy did not start (last status: {state.status or 'unknown'})")
-
-        if state.running:
-            log(f"proxy already running on port {port}")
-        else:
-            start_and_wait()
-
         verified = False
-        for address in phone.phone_ips(serial):
-            if phone.proxy_check(address):
-                verified = True
-        if not verified:
-            die("the proxy is running but no LAN address answered with 200")
-        log("phone proxy configured and verified")
-        return 0
-    finally:
-        shutil.rmtree(directory, ignore_errors=True)
+        if running:
+            for address in phone.phone_ips(serial):
+                verified = _request(address, port, user, password) == "200"
+                if verified:
+                    break
+            sys.stderr.write(f"request    {'200' if verified else 'no'} (want 200)\n")
+        good = (
+            current_port == port
+            and current_user == user
+            and current_auto == want_auto
+            and running
+            and verified
+        )
+        return 0 if good else 1
+
+    log(f"phone: {serial}")
+    log(f"starting the proxy on port {port} as {user}")
+    _send(
+        serial,
+        START,
+        "--ei",
+        "port",
+        port,
+        "--es",
+        "user",
+        user,
+        "--es",
+        "password",
+        password,
+        "--ez",
+        "anonymous",
+        "false",
+        "--ez",
+        "auto_start",
+        want_auto,
+    )
+
+    state = _wait(serial, lambda each: _running(each) or _gated(each), 15)
+    if not _running(state):
+        if _gated(state):
+            die(
+                f"proxy is not listening: {state} — its SSID gate does not match "
+                "this network"
+            )
+        die(f"proxy did not start ({state or 'the service gave no state'})")
+
+    written_port, written_user, written_auto = _settings(_dump(serial))
+    if written_port != port or written_user != user or written_auto != want_auto:
+        die(
+            "the app did not take the settings "
+            f"(port {written_port}, user '{written_user}', "
+            f"auto-start {written_auto})"
+        )
+    log(
+        f"settings written: port {port}, user {user}, "
+        f"password {len(password)} chars, auto-start {want_auto}"
+    )
+
+    verified = ""
+    for address in phone.phone_ips(serial):
+        code = _request(address, port, user, password)
+        log(f"{address}:{port} -> https://example.com = {code}")
+        if code == "200":
+            verified = address
+            break
+    if not verified:
+        die("the proxy is listening but no LAN address answered with 200")
+    log(f"phone proxy configured and verified through {verified}")
+    return 0

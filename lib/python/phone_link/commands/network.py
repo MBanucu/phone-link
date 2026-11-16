@@ -63,9 +63,10 @@ HTTPS after each step. --check only reports whether internet already works.
 
 USAGE_FIX_APK = """usage: phone-fix-apk [--refresh] [--check]
 
-Caches the proxy APK in the ambulance cache (default /var/cache/phone-link) so
-phone-doctor-fix can reinstall the app without a download. --refresh replaces
-the cache with F-Droid's current suggested version; --check only reports.
+Caches this checkout's proxy APK (or PHONE_PROXY_APK) in the ambulance cache
+(default /var/cache/phone-link) so a repair can reinstall the app when the tree
+is not here. Nothing is downloaded: a build is a file. --refresh replaces an
+older copy; --check only reports.
 """
 
 
@@ -688,23 +689,24 @@ def phone_fix_apk(args: list[str]) -> int:
             phone.as_root("phone-fix-apk", args)
         die(f"cannot create {settings.PHONE_APK_CACHE}")
 
-    installer = _tool("phone-proxy-install")
-    if not os.access(installer, os.X_OK):
-        die("phone-proxy-install not found")
+    source = phone.app_apk()
+    if not source:
+        die(
+            "no APK to cache: build this checkout's app "
+            "(nix develop .#android -c ./android/build.sh), "
+            "or name one with PHONE_PROXY_APK"
+        )
+    if not os.path.isfile(source):
+        die(f"not a file: {source}")
 
-    log(f"downloading the proxy APK into {settings.PHONE_APK_CACHE}")
-    environment = dict(os.environ, PHONE_APK_DIR=settings.PHONE_APK_CACHE)
-    import subprocess
+    target = os.path.join(settings.PHONE_APK_CACHE, os.path.basename(source))
+    if os.path.abspath(source) == os.path.abspath(target):
+        log(f"ambulance APK already stocked: {target}")
+        return 0
 
-    try:
-        done = subprocess.run([installer, "--fdroid", "--check"], env=environment)
-    except OSError:
-        die("phone-proxy-install could not be started")
-    if done.returncode != 0:
-        raise SystemExit(done.returncode)
+    log(f"copying {source} into {settings.PHONE_APK_CACHE}")
+    import shutil
 
-    cached = phone.apk_cached()
-    if not cached:
-        die(f"no APK appeared in {settings.PHONE_APK_CACHE}")
-    log(f"ambulance APK ready: {cached}")
+    shutil.copy2(source, target)
+    log(f"ambulance APK ready: {target}")
     return 0

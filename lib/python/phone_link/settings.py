@@ -30,9 +30,16 @@ PHONE_HOTSPOT_CON = _env("PHONE_HOTSPOT_CON", "XPLORE 2")
 PHONE_HOTSPOT_SSID = _env("PHONE_HOTSPOT_SSID", PHONE_HOTSPOT_CON)
 PHONE_PROXY_PORT = int(_env("PHONE_PROXY_PORT", "1080"))
 PHONE_PROXY_USER = _env("PHONE_PROXY_USER", "proxy")
-PHONE_PROXY_PKG = _env("PHONE_PROXY_PKG", "com.tokyoxpa3.androidproxy")
-# The APK this repository builds, as opposed to the vendored proxy above.
-PHONE_APP_PKG = _env("PHONE_APP_PKG", "org.phonelink.proxy")
+# The app in `android/`: it is the phone's proxy, and PHONE_PROXY_PKG is what a
+# command means by "the proxy app". The vendored `com.tokyoxpa3.androidproxy`
+# still works by overriding it, which is what the uninstall and data-clear
+# commands are for.
+PHONE_PROXY_PKG = _env("PHONE_PROXY_PKG", "org.phonelink.proxy")
+PHONE_APP_PKG = _env("PHONE_APP_PKG", PHONE_PROXY_PKG)
+# Whatever id it is installed under (the `.test` build included), our app is the
+# one whose namespace this is: the vendored proxy is not, and must not be handed
+# a development permission it has no use for.
+PHONE_APP_NAMESPACE = "org.phonelink.proxy"
 PHONE_ADB_PORT = _env("PHONE_ADB_PORT", "5555")
 PHONE_SECRETS = _env("PHONE_SECRETS", "/etc/nixos/phone-socks-secrets")
 PHONE_NM_SYSTEM_CONNECTIONS = _env(

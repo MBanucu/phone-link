@@ -1,8 +1,19 @@
-"""Proxy checks: ambulance APK, install, version, compatibility, request."""
+"""Proxy checks: this repository's app, its version, compatibility, a request.
+
+The phone's proxy is the app in `android/`, so the version it is measured
+against is the one in this checkout's manifest — the file `android/build.sh`
+builds from — and a reinstall is `phone-proxy-install`, which installs that
+build. No store is in the loop: an app that is not this checkout's build is
+simply out of date with it, and an offline host is no excuse for a check that
+cannot say which version the tree would produce.
+
+What is asked of the phone is what the app answers for itself: `dumpsys
+package` for what is installed, and a request through the listener for whether
+it works.
+"""
 
 from __future__ import annotations
 
-import json
 import re
 
 from ..context import Context
@@ -10,15 +21,9 @@ from ..model import Result, fail, ok, skip, warn
 
 SECTION = "[proxy]"
 
-FDROID_URL = "https://f-droid.org/api/v1/packages/"
-
-
-def _dump(ctx: Context) -> str:
-    return ctx.adb("shell", "dumpsys package", ctx.proxy_pkg)
-
 
 def _installed_versions(ctx: Context) -> tuple[str, str, str, str]:
-    dump = _dump(ctx)
+    dump = ctx.adb("shell", "dumpsys package", ctx.proxy_pkg)
 
     def first(pattern: str) -> str:
         match = re.search(pattern, dump)
@@ -32,22 +37,15 @@ def _installed_versions(ctx: Context) -> tuple[str, str, str, str]:
     )
 
 
-def _fdroid_latest(ctx: Context) -> tuple[str, str]:
-    raw = ctx.text(
-        ["curl", "-fsSL", "--max-time", "10", FDROID_URL + ctx.proxy_pkg],
-        timeout=10,
-    )
+def _tree_version(ctx: Context) -> tuple[str, str]:
+    """The versionName and versionCode this checkout builds."""
     try:
-        data = json.loads(raw)
-    except (ValueError, TypeError):
+        text = ctx.proxy_manifest.read_text()
+    except OSError:
         return "", ""
-    code = str(data.get("suggestedVersionCode", ""))
-    name = ""
-    for package in data.get("packages", []):
-        if str(package.get("versionCode")) == code:
-            name = str(package.get("versionName", ""))
-            break
-    return code, name
+    name = re.search(r'android:versionName="([^"]+)"', text)
+    code = re.search(r'android:versionCode="(\d+)"', text)
+    return (name.group(1) if name else ""), (code.group(1) if code else "")
 
 
 def _proxy_request(ctx: Context, target: str) -> Result:
@@ -84,15 +82,19 @@ def _proxy_request(ctx: Context, target: str) -> Result:
 def check(ctx: Context) -> list[Result]:
     results: list[Result] = []
 
-    apk = ctx.apk_cached()
-    if apk:
-        results.append(ok("apk_cache", "ambulance apk", str(apk)))
+    apk = ctx.proxy_apk
+    if apk and apk.is_file():
+        results.append(ok("apk_cache", "app apk", str(apk)))
+    elif apk:
+        # An explicit file that is not there beats a silent fallback: it is the
+        # one the repair would hand to adb.
+        results.append(fail("apk_cache", "app apk", f"{apk} is not there"))
     else:
         results.append(
             fail(
                 "apk_cache",
-                "ambulance apk",
-                "none cached (run phone-fix-apk)",
+                "app apk",
+                "not built (nix develop .#android -c ./android/build.sh)",
             )
         )
 
@@ -110,35 +112,34 @@ def check(ctx: Context) -> list[Result]:
     if serial:
         version, code, min_sdk, target_sdk = _installed_versions(ctx)
         phone_sdk = ctx.adb("shell", "getprop", "ro.build.version.sdk").strip()
+        tree_name, tree_code = _tree_version(ctx)
         if not code:
             results.append(skip("proxy_version", "proxy version", "app not installed"))
+        elif not tree_code:
+            results.append(
+                skip(
+                    "proxy_version",
+                    "proxy version",
+                    f"{version} ({code}); no manifest here to compare with",
+                )
+            )
+        elif code == tree_code:
+            results.append(
+                ok(
+                    "proxy_version",
+                    "proxy version",
+                    f"{version} ({code}), this checkout's build",
+                )
+            )
         else:
-            latest_code, latest_name = _fdroid_latest(ctx)
-            if not latest_code:
-                results.append(
-                    skip(
-                        "proxy_version",
-                        "proxy version",
-                        "F-Droid unreachable (offline?)",
-                    )
+            results.append(
+                warn(
+                    "proxy_version",
+                    "proxy version",
+                    f"{version} ({code}) is not this checkout's "
+                    f"{tree_name or '?'} ({tree_code}); run phone-proxy-install",
                 )
-            elif code == latest_code:
-                results.append(
-                    ok(
-                        "proxy_version",
-                        "proxy version",
-                        f"{version} ({code}), F-Droid latest",
-                    )
-                )
-            else:
-                results.append(
-                    warn(
-                        "proxy_version",
-                        "proxy version",
-                        f"{version} ({code}) < {latest_name or '?'} ({latest_code}); "
-                        "run phone-proxy-install --fdroid",
-                    )
-                )
+            )
         if min_sdk and phone_sdk:
             if int(min_sdk) <= int(phone_sdk):
                 results.append(

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Hermetic tests for bin/phone-proxy-start: stub adb serving the app screen,
-# stub phone-unlock and timeout. No phone, no network.
+# Hermetic tests for bin/phone-proxy-start: stub adb with the app's service
+# dump and its intents. No phone, no screen, no keyguard.
 set -u
 
 BASH_BIN=$(command -v bash)
@@ -22,164 +22,93 @@ bad() {
   printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
 }
 
-# The app screen with just what these scripts read: the Start/Stop button and
-# the status line.
+# The app as adb sees it: a start makes it listen (unless its SSID gate says
+# otherwise), a stop takes the service away, and the dump is what it says.
 cat >"$STUBS/adb" <<'EOF'
 #!/usr/bin/env bash
 args=("$@")
 if [ "${args[0]:-}" = "-s" ]; then args=("${args[@]:2}"); fi
-render_xml() {
-  local btn status
-  if [ -f "$LOG/failed" ]; then
-    btn='🚀 Start 5G Proxy'
-    status='❌ Proxy Failed to Start: test'
-  elif [ -f "$LOG/running" ]; then
-    btn='🛑 Stop Proxy Service'
-    status='✅ 5G Proxy Running'
-  else
-    btn='🚀 Start 5G Proxy'
-    status='Proxy Stopped'
-  fi
-  cat <<XML
-<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
-<hierarchy rotation="0">
- <node package="com.tokyoxpa3.androidproxy" class="android.widget.Button" text="$btn" bounds="[48,1600][1392,1800]" />
- <node package="com.tokyoxpa3.androidproxy" class="android.widget.TextView" text="$status" bounds="[80,1820][1360,1900]" />
-</hierarchy>
-XML
-}
-case "${args[0]:-}" in
-  devices) printf 'List of devices attached\nXPLO2EEA0001541\tdevice\n' ;;
-  pull) cp "$LOG/remote.xml" "${args[2]:-}" ;;
-  shell)
-    args=("${args[@]:1}")
-    case "${args[0]:-}" in
-      pm) [ "${args[1]:-}" = path ] && printf 'package:/data/app/x/base.apk\n' ;;
-      dumpsys) printf '  showing=%s\n' "$(cat "$LOG/keyguard" 2>/dev/null || echo false)" ;;
-      monkey) printf 'Events injected: 1\n' ;;
-      uiautomator) render_xml >"$LOG/remote.xml" ;;
-      input)
-        args=("${args[@]:1}")
-        case "${args[0]:-}" in
-          tap)
-            printf 'tap %s %s\n' "${args[1]}" "${args[2]}" >>"$LOG/input.log"
-            if [ "${args[2]:-}" = 1700 ]; then
-              if [ -f "$LOG/fail" ]; then
-                : >"$LOG/failed"
-              elif [ -f "$LOG/running" ]; then
-                rm -f "$LOG/running"
-              else
-                : >"$LOG/running"
-              fi
-            fi
-            ;;
-          keyevent) printf 'keyevent %s\n' "${args[*]:1}" >>"$LOG/input.log" ;;
-        esac
+cmd="${args[*]}"
+case $cmd in
+  "devices") printf 'List of devices attached\nXPLO2EEA0001541\tdevice\n' ;;
+  "shell pm path "*) cat "$LOG/pm" ;;
+  "shell dumpsys activity service "*) cat "$LOG/dump" ;;
+  "shell am start-foreground-service "*)
+    printf '%s\n' "$cmd" >>"$LOG/actions"
+    case $cmd in
+      *action.STOP*) : >"$LOG/dump" ;;
+      *action.START*)
+        if [ -f "$LOG/gated" ]; then
+          printf '  state       "laptop" not listening: on another network\n' >"$LOG/dump"
+        else
+          printf '  state       "laptop" listening on 0.0.0.0:1081 · 0 clients\n' >"$LOG/dump"
+        fi
         ;;
     esac
     ;;
 esac
 EOF
 sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/adb"
-
-cat >"$STUBS/phone-unlock" <<'EOF'
-#!/usr/bin/env bash
-exit 0
-EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/phone-unlock"
-
-# The script bounds `adb shell uiautomator dump` with `timeout 20`; run it.
-cat >"$STUBS/timeout" <<'EOF'
-#!/usr/bin/env bash
-if [ "${1:-}" = "20" ]; then shift; exec "$@"; fi
-exit 0
-EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/timeout"
-
-chmod +x "$STUBS/adb" "$STUBS/phone-unlock" "$STUBS/timeout"
+chmod +x "$STUBS"/*
 export PATH="$STUBS:$PATH"
-
-fresh_state() {
-  printf 'false\n' >"$LOG/keyguard"
-  rm -f "$LOG/running" "$LOG/failed" "$LOG/fail" "$LOG/input.log"
-}
 
 run() {
   "$BASH_BIN" "$SCRIPT" "$@" >"$LOG/out" 2>&1
 }
 
-# 1. --check on a locked phone fails fast, read-only.
-fresh_state
-printf 'true\n' >"$LOG/keyguard"
-if run --check; then
-  bad "--check fails on a locked phone"
-else
-  ok "--check fails on a locked phone"
-fi
-grep -q 'phone is locked; run phone-unlock' "$LOG/out" && ok "locked message names phone-unlock" \
-  || bad "locked message names phone-unlock" "$(cat "$LOG/out")"
-[ ! -f "$LOG/input.log" ] && ok "locked --check taps nothing" || bad "locked --check taps nothing"
+fresh() {
+  printf 'package:/data/app/base.apk\n' >"$LOG/pm"
+  : >"$LOG/dump"
+  : >"$LOG/actions"
+  rm -f "$LOG/gated"
+}
 
-# 2. --check reports a stopped proxy and exits 1.
-fresh_state
-if run --check; then
-  bad "--check exits 1 when stopped"
-else
-  ok "--check exits 1 when stopped"
-fi
-grep -q 'proxy is stopped' "$LOG/out" && ok "--check says it is stopped" \
-  || bad "--check says it is stopped" "$(cat "$LOG/out")"
-[ ! -f "$LOG/input.log" ] && ok "--check taps nothing when stopped" || bad "--check taps nothing when stopped"
+# 1. --check says it is stopped, and changes nothing.
+fresh
+if run --check; then bad "--check on a stopped proxy exits 1"; else ok "--check on a stopped proxy exits 1"; fi
+grep -q 'proxy is not listening (stopped)' "$LOG/out" && ok "says it is not listening" \
+  || bad "says it is not listening" "$(cat "$LOG/out")"
+[ -s "$LOG/actions" ] && bad "--check sends nothing" || ok "--check sends nothing"
 
-# 3. --check exits 0 and taps nothing when already running.
-: >"$LOG/running"
-if run --check; then
-  ok "--check exits 0 when running"
-else
-  bad "--check exits 0 when running" "$(cat "$LOG/out")"
-fi
-grep -q 'proxy is already running' "$LOG/out" && ok "--check says it is running" \
-  || bad "--check says it is running" "$(cat "$LOG/out")"
-[ ! -f "$LOG/input.log" ] && ok "--check taps nothing when running" || bad "--check taps nothing when running"
+# 2. --check on a listening proxy is 0.
+fresh
+printf '  state       "laptop" listening on 0.0.0.0:1081 · 2 clients\n' >"$LOG/dump"
+if run --check; then ok "--check on a listening proxy exits 0"; else bad "--check on a listening proxy exits 0" "$(cat "$LOG/out")"; fi
+grep -q 'already listening ("laptop" listening on 0.0.0.0:1081' "$LOG/out" \
+  && ok "quotes what the service says" || bad "quotes what the service says" "$(cat "$LOG/out")"
 
-# 4. A stopped proxy is started with one tap.
-fresh_state
-if run; then
-  ok "start exits 0"
-else
-  bad "start exits 0" "$(cat "$LOG/out")"
-fi
-grep -q 'tap 720 1700' "$LOG/input.log" && ok "start taps the Start button" \
-  || bad "start taps the Start button" "$(cat "$LOG/input.log" 2>/dev/null)"
-[ -f "$LOG/running" ] && ok "proxy is running afterwards" || bad "proxy is running afterwards"
-grep -q 'proxy started' "$LOG/out" && ok "start reports success" \
-  || bad "start reports success" "$(cat "$LOG/out")"
+# 3. A start is the app's own intent, naming the service by its component.
+fresh
+if run; then ok "start exits 0"; else bad "start exits 0" "$(cat "$LOG/out")"; fi
+grep -q 'am start-foreground-service -n org.phonelink.proxy/org.phonelink.proxy.ProxyService -a org.phonelink.proxy.action.START$' \
+  "$LOG/actions" && ok "sends START to the app's service" || bad "sends START to the app's service" "$(cat "$LOG/actions")"
+grep -q 'proxy started ("laptop" listening' "$LOG/out" && ok "says it started" \
+  || bad "says it started" "$(cat "$LOG/out")"
 
-# 5. Starting an already running proxy taps nothing.
-if run; then
-  ok "second start exits 0"
-else
-  bad "second start exits 0" "$(cat "$LOG/out")"
-fi
-grep -q 'proxy is already running' "$LOG/out" && ok "second start says already running" \
-  || bad "second start says already running" "$(cat "$LOG/out")"
-[ "$(grep -c 'tap ' "$LOG/input.log")" = 1 ] && ok "second start taps nothing" \
-  || bad "second start taps nothing" "$(cat "$LOG/input.log")"
+# 4. Starting something already listening sends nothing.
+fresh
+printf '  state       "laptop" listening on 0.0.0.0:1081 · 0 clients\n' >"$LOG/dump"
+if run; then ok "starting a running proxy exits 0"; else bad "starting a running proxy exits 0" "$(cat "$LOG/out")"; fi
+[ -s "$LOG/actions" ] && bad "a running proxy is not restarted" || ok "a running proxy is not restarted"
 
-# 6. A failed start is reported instead of waiting forever.
-fresh_state
-: >"$LOG/fail"
-if run; then
-  bad "failed start exits 1"
-else
-  ok "failed start exits 1"
-fi
-grep -q 'proxy failed to start' "$LOG/out" && ok "failed start explains the status" \
-  || bad "failed start explains the status" "$(cat "$LOG/out")"
-[ ! -f "$LOG/running" ] && ok "failed start leaves the proxy stopped" || bad "failed start leaves the proxy stopped"
+# 5. A gate that says "another network" is the reason, not a mystery.
+fresh
+: >"$LOG/gated"
+if run; then bad "a gated start exits 1"; else ok "a gated start exits 1"; fi
+grep -q 'SSID gate does not match' "$LOG/out" && ok "names the SSID gate" \
+  || bad "names the SSID gate" "$(cat "$LOG/out")"
 
-# 7. --help exits 0.
+# 6. An app that is not installed is said plainly.
+fresh
+: >"$LOG/pm"
+if run; then bad "a missing app exits 1"; else ok "a missing app exits 1"; fi
+grep -q 'org.phonelink.proxy is not installed; run phone-proxy-install first' "$LOG/out" \
+  && ok "says which app and how to install it" || bad "says which app and how to install it" "$(cat "$LOG/out")"
+
+# 7. --help and unknown arguments.
+fresh
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
+if run --bogus; then bad "unknown argument exits 1"; else ok "unknown argument exits 1"; fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

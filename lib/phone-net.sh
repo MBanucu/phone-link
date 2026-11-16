@@ -24,7 +24,9 @@ PHONE_HOTSPOT_SSID=${PHONE_HOTSPOT_SSID:-$PHONE_HOTSPOT_CON}
 PHONE_AP_SUBNET=${PHONE_AP_SUBNET:-192.168.77.0/24}
 PHONE_PROXY_PORT=${PHONE_PROXY_PORT:-1080}
 PHONE_PROXY_USER=${PHONE_PROXY_USER:-proxy}
-PHONE_PROXY_PKG=${PHONE_PROXY_PKG:-com.tokyoxpa3.androidproxy}
+# The app in android/ is the proxy; set PHONE_PROXY_PKG to
+# com.tokyoxpa3.androidproxy to drive the vendored one instead.
+PHONE_PROXY_PKG=${PHONE_PROXY_PKG:-org.phonelink.proxy}
 PHONE_ADB_PORT=${PHONE_ADB_PORT:-5555}
 PHONE_SECRETS=${PHONE_SECRETS:-/etc/nixos/phone-socks-secrets}
 # The ambulance box: a root-owned cache of the proxy APK, kept so the proxy

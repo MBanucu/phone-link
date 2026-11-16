@@ -73,13 +73,16 @@ for stub in "$WORK/stub/adb" "$WORK/stub/curl"; do
   sed -i "1s|.*|#!${BASH}|" "$stub"
 done
 
+# --fdroid is for the vendored app, which is the one a store still has; the
+# default package is this checkout's own build.
 run() {
   HOME="$WORK/home" PATH="$WORK/stub:$PATH" PHONE_APK_DIR="$WORK/cache" \
-    bash "$SCRIPT" "$@" 2>&1
+    PHONE_PROXY_PKG=com.tokyoxpa3.androidproxy bash "$SCRIPT" "$@" 2>&1
 }
 
 run_absent() {
   HOME="$WORK/home" PATH="$WORK/stub:$PATH" PHONE_APK_DIR="$WORK/cache" \
+    PHONE_PROXY_PKG=com.tokyoxpa3.androidproxy \
     ADB_STUB_ABSENT=1 bash "$SCRIPT" "$@" 2>&1
 }
 

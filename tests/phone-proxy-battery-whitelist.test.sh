@@ -33,7 +33,7 @@ case "${args[0]:-}" in
       "pm path") [ -f "$LOG/installed" ] && printf 'package:/data/app/x/base.apk\n' ;;
       "dumpsys deviceidle")
         if [ -f "$LOG/whitelisted" ]; then
-          printf 'user,com.tokyoxpa3.androidproxy,10300\n'
+          printf 'user,org.phonelink.proxy,10300\n'
         else
           printf 'user,com.example.other,10100\n'
         fi
@@ -41,7 +41,7 @@ case "${args[0]:-}" in
       "cmd deviceidle")
         printf '%s\n' "${args[*]:1}" >>"$LOG/whitelist.log"
         : >"$LOG/whitelisted"
-        printf 'Added: com.tokyoxpa3.androidproxy\n'
+        printf 'Added: org.phonelink.proxy\n'
         ;;
       *) : ;;
     esac
@@ -74,7 +74,7 @@ if run; then
 else
   bad "add exits 0" "$(cat "$LOG/out")"
 fi
-grep -qF 'deviceidle whitelist +com.tokyoxpa3.androidproxy' "$LOG/whitelist.log" \
+grep -qF 'deviceidle whitelist +org.phonelink.proxy' "$LOG/whitelist.log" \
   && ok "exact cmd deviceidle argv" || bad "exact cmd deviceidle argv" "$(cat "$LOG/whitelist.log" 2>/dev/null)"
 [ -f "$LOG/whitelisted" ] && ok "app is whitelisted afterwards" || bad "app is whitelisted afterwards"
 grep -q 'Doze will now leave' "$LOG/out" && ok "effect is explained" || bad "effect is explained"
