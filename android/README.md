@@ -66,9 +66,10 @@ dev shell. `debug.keystore` is tracked in the repository, so every build —
 local or in the sandbox — carries the same signature and `adb install -r`
 updates the sideloaded app instead of failing with
 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`. It is a throwaway debug key: never ship
-this app with it. `build/` stays ignored. Before the key was tracked, each
-`nix build` generated its own and every install needed an uninstall, which also
-deleted the app's stored configuration.
+this app with it — `build.sh` signs with a key of your own when one is named in
+the environment, see below. `build/` stays ignored. Before the key was tracked,
+each `nix build` generated its own and every install needed an uninstall, which
+also deleted the app's stored configuration.
 
 `nix flake check` builds the same APK in the sandbox (`proxy-apk`), and
 `nix build .#proxy-apk` gives the artifact without a phone. Three APKs come out:
@@ -76,6 +77,43 @@ the app, `capture.apk` (the accessibility dumper the live harness reads the
 screen from) and `devicetest.apk` (the instrumentation that runs the panel's own
 checks inside the app's process). Only the first is the proxy; the other two are
 installed by a test run and removed by it.
+
+### Signing a release
+
+The debug key is tracked here, so anyone can sign an update with it; an APK for
+other people is signed with a key that is not:
+
+```sh
+PHONE_APP_KEYSTORE=~/keys/phone-link.jks PHONE_APP_KEY_ALIAS=phonelink \
+PHONE_APP_KEYSTORE_PASS=... PHONE_APP_KEY_PASS=... \
+  nix develop .#android -c ./android/build.sh
+```
+
+The four variables are the keystore (JKS or PKCS12), the alias inside it and the
+two passwords, the key's being optional when it is the store's. They reach
+`apksigner` as `env:` references, so no password appears in a process listing or
+in the log of the job that ran the build. With `PHONE_APP_KEYSTORE` unset,
+nothing changes: the debug key signs and the phone updates in place.
+
+Generate a release key once and keep it somewhere it cannot be lost — the same
+key is the only way to update an installed app in place, so a lost keystore
+means every phone has to uninstall and loses its saved proxies:
+
+```sh
+keytool -genkeypair -keystore phone-link.jks -storetype PKCS12 \
+  -alias phonelink -keyalg RSA -keysize 2048 -validity 10000 \
+  -dname "CN=phone-link release"
+```
+
+Tagging publishes an APK. `.github/workflows/release.yml` runs on a `v*` tag,
+builds from the tagged tree with the repository's release secrets
+(`ANDROID_KEYSTORE`, the keystore file base64-encoded because a secret is text,
+plus `ANDROID_KEYSTORE_PASS`, `ANDROID_KEY_ALIAS` and optionally
+`ANDROID_KEY_PASS`), reads the certificate out of the finished APK and refuses
+to publish if it is the debug one, then attaches
+`phone-link-proxy-<version>.apk` and its `.sha256` to the release for the tag.
+The version in the name is the app's `android:versionName`, not the flake's:
+the two are versioned separately.
 
 ## Tests
 

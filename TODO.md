@@ -47,9 +47,9 @@ list is empty.
   drive this app and nothing else. What stays: the NixOS module, the
   scripts, the GUI.
 
-  Then the distribution, which is most of the work: signed release builds in
-  CI on a tag (the keystore as a CI secret — not the throwaway debug key
-  this repository tracks), an AAB for Google Play beside the APK, a
+  Then the distribution, which is most of the work: an AAB for Google Play
+  beside the APK (a tag already publishes a signed APK —
+  `.github/workflows/release.yml` with the keystore as a repository secret), a
   `fastlane` metadata tree with description, screenshots and per-version
   changelogs, and the stores themselves. F-Droid first: it is the natural
   home for a dependency-free FOSS app that already builds from source with
@@ -102,3 +102,40 @@ list is empty.
   can be imported again, and a schema change costs a re-import and not a
   reopened history. SQLite in `result-live/` would do: one file, no daemon,
   and `sqlite3` reads it without the project.
+
+## The doctor's live test leaves the daily proxy alone
+
+- [ ] `tests/live/doctor-fix-proxy.sh` breaks the setup on the one app the phone
+  lives on: it uninstalls `org.phonelink.proxy`, so a run costs the phone the
+  proxies it had saved and reconfiguring afterwards. The app's own harness
+  already solved this — `tests/live/proxy-app.sh` drives
+  `org.phonelink.proxy.test` out of `phone-link-proxy-test.apk` and never
+  touches the daily build — and the doctor's harness only needs the same
+  package. What stands in the way is the repair, not the driver: the doctor
+  reads `PHONE_PROXY_PKG`, but `phone-proxy-install` installs whatever
+  application id the APK carries and `app_apk()` hands it the production build,
+  so "reinstall the app" would put the daily proxy back and leave the test one
+  gone — a repair of a package the check it was fixing was not measuring. The
+  fix should install the APK that matches `PHONE_PROXY_PKG` (the test build for
+  the test package, the tree's build otherwise), the harness should run as the
+  test package and install it first, and the daily app should still be
+  listening on its own port at the end, which the run can require.
+
+## The live doctor test needs a route that survives itself
+
+- [ ] `tests/live/doctor-fix-proxy.sh` is the one live test that takes the
+  wireless route away from under itself: step 3 drops the laptop AP, and the
+  phone's adb rides on it (`adb devices` has a single `192.168.77.232:<port>`
+  transport here), so from that step to the AP coming back — the uninstall, the
+  doctor's complaints, `phone-doctor-fix --yes --required`, and the exit trap
+  that is supposed to put everything back — every adb call is addressed to a
+  transport that no longer answers. What it checks before dropping is the USB
+  *tether* (`rndis0` has an address), which is not the same thing: adb can be
+  up only over Wi-Fi with the tether sitting there, and the run then cuts its
+  own link and cannot restore anything. It should require a route that outlives
+  the drop before it drops anything — an adb transport that is a USB serial
+  rather than a `host:port` one, or the phone answering at the tether address —
+  and skip with the reason (cable, `phone-adb-wifi`) when neither is there, the
+  way `tests/live/proxy-app.sh` already refuses to start on a link it cannot
+  reach. `phone.sh`'s `adb_link` recovery is the other half of this: mDNS finds
+  a rotated wireless port, but not a phone that left the network.

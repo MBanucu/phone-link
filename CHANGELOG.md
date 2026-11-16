@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A tag publishes an installable APK. The app was built locally or not at all:
+  the GitHub releases were notes for the flake with no assets, and the only
+  signature a build carried was the debug key tracked in this repository, which
+  anyone could sign an update with. `android/build.sh` now signs with a key
+  named in the environment — `PHONE_APP_KEYSTORE`, its alias and the two
+  passwords, which reach `apksigner` as `env:` references so neither shows up in
+  a process listing or a build log — and `.github/workflows/release.yml` runs on
+  a `v*` tag, builds from the tagged tree with the release key kept in
+  repository secrets, reads the certificate back out of the finished APK and
+  refuses to publish if it is the debug one, then attaches
+  `phone-link-proxy-<version>.apk` and its `.sha256` to the release for the tag.
+  A checkout without a release key is unaffected: it still builds the
+  debug-signed APK the phone updates in place with.
+
 - A live run says how much of it is left. `result-live/timings.csv` kept one row
   per step per run and was only ever read after the fact; the harness now prices
   the steps it is about to take at the median of their last five runs, marks a

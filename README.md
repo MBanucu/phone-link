@@ -447,9 +447,13 @@ what it is doing — so a start needs no screen, keyguard or taps. The vendored
 F-Droid app still works with `PHONE_PROXY_PKG=com.tokyoxpa3.androidproxy`, and
 its uninstall and data-clear are the same commands.
 
-The app's APK is built from this tree, so there is nothing to download. For a
-phone that still runs the vendored F-Droid app, that app is on F-Droid and the
-script can use it as an update channel:
+The app's APK is built from this tree, and a tagged release carries it: a `v*`
+tag builds `android/build.sh` in CI, signs with the release key from the
+repository's secrets and attaches `phone-link-proxy-<version>.apk` (with its
+`.sha256`) to the release — `android/README.md` has the four secrets that needs.
+There is nothing to fetch otherwise. For a phone that still runs the vendored
+F-Droid app, that app is on F-Droid and the script can use it as an update
+channel:
 
 ```sh
 phone-proxy-install --fdroid            # download the suggested version, install

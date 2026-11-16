@@ -58,12 +58,45 @@ echo "platform:    $android_jar"
 rm -rf "$build"
 mkdir -p "$build"
 
-# One fixed key, tracked in the repository, so every build carries the same
-# signature and `adb install -r` updates the app instead of refusing it. Only
-# generated when the file is missing, e.g. in a checkout that lost it; the key
-# is a throwaway debug key, which is why nothing here is secret.
+# Signing. Two keys, one code path: `debug.keystore`, tracked in the repository,
+# so every build carries the same signature and `adb install -r` updates the app
+# instead of refusing it; and, when one is named in the environment, a release
+# key, which is what an APK meant for other people is signed with.
+#
+#   PHONE_APP_KEYSTORE       the keystore file (JKS or PKCS12)
+#   PHONE_APP_KEY_ALIAS      the key inside it
+#   PHONE_APP_KEYSTORE_PASS  its store password
+#   PHONE_APP_KEY_PASS       the key's password, if it is not the store's
+#
+# The passwords reach apksigner as `env:` references, so neither appears in a
+# process listing or in the log of the job that built the release.
 keystore="$here/debug.keystore"
-if [ ! -f "$keystore" ]; then
+key_alias=androiddebugkey
+ks_pass=pass:android
+key_pass=pass:android
+if [ -n "${PHONE_APP_KEYSTORE:-}" ]; then
+    keystore=$PHONE_APP_KEYSTORE
+    key_alias=${PHONE_APP_KEY_ALIAS:-}
+    ks_pass=env:PHONE_APP_KEYSTORE_PASS
+    key_pass=${PHONE_APP_KEY_PASS:+env:PHONE_APP_KEY_PASS}
+    if [ ! -f "$keystore" ]; then
+        echo "build.sh: PHONE_APP_KEYSTORE is not a file: $keystore" >&2
+        exit 2
+    fi
+    if [ -z "$key_alias" ]; then
+        echo "build.sh: PHONE_APP_KEY_ALIAS is required with PHONE_APP_KEYSTORE" >&2
+        exit 2
+    fi
+    if [ -z "${PHONE_APP_KEYSTORE_PASS:-}" ]; then
+        echo "build.sh: PHONE_APP_KEYSTORE_PASS is required with PHONE_APP_KEYSTORE" >&2
+        exit 2
+    fi
+fi
+
+# The debug key is a throwaway, which is why nothing here is secret; it is only
+# generated when the file is missing, e.g. in a checkout that lost it, and never
+# when a release key is what will sign the build.
+if [ -z "${PHONE_APP_KEYSTORE:-}" ] && [ ! -f "$keystore" ]; then
     keytool -genkeypair \
         -keystore "$keystore" -storepass android -keypass android \
         -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
@@ -122,10 +155,11 @@ build_apk() {
     "$build_tools/zipalign" -f -p 4 "$work/base.apk" "$work/aligned.apk"
 
     apk="$build/$name.apk"
-    "$build_tools/apksigner" sign \
-        --ks "$keystore" --ks-pass pass:android --key-pass pass:android \
-        --ks-key-alias androiddebugkey \
-        --out "$apk" "$work/aligned.apk"
+    set -- --ks "$keystore" --ks-pass "$ks_pass" --ks-key-alias "$key_alias"
+    if [ -n "$key_pass" ]; then
+        set -- "$@" --key-pass "$key_pass"
+    fi
+    "$build_tools/apksigner" sign "$@" --out "$apk" "$work/aligned.apk"
     "$build_tools/apksigner" verify --print-certs "$apk" | head -3
 
     echo "built $apk ($(wc -c < "$apk") bytes)"
