@@ -70,7 +70,7 @@ def _version_tuple(text: str) -> tuple[int, ...]:
     return tuple(numbers)
 
 
-def _latest_tag(ctx: Context) -> str:
+def _latest_tag(ctx: Context, installed: str) -> str:
     """The newest release tag, read once a day; "" when it cannot be read.
 
     The one check that asks a network question, because "is this release the
@@ -90,7 +90,10 @@ def _latest_tag(ctx: Context) -> str:
                 tag = handle.read().strip()
     except OSError:
         pass
-    if tag:
+    # A cached tag that is not newer than what is installed is stale by
+    # definition — a release landed since or the phone is ahead of this tree —
+    # so it is worth one question rather than a day of a misleading answer.
+    if tag and _version_tuple(tag) > _version_tuple(installed):
         return tag
     repo = ctx.get("PHONE_LINK_REPO", "MBanucu/phone-link")
     proc = ctx.run(
@@ -207,7 +210,7 @@ def check(ctx: Context) -> list[Result]:
                     f"{tree_name or '?'} ({tree_code}); run phone-proxy-install",
                 )
             )
-        latest = _latest_tag(ctx) if version else ""
+        latest = _latest_tag(ctx, version) if version else ""
         if not version:
             pass
         elif not latest:

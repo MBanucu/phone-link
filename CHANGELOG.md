@@ -43,6 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The release check refetches instead of trusting a stale answer: a cached tag
+  that is not newer than the installed build cannot be the newest one, so the
+  doctor asks again rather than saying "nothing newer than v0.9.0" to a phone
+  running 0.9.1 for the rest of the day.
+
 - The flake packages every script in `bin/` instead of a typed list. The list
   had already drifted — `phone-proxy-boot` was in `bin/` and in the action
   registry but not in the package, so it worked from a checkout and did not
