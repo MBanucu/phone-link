@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The installer knows about the release APK, and about the key it is signed
+  with. A tagged release is the signed copy of this app, but the only way to get
+  it was `gh release download` and the only way onto it from a locally built
+  install was an uninstall the error never mentioned: adb says
+  `INSTALL_FAILED_UPDATE_INCOMPATIBLE` and the script said "adb install failed".
+  `phone-proxy-install --release [TAG]` downloads the release's APK, checks the
+  `.sha256` beside it and installs it from the cache; `--replace-signer` removes
+  the installed copy first, saying what that costs (the app's saved proxies),
+  and asking unless `--yes`; and a refused install now names the cause and the
+  flag instead of the symptom.
+
 ## [0.5.0] - 2026-11-16
 
 ### Added

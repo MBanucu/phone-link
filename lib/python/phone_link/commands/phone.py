@@ -7,6 +7,7 @@ bare `adb` refuses to choose between them.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import sys
@@ -14,7 +15,11 @@ import time
 from pathlib import Path
 
 from .. import phone, settings
-from ..shell import capture, die, have, log, run_text, status
+from ..shell import capture, die, have, log, run_both, run_text, status
+
+# The repository a release is published from: --release reads its latest
+# release, or the tag it is given, rather than guessing at F-Droid or GitHub.
+PHONE_LINK_REPO = os.environ.get("PHONE_LINK_REPO", "MBanucu/phone-link")
 
 USAGE_MOBILE_DATA = """usage: phone-fix-mobile-data [--check]
 
@@ -60,6 +65,7 @@ and refuses in a non-interactive shell. --check only reports what would go.
 
 USAGE_INSTALL = """usage: phone-proxy-install [APK...]
        phone-proxy-install --fdroid [--check]
+       phone-proxy-install --release [TAG]
        phone-proxy-install --pull [DIR]
        phone-proxy-install --status
        phone-proxy-install --check APK
@@ -68,11 +74,18 @@ Installs or updates the phone's SOCKS proxy app over adb (-r -g) — with no
 argument, the APK this checkout builds (`android/build.sh` writes it) — pulls
 the installed APK off the phone for later reinstalls, or reports what is
 installed. --fdroid fetches the vendored proxy from F-Droid instead, for a
-phone that still runs it.
+phone that still runs it; --release takes the APK attached to a release of this
+repository (the latest one, or the tag given), and checks the .sha256 beside it
+before installing it.
 
---fdroid caches downloads in $PHONE_APK_DIR, defaulting to
+An app signed with a different key cannot be updated in place — adb refuses the
+install — so --replace-signer uninstalls it first. That also clears the app's
+saved proxies; --yes skips the prompt. It is what a phone moving from a locally
+built APK to a signed release needs, once.
+
+Downloads are cached in $PHONE_APK_DIR, defaulting to
 $XDG_CACHE_HOME/phone-link (or ~/.cache/phone-link), named
-<pkg>-<version>-<code>.apk.
+<pkg>-<version>-<code>.apk for F-Droid and after the release's asset otherwise.
 """
 
 USAGE_ADB_WIFI = """usage: phone-adb-wifi [--legacy | --tls] [--check]
@@ -587,6 +600,9 @@ def phone_proxy_install(args: list[str]) -> int:
     """Install, update, pull or report the phone's SOCKS proxy app."""
     mode = "install"
     use_fdroid = False
+    use_release = False
+    replace_signer = False
+    assume_yes = False
     extra: list[str] = []
     index = 0
     while index < len(args):
@@ -601,6 +617,12 @@ def phone_proxy_install(args: list[str]) -> int:
             mode = "install"
         elif value == "--fdroid":
             use_fdroid = True
+        elif value == "--release":
+            use_release = True
+        elif value == "--replace-signer":
+            replace_signer = True
+        elif value in ("-y", "--yes"):
+            assume_yes = True
         elif value in ("-h", "--help"):
             print(USAGE_INSTALL, end="", file=sys.stderr)
             return 0
@@ -620,6 +642,14 @@ def phone_proxy_install(args: list[str]) -> int:
         die("--pull reads the phone, not F-Droid; drop --fdroid")
     if use_fdroid and extra:
         die("--fdroid fetches the APK itself; drop the path argument")
+    if use_fdroid and use_release:
+        die("--fdroid and --release both fetch an APK; pick one")
+    if use_release and mode in ("status", "pull"):
+        die(f"--{mode} does not download; drop --release")
+    if use_release and len(extra) > 1:
+        die("--release takes one tag at most")
+    if replace_signer and mode == "check":
+        die("--check installs nothing; drop --replace-signer")
 
     serial = _serial()
     package = settings.PHONE_PROXY_PKG
@@ -677,6 +707,79 @@ def phone_proxy_install(args: list[str]) -> int:
             return str(files[0])
         return None
 
+    def cache_dir() -> str:
+        return os.environ.get("PHONE_APK_DIR") or (
+            os.path.join(
+                os.environ.get("XDG_CACHE_HOME") or os.path.join(
+                    os.environ.get("HOME", ""), ".cache"
+                ),
+                "phone-link",
+            )
+        )
+
+    def download(url: str, destination: str, *, timeout: float = 330) -> bool:
+        """Fetch url to destination, writing nothing when it fails."""
+        code, _ = run_text(
+            ["curl", "-fsSL", "--max-time", "300", "-o", f"{destination}.part", url],
+            timeout=timeout,
+        )
+        if code != 0:
+            try:
+                os.unlink(f"{destination}.part")
+            except OSError:
+                pass
+            return False
+        return True
+
+    def release_apk() -> str:
+        """The APK attached to a release of this repository, checked."""
+        tag = extra[0] if extra else ""
+        wanted = tag or "latest"
+        api = (
+            f"https://api.github.com/repos/{PHONE_LINK_REPO}/releases/tags/{tag}"
+            if tag
+            else f"https://api.github.com/repos/{PHONE_LINK_REPO}/releases/latest"
+        )
+        code, body = run_text(["curl", "-fsSL", "--max-time", "30", api], timeout=40)
+        if code != 0:
+            die(f"cannot read the {wanted} release of {PHONE_LINK_REPO}")
+        # The release's assets are the only thing needed from the document, and
+        # the APK is the one asset without a suffix.
+        urls = re.findall(r'"browser_download_url":\s*"([^"]+)"', body)
+        apk_url = next((url for url in urls if url.endswith(".apk")), "")
+        if not apk_url:
+            die(f"the {wanted} release of {PHONE_LINK_REPO} has no APK attached")
+        name = apk_url.rsplit("/", 1)[-1]
+        log(f"release: {wanted} ({name})")
+
+        cache = cache_dir()
+        file = os.path.join(cache, name)
+        if os.path.isfile(file) and os.path.getsize(file) > 0:
+            log(f"cached: {file}")
+            return file
+        os.makedirs(cache, exist_ok=True)
+        if not download(apk_url, file):
+            die(f"download failed: {apk_url}")
+
+        # A release carries the checksum beside the APK; without one there is
+        # nothing to compare, which is said rather than passed over.
+        expected = ""
+        code, sums = run_text(["curl", "-fsSL", "--max-time", "30", apk_url + ".sha256"], timeout=40)
+        if code == 0 and sums.strip():
+            expected = sums.split()[0]
+        with open(f"{file}.part", "rb") as handle:
+            digest = hashlib.sha256(handle.read()).hexdigest()
+        if expected:
+            if digest != expected:
+                os.unlink(f"{file}.part")
+                die(f"checksum mismatch for {name}: downloaded {digest}, release says {expected}")
+            log(f"checksum: {digest} matches the release")
+        else:
+            log("warning: the release carries no .sha256; the download is unchecked")
+        os.replace(f"{file}.part", file)
+        log(f"downloaded: {file} ({os.path.getsize(file)} bytes)")
+        return file
+
     def fdroid_latest() -> str:
         api = f"https://f-droid.org/api/v1/packages/{package}"
         code, body = run_text(["curl", "-fsSL", "--max-time", "30", api], timeout=40)
@@ -692,14 +795,7 @@ def phone_proxy_install(args: list[str]) -> int:
         name = name_match.group(1) if name_match else ""
         log(f"F-Droid: {name or 'versionCode ' + version_code} (versionCode {version_code})")
 
-        cache = os.environ.get("PHONE_APK_DIR") or (
-            os.path.join(
-                os.environ.get("XDG_CACHE_HOME") or os.path.join(
-                    os.environ.get("HOME", ""), ".cache"
-                ),
-                "phone-link",
-            )
-        )
+        cache = cache_dir()
         # Keyed by versionCode too: a rebuild can keep versionName and still
         # be new.
         file = os.path.join(
@@ -751,13 +847,25 @@ def phone_proxy_install(args: list[str]) -> int:
         return 0
 
     def install_apks(apks: list[str]) -> None:
-        if len(apks) == 1:
-            if status(["adb", "-s", serial, "install", "-r", "-g", apks[0]]) != 0:
-                die("adb install failed")
-        elif (
-            status(["adb", "-s", serial, "install-multiple", "-r", "-g", *apks]) != 0
-        ):
-            die("adb install-multiple failed")
+        one = len(apks) == 1
+        argv = (
+            ["adb", "-s", serial, "install", "-r", "-g", apks[0]]
+            if one
+            else ["adb", "-s", serial, "install-multiple", "-r", "-g", *apks]
+        )
+        # adb says why it refused; the reason decides what to say next, so the
+        # output is kept and printed rather than dropped.
+        code, output = run_both(argv, timeout=300)
+        if output.strip():
+            log(output.strip())
+        if code != 0:
+            if "INSTALL_FAILED_UPDATE_INCOMPATIBLE" in output or "ignature" in output:
+                die(
+                    "the installed app is signed with a different key, so adb "
+                    "cannot update it in place: --replace-signer uninstalls it "
+                    "first (which clears the app's saved proxies)"
+                )
+            die("adb install failed" if one else "adb install-multiple failed")
         grant_settings()
 
     def grant_settings() -> None:
@@ -795,7 +903,9 @@ def phone_proxy_install(args: list[str]) -> int:
         return pull_apks(extra[0] if extra else os.path.join(os.getcwd(), "apk"))
 
     local_apks: list[str] = []
-    if use_fdroid:
+    if use_release:
+        local_apks = [release_apk()]
+    elif use_fdroid:
         local_apks = [fdroid_latest()]
     elif extra:
         local_apks = list(extra)
@@ -817,6 +927,24 @@ def phone_proxy_install(args: list[str]) -> int:
     if mode == "check":
         log("check only; nothing installed")
         return 0
+
+    # An app signed with another key cannot be updated in place; the only way
+    # onto a differently signed build is to remove the old one, and the app's
+    # data goes with it. Said before it happens, and asked about unless --yes.
+    if replace_signer and remote_paths():
+        log(
+            f"{package} is installed: replacing it with a differently signed "
+            "build uninstalls it first, which clears the app's saved proxies"
+        )
+        if not assume_yes:
+            if not sys.stdin.isatty():
+                die("refusing to replace the app without --yes (not a terminal)")
+            if not _confirm_stdin(f"Uninstall {package} and install over it? [y/N] "):
+                log("aborted")
+                return 1
+        if status(["adb", "-s", serial, "uninstall", package]) != 0:
+            die("adb uninstall failed")
+        log(f"uninstalled {package}")
 
     install_apks(local_apks)
     show_status()

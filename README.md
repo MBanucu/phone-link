@@ -100,7 +100,7 @@ Or straight from the checkout: `./bin/phone-net-status`.
 | `phone-fix-mobile-data` | enable the phone's mobile data and wait for a default route (`--check` reports only) |
 | `phone-fix-tunnel` | start `phone-tun`, or restart it when its route is missing, and wait for the route (`--check` reports only) |
 | `phone-proxy-check` | request through the proxy on the hotspot and AP addresses (needs root for the secret) |
-| `phone-proxy-install` | install/update the proxy app — this checkout's build (`android/build/phone-link-proxy.apk`) unless an APK is named; `--fdroid` fetches the vendored F-Droid app instead, `--pull` copies the installed APK off the phone, `--status` reports the version |
+| `phone-proxy-install` | install/update the proxy app — this checkout's build (`android/build/phone-link-proxy.apk`) unless an APK is named; `--release [TAG]` takes the APK attached to a release of this repository (checksum checked), `--fdroid` fetches the vendored F-Droid app instead, `--replace-signer` uninstalls a differently signed copy first (which clears its data), `--pull` copies the installed APK off the phone, `--status` reports the version |
 | `phone-proxy-uninstall` | remove the proxy app (`--check` previews, `--keep-data` keeps app data, `--yes` skips the prompt) |
 | `phone-proxy-data-clear` | wipe the proxy app's data, back to port 1080 with no auth (`--check` previews, `--yes` skips the prompt) |
 | `phone-proxy-battery-whitelist` | add the proxy app to the device-idle (Doze) whitelist so the proxy is not killed with the screen off (`--check` only reports) |
@@ -451,9 +451,19 @@ The app's APK is built from this tree, and a tagged release carries it: a `v*`
 tag builds `android/build.sh` in CI, signs with the release key from the
 repository's secrets and attaches `phone-link-proxy-<version>.apk` (with its
 `.sha256`) to the release — `android/README.md` has the four secrets that needs.
-There is nothing to fetch otherwise. For a phone that still runs the vendored
-F-Droid app, that app is on F-Droid and the script can use it as an update
-channel:
+`phone-proxy-install --release` installs it without leaving the checkout:
+
+```sh
+phone-proxy-install --release              # the latest release's APK
+phone-proxy-install --release v0.5.0       # a particular tag
+phone-proxy-install --release --replace-signer
+```
+
+That last one is for a phone whose app was built locally: the debug key is a
+different signature, so adb refuses to update in place and the app has to go
+first — which clears its saved proxies. There is nothing to fetch otherwise.
+For a phone that still runs the vendored F-Droid app, that app is on F-Droid and
+the script can use it as an update channel:
 
 ```sh
 phone-proxy-install --fdroid            # download the suggested version, install

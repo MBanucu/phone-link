@@ -115,6 +115,28 @@ def run(argv: Sequence[str], *, timeout: float | None = None) -> int:
         return 127
 
 
+def run_both(argv: Sequence[str], *, timeout: float = DEFAULT_TIMEOUT) -> tuple[int, str]:
+    """Run a command and return (status, stdout and stderr together).
+
+    Unlike `run_text` there is no retry and nothing is dropped: the caller needs
+    the failing command's own words, and repeating a command that takes a
+    decision (an install) to see them twice is not a kindness.
+    """
+    try:
+        done = subprocess.run(
+            adb.prepare(argv),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return 127, ""
+    return done.returncode, done.stdout.rstrip("\n")
+
+
 def must(argv: Sequence[str], *, timeout: float | None = None) -> None:
     """Run a command that has to succeed, as `set -e` enforced in bash."""
     code = run(argv, timeout=timeout)

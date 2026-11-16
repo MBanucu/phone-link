@@ -115,6 +115,11 @@ to publish if it is the debug one, then attaches
 The version in the name is the app's `android:versionName`, not the flake's:
 the two are versioned separately.
 
+`phone-proxy-install --release` fetches that APK (checksum checked) and installs
+it. A phone that already runs a locally built APK cannot update in place — that
+one carries the debug key — so it needs `--replace-signer` once, which
+uninstalls first and takes the app's saved proxies with it.
+
 ## Tests
 
 - `tests/proxy-app.test.sh` — hermetic, plain JDK. It compiles `Upstream`,
