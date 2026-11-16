@@ -409,7 +409,7 @@ def doctor_bin() -> str | None:
         return override
     root = Path(__file__).resolve().parents[3]
     candidate = root / "bin" / "phone-doctor"
-    if candidate.is_file():
+    if candidate.is_file() and os.access(candidate, os.X_OK):
         return str(candidate)
     return shutil.which("phone-doctor")
 

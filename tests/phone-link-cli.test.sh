@@ -107,6 +107,9 @@ BASH=$(command -v bash)
 for stub in "$STUBS"/*; do sed -i "1s|.*|#!$BASH|" "$stub"; done
 chmod +x "$STUBS"/*
 export PATH="$STUBS:$PATH"
+# The doctor beside the checkout wins over PATH by design, and this suite is
+# about the CLI, not about that precedence: name the stub so it is the one used.
+export PHONE_DOCTOR=$STUBS/phone-doctor
 
 if run run phone-fix-mobile-data --check; then bad "run keeps the exit status"; else
   ok "run keeps the exit status"

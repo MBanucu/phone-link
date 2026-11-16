@@ -142,3 +142,14 @@ list is empty.
   doctor can read the latest tag once a day (cached, three seconds, a warning
   and never a failure) and say when a newer release exists. Until the app can be
   dated, the check would warn about every install.
+
+## The flake's script list is typed, and drifts
+
+- [ ] `flake.nix` names every script three times: once in `scripts`, once (by
+  being a `bin/` file) in the checkout, and once in the registry the GUI reads.
+  `phone-proxy-boot` was added to `bin/` and to the registry and not to
+  `scripts`, so it worked from a checkout and did not exist in the package —
+  `nix flake check` says `action without a script`, and only a full check says
+  anything at all. The list should be generated from `${./bin}` (a directory
+  listing at evaluation time), with the exceptions — `phone-link` and the GUI —
+  subtracted by name, so a new script is packaged by existing.

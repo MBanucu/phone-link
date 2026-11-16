@@ -32,6 +32,7 @@
         "phone-link-uninstall"
         "phone-net-status"
         "phone-proxy-battery-whitelist"
+        "phone-proxy-boot"
         "phone-proxy-check"
         "phone-proxy-data-clear"
         "phone-proxy-install"
