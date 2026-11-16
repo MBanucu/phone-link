@@ -86,10 +86,23 @@
 set -u
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-APK=${PROXY_APP_APK:-$ROOT/android/build/phone-link-proxy.apk}
+# The build under test, and the package it is installed as: the test build, so a
+# run never replaces the proxy the phone lives on (build.sh builds both from the
+# same sources). The classes keep their package under the other id, which is why
+# a component is `$PKG/$CLASS.Service` — see android/AndroidManifest.xml.
+APK=${PROXY_APP_APK:-$ROOT/android/build/phone-link-proxy-test.apk}
 PORT=${PROXY_APP_PORT:-18080}
-PKG=org.phonelink.proxy
-SERVICE=$PKG/.ProxyService
+PKG=${PHONE_PROXY_PKG:-org.phonelink.proxy.test}
+CLASS=org.phonelink.proxy
+# The package the resource table is packaged under. build.sh relinks the
+# manifest under the test id but not the resources, so a node in a screen dump
+# carries the installed id in `package` and this one in `resource-id`.
+RES=$CLASS
+SERVICE=$PKG/$CLASS.ProxyService
+ACTIVITY=$PKG/$CLASS.MainActivity
+# The other instance, if the phone has one: this run must leave it alone, and
+# saying so is a check rather than a promise.
+STABLE=${PHONE_STABLE_PKG:-org.phonelink.proxy}
 START=org.phonelink.proxy.action.START
 STOP=org.phonelink.proxy.action.STOP
 USER_NAME=phonelink-test
@@ -341,7 +354,7 @@ cleanup() {
   # nothing removed them, so they outlived the run that asked for them; they
   # are asked for again here rather than trusted to the delete, because a card
   # that refuses the write is worth a check of its own.
-  local dumps= dump
+  local dumps="" dump="" stable_after=""
   for dump in /sdcard/proxy-app-ui.xml /sdcard/proxy-app-shot.xml; do
     shell rm -f "$dump" >/dev/null 2>&1
     if shell ls "$dump" >/dev/null 2>&1; then
@@ -353,6 +366,21 @@ cleanup() {
   else
     bad "the run leaves no screen dumps on the phone's card"
     printf '  still there:%s\n' "$dumps"
+  fi
+  # The instance the phone lives on: the run installed and drove the test
+  # package, so this one's listener and its store have to read as they did
+  # before it started. Compared whole rather than field by field, because a
+  # field that nobody thought to compare is exactly what a shared store would
+  # change.
+  if [ -n "${stable_before:-}" ]; then
+    stable_after=$(shell dumpsys activity service "$STABLE/$CLASS.ProxyService" 2>/dev/null)
+    if [ "$stable_before" = "$stable_after" ]; then
+      ok "the daily proxy is untouched"
+    else
+      bad "the daily proxy is untouched"
+      diff <(printf '%s\n' "$stable_before") <(printf '%s\n' "$stable_after") |
+        head -12 | sed 's/^/  /'
+    fi
   fi
   if [ -n "$screen_timeout" ]; then
     shell settings put system screen_off_timeout "$screen_timeout" >/dev/null 2>&1
@@ -448,9 +476,12 @@ foreground() { shell dumpsys activity services "$PKG" | grep -q 'isForeground=tr
 
 # The panel has to inflate and stay up; a crash shows in the crash buffer.
 panel_opens() {
-  shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1 || return 1
+  shell am start -W -n "$ACTIVITY" >/dev/null 2>&1 || return 1
   settle
-  shell dumpsys activity activities | grep -q "$PKG/.MainActivity" || return 1
+  # The class package is the same under either id, so the class name is what
+  # the dump always shows: `pkg/.MainActivity` for the stable id, the full form
+  # for the test one.
+  shell dumpsys activity activities | grep -q "$CLASS.MainActivity" || return 1
   ! phone logcat -d -b crash 2>/dev/null | grep -q "$PKG"
 }
 
@@ -680,7 +711,7 @@ port_closed() { closed "$PORT"; }
 tile_click() {
   shell cmd statusbar expand-settings >/dev/null 2>&1
   sleep 2
-  shell cmd statusbar click-tile "$PKG/.ProxyTile" >/dev/null 2>&1
+  shell cmd statusbar click-tile "$PKG/$CLASS.ProxyTile" >/dev/null 2>&1
 }
 
 # Before the Wi-Fi read, because a dead link makes every read empty.
@@ -727,6 +758,10 @@ step_unlock() {
 # --- install
 step_install() {
   step 'install'
+  # What the other instance looks like before this run touches the phone. Its
+  # dump is empty when it is not installed or not running, and the check at the
+  # end of the run is skipped then.
+  stable_before=$(shell dumpsys activity service "$STABLE/$CLASS.ProxyService" 2>/dev/null)
   if phone install -r -g "$APK" >/dev/null 2>&1; then
     ok 'installs'
   else
@@ -1167,14 +1202,12 @@ step_rename() {
   shell am start-foreground-service -n "$SERVICE" \
     -a org.phonelink.proxy.action.RENAME_PROFILE --es profile harness-renamed \
     --es to harness-adb >/dev/null 2>&1
-  sleep 2
-  if shell dumpsys activity service "$SERVICE" | grep 'saved' |
-    grep -q '"harness-adb"'; then
+  if watch_dump '"harness-adb"' 6000; then
     ok 'RENAME_PROFILE renames from adb'
   else
     bad 'RENAME_PROFILE renames from adb'
   fi
-  if shell dumpsys activity service "$SERVICE" | grep -q 'profile *"harness-adb"'; then
+  if watch_dump 'profile *"harness-adb"' 3000; then
     ok 'and the proxy in use keeps its place'
   else
     bad 'and the proxy in use keeps its place'
@@ -1619,7 +1652,7 @@ step_tile() {
     # everything.
     shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
     sleep 2
-    shell cmd statusbar add-tile "$PKG/.ProxyTile" >/dev/null 2>&1
+    shell cmd statusbar add-tile "$PKG/$CLASS.ProxyTile" >/dev/null 2>&1
     tile_click
     if wait_foreground; then ok 'the tile starts the service'; else
       bad 'the tile starts the service'

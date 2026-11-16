@@ -4,19 +4,6 @@ Ideas taken from the user's messages, in the order they are being built.
 Delete an item once it is implemented and committed; delete the file when the
 list is empty.
 
-## Two instances of the app at once
-
-- [ ] The live harness drives the app's screen, so the phone is busy while a run
-  is in progress and nothing else can use it: a background end-to-end test —
-  start a proxy, push traffic through it, read its counters — has to wait for
-  the foreground UI run to finish, or fight it for the adb connection and the
-  one Activity. Run two instances of the app instead, in the same phone
-  process or in two, each with its own package/port/profile store, so one can
-  be driven over adb while the other's screens are exercised: the harness
-  already keeps its listeners on their own ports, and the store is private
-  preferences, so the seam is the package name (and a manifest placeholder
-  for it), not the code.
-
 ## A tile with more than two states
 
 - [ ] A press can only choose between off and listening — the phone's third
@@ -88,40 +75,6 @@ list is empty.
   the same APK with more paperwork. GitHub Releases plus Obtainium needs
   none of it — a signed APK on a release is installable and updatable from
   the phone — and is worth having from the first tag whatever else happens.
-
-## A stable proxy and a test proxy on the same phone
-
-- [ ] Testing an unstable build must not replace the proxy the phone uses every
-  day. Today it does: the harness installs the app under test over the
-  installed one (`adb install -r`, the same package, so the same store), and
-  every step that saves or deletes a profile, starts and stops listeners or
-  flips the service switches runs against the real configuration. Keeping
-  the app installed (`KEEP_APP=1`) only keeps the *last tested* build
-  installed. What is wanted: two packages on one phone — the stable one the
-  phone lives on, and an unstable one from any build — both installable, both
-  startable, listening at the same time on their own ports, with their own
-  store, their own notifications and their own Quick Settings tiles, so a
-  test run never touches the daily proxy and the daily proxy never shows up
-  in a test's list. The mechanism is mostly there: the harness takes the
-  package name from `PHONE_PROXY_PKG`, the service is addressed as
-  `$PKG/.ProxyService`, and the panel reads the package from its own
-  resources — so an `applicationId` suffix for a test build
-  (`org.phonelink.proxy` vs `org.phonelink.proxy.test`, built by `build.sh`
-  with one more `aapt2` flag) may be the whole of it. What has to be checked
-  and made explicitly package-relative: the manifest's service, receiver and
-  tile components (a `TileService` component is unique per package, and two
-  apps both offering "Proxy" in the shade is a thing to expect), the
-  notification channel and both notification ids (they are per package,
-  which is what makes two notifications possible), the `dumpsys activity
-  service` and `am start-foreground-service` commands the scripts and the
-  help text use, the preference/store file (already per package), and the
-  capture app's a11y setting, which is per component and so already fine.
-  Then the harness: install the *test* package, never the stable one, and
-  prove in a step that the other one is untouched — its dumpsys still lists
-  its listener, its store still holds its profiles. The daily proxy and the
-  unstable one also have to coexist as *listeners*: different ports
-  (mandatory), and both claiming the SSID is fine, since that is a predicate
-  rather than a binding.
 
 ## The scroll that sometimes cannot find Save
 

@@ -5,7 +5,8 @@
 # helper added for one step is added where it belongs, and a step reads as
 # claims rather than as adb.
 #
-# Needs the caller's variables: ROOT, serial, ARTIFACTS, PORT, PKG, SERVICE,
+# Needs the caller's variables: ROOT, serial, ARTIFACTS, PORT, PKG, RES, SERVICE,
+# ACTIVITY,
 # SSID, USER_NAME, PASSWORD, CAPTURE_PKG, CAPTURE_DIR, DEVICETEST_PKG and the
 # capture/devicetest APK paths.
 set -u
@@ -230,6 +231,22 @@ wait_change() { # wait_change [MS] -> the screen said something
   wait_phone --ez change true --ei timeout "${1:-2000}"
 }
 
+# The service's own words, watched rather than asked once: an action sent over
+# adb is applied as the intent arrives, and the panel may be writing its view of
+# the store at the same moment — a fixed sleep is a guess at whose write lands
+# second, and a check that guesses fails when it guessed right and lost.
+watch_dump() { # watch_dump PATTERN [MS] -> the dump holds it
+  local pattern=$1 waited=0 limit=${2:-5000}
+  while :; do
+    if shell dumpsys activity service "$SERVICE" 2>/dev/null | grep -q "$pattern"; then
+      return 0
+    fi
+    [ "$waited" -ge "$limit" ] && return 1
+    sleep 0.2
+    waited=$((waited + 200))
+  done
+}
+
 # The screen has stopped moving: the service answers once nothing on it has
 # changed for a moment, which is the event a step actually wants after a tap.
 settle() { # settle [QUIET_MS]
@@ -272,7 +289,7 @@ sequence() { # sequence 'SCRIPT' -> 0 when every instruction ran
 
 # The panel, up and still, whatever it was showing before.
 open_panel() {
-  shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
+  shell am start -W -n "$ACTIVITY" >/dev/null 2>&1
   settle
 }
 
@@ -390,7 +407,7 @@ ui_dump() {
     # Accept the panel, or one of the app's own dialogs: the battery request is
     # a window of its own and the dump then holds only that one.
     if printf '%s' "$xml" | grep -q '<hierarchy' &&
-      { printf '%s' "$xml" | grep -q "$PKG:id/header_title" ||
+      { printf '%s' "$xml" | grep -q "$RES:id/header_title" ||
         printf '%s' "$xml" | grep -q 'id/alertTitle"' ||
         printf '%s' "$xml" | grep -q 'text="About this app"'; }; then
       printf '%s\n' "$xml"
@@ -405,7 +422,7 @@ ui_dump() {
     if ! printf '%s' "$xml" | grep -q "package=\"$PKG\""; then
       case $recovered in
         0)
-          shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
+          shell am start -W -n "$ACTIVITY" >/dev/null 2>&1
           recovered=1
           ;;
         1)
@@ -456,8 +473,8 @@ panel_where() {
   printf '  focus: %s\n' "$(shell dumpsys window 2>/dev/null |
     grep -m1 mCurrentFocus | sed 's/^ *//')"
   printf '  activity records: %s\n' "$(shell dumpsys activity activities 2>/dev/null |
-    grep -c "$PKG/.MainActivity")"
-  printf '  app nodes: %s\n' "$(ui_dump | grep -o "$PKG:id/[a-z_]*" | wc -l)"
+    grep -c "$ACTIVITY")"
+  printf '  app nodes: %s\n' "$(ui_dump | grep -o "$RES:id/[a-z_]*" | wc -l)"
   if [ -n "$sequence_stopped" ]; then
     printf '  last sequence stopped at: %s\n' "$sequence_stopped"
   fi
@@ -541,7 +558,7 @@ panel_home() {
     else
       # The panel is not up at all — pressing Back here would land on the
       # launcher, so bring the panel up instead.
-      shell am start -W -n "$PKG/.MainActivity" >/dev/null 2>&1
+      shell am start -W -n "$ACTIVITY" >/dev/null 2>&1
     fi
     settle
   done
