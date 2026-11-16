@@ -26,6 +26,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.7.0] - 2026-11-16
 
+### Added
+
+- `phone-doctor` says when a newer release exists. The phone knew nothing about
+  releases, and it could not have: `AndroidManifest.xml` said `versionCode="1"`
+  and `versionName="0.1.0"` for every APK ever built, so a phone three releases
+  behind passed every check. `android/build.sh` now stamps the project's version
+  into a copy of the manifest from `android/version` (kept equal to the flake's
+  `version` by a `nix flake check`), the release asset is named after it, and a
+  new `app_release` check compares the installed name with the newest tag — a
+  warning, cached for a day, and `skip` on a host that cannot ask.
+
 ### Changed
 
 - The flake packages every script in `bin/` instead of a typed list. The list

@@ -9,6 +9,9 @@ SCRIPT=$ROOT/bin/phone-doctor
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
+# The doctor caches the newest release under the cache directory for a day,
+# so the suite keeps that inside its sandbox too.
+export XDG_CACHE_HOME=$TMP/cache
 mkdir -p "$LOG" "$STUBS"
 
 pass=0
@@ -93,6 +96,9 @@ cat >"$STUBS/curl" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
   *--socks5-hostname*) printf '%s' "$(cat "$LOG/proxy_code")" ;;
+  # The release check: no file queued means "could not ask", which is what an
+  # offline host sees and what keeps this suite off the network.
+  *api.github.com*) cat "$LOG/release_json" 2>/dev/null ;;
   *) printf '%s' "$(cat "$LOG/internet_code")" ;;
 esac
 EOF
@@ -369,6 +375,19 @@ grep -q 'USB only' "$LOG/out" && bad "does not fall back to USB only" \
 
 # 19. --help exits 0.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
+
+# The release check: the answer is cached for a day, so the case starts without
+# one, and a queued GitHub answer stands in for the network.
+release_cache=$XDG_CACHE_HOME/phone-link/latest-release
+rm -f "$release_cache"
+printf '{"tag_name": "v9.9.9"}' >"$LOG/release_json"
+fresh_state
+run --analyze
+grep -q '^warn *app_release' "$LOG/out" && ok "names a newer release" \
+  || bad "names a newer release" "$(cat "$LOG/out")"
+grep -q 'run phone-proxy-install --release' "$LOG/out" && ok "says how to get it" \
+  || bad "says how to get it" "$(cat "$LOG/out")"
+rm -f "$release_cache" "$LOG/release_json"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

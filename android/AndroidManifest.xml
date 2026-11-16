@@ -17,8 +17,12 @@
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.phonelink.proxy"
-    android:versionCode="1"
-    android:versionName="0.1.0">
+    android:versionCode="0"
+    android:versionName="0.0.0">
+    <!-- The two above are a template: android/build.sh stamps the project's
+         version (android/version, kept in step with the flake's `version` by
+         `nix flake check`) into a copy at build time, so a phone can say which
+         release it runs instead of 0.1.0 forever. -->
 
     <uses-sdk
         android:minSdkVersion="29"

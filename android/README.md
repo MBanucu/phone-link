@@ -661,6 +661,18 @@ ignored, and a file whose `version` is newer than the app is refused with the
 reason. The file holds passwords in plain text: the panel says so before it
 writes one, and the app never puts it anywhere by itself.
 
+## Which build is this
+
+The APK's `versionName` is the project's version and its `versionCode` is
+`major*10000 + minor*100 + patch`, stamped into a copy of `AndroidManifest.xml`
+by `build.sh` from `android/version`. The tracked manifest keeps a template
+(`0.0.0`), so a checkout that was never rebuilt does not claim a release, and
+`nix flake check` refuses `android/version` drifting from the flake's `version`.
+`dumpsys package org.phonelink.proxy | grep versionName` answers which release
+the phone runs, the release asset is named after the same number, and
+`phone-doctor` warns when a newer tag exists (a cached, one-a-day GitHub call;
+offline it says the check is unknown instead of guessing).
+
 ## What this scaffold does not do yet
 
 - Tethering is excluded on purpose, so a phone in hotspot or USB-tether mode has

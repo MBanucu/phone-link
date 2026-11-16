@@ -59,7 +59,8 @@ When asked to work the wishlist and not report back until it is empty:
    sure than it should have been. Fix them in the same run when they are small.
 4. Cut a release when a coherent set has landed: bump `version` in `flake.nix`,
    move `## [Unreleased]` into a dated section with its comparison link, commit
-   `chore(release): X.Y.Z`, tag `vX.Y.Z`, push `main` and the tag, watch the
+   `android/version` (the APK's stamped version; `nix flake check` refuses a
+   mismatch), commit `chore(release): X.Y.Z`, tag `vX.Y.Z`, push `main` and the tag, watch the
    `Release` workflow, and replace the generated notes with the CHANGELOG
    section plus how to install what was attached.
 5. Some wishes are not an agent's to finish: creating a repository, a store

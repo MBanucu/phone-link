@@ -88,10 +88,11 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -eu
-          version=$(sed -n 's/.*android:versionName="\([^"]*\)".*/\1/p' \
-            android/AndroidManifest.xml | head -1)
+          # The app's own version, which build.sh stamps into the manifest from
+          # android/version; `nix flake check` keeps the two in step.
+          version=$(tr -d '[:space:]' < android/version)
           if [ -z "$version" ]; then
-            echo "::error::no android:versionName in android/AndroidManifest.xml" >&2
+            echo "::error::android/version is empty" >&2
             exit 1
           fi
           asset="$RUNNER_TEMP/phone-link-proxy-$version.apk"

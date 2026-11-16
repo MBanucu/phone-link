@@ -277,6 +277,19 @@
 
           # The GUI's table and bin/ must agree: a script with no action fails
           # here, which is what keeps "every CLI action is in the GUI" true.
+          # The app's stamped version and the project's are one number: build.sh
+          # reads android/version for the manifest, the release workflow names the
+          # asset after it, and the doctor compares it with the newest tag.
+          version-file = pkgs.runCommand "phone-link-version-check" { } ''
+            app=$(tr -d '[:space:]' < ${./android/version})
+            if [ "$app" != "${version}" ]; then
+              echo "android/version is $app, flake.nix says ${version}" >&2
+              echo "bump both in the release commit" >&2
+              exit 1
+            fi
+            touch $out
+          '';
+
           registry = pkgs.runCommand "phone-link-registry-check" { } ''
             ${package}/bin/phone-link check-registry ${lib.escapeShellArgs scripts}
             touch $out

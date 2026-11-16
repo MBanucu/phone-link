@@ -14,7 +14,9 @@ it works.
 
 from __future__ import annotations
 
+import os
 import re
+import time
 
 from ..context import Context
 from ..model import Result, fail, ok, skip, warn
@@ -38,14 +40,78 @@ def _installed_versions(ctx: Context) -> tuple[str, str, str, str]:
 
 
 def _tree_version(ctx: Context) -> tuple[str, str]:
-    """The versionName and versionCode this checkout builds."""
+    """The versionName and versionCode this checkout builds.
+
+    The manifest is a template — `android/build.sh` stamps the version into a
+    copy — so the number comes from `android/version`, the same file the build
+    reads, and only a checkout without one falls back to the manifest.
+    """
+    version_file = ctx.proxy_manifest.parent / "version"
     try:
-        text = ctx.proxy_manifest.read_text()
+        text = version_file.read_text().strip()
+    except OSError:
+        text = ""
+    if re.fullmatch(r"\d+\.\d+\.\d+", text):
+        parts = [int(part) for part in text.split(".")]
+        code = f"{parts[0]}{parts[1]:02d}{parts[2]:02d}"
+        return text, code
+    try:
+        manifest = ctx.proxy_manifest.read_text()
     except OSError:
         return "", ""
-    name = re.search(r'android:versionName="([^"]+)"', text)
-    code = re.search(r'android:versionCode="(\d+)"', text)
+    name = re.search(r'android:versionName="([^"]+)"', manifest)
+    code = re.search(r'android:versionCode="(\d+)"', manifest)
     return (name.group(1) if name else ""), (code.group(1) if code else "")
+
+
+def _version_tuple(text: str) -> tuple[int, ...]:
+    numbers = [int(part) for part in re.findall(r"\d+", text)[:3]]
+    return tuple(numbers)
+
+
+def _latest_tag(ctx: Context) -> str:
+    """The newest release tag, read once a day; "" when it cannot be read.
+
+    The one check that asks a network question, because "is this release the
+    newest" is not a fact the phone has. A cached answer lasts a day and a host
+    that cannot reach GitHub says so instead of stalling: three seconds, once.
+    """
+    cache = os.path.join(
+        os.environ.get("XDG_CACHE_HOME")
+        or os.path.join(os.path.expanduser("~"), ".cache"),
+        "phone-link",
+        "latest-release",
+    )
+    tag = ""
+    try:
+        if time.time() - os.path.getmtime(cache) < 86400:
+            with open(cache, encoding="utf-8") as handle:
+                tag = handle.read().strip()
+    except OSError:
+        pass
+    if tag:
+        return tag
+    repo = ctx.get("PHONE_LINK_REPO", "MBanucu/phone-link")
+    proc = ctx.run(
+        [
+            "curl",
+            "-fsS",
+            "--max-time",
+            "3",
+            f"https://api.github.com/repos/{repo}/releases/latest",
+        ],
+        timeout=5,
+    )
+    match = re.search(r'"tag_name"\s*:\s*"([^"]+)"', (proc.stdout or "") if proc else "")
+    tag = match.group(1) if match else ""
+    if tag:
+        try:
+            os.makedirs(os.path.dirname(cache), exist_ok=True)
+            with open(cache, "w", encoding="utf-8") as handle:
+                handle.write(tag + "\n")
+        except OSError:
+            pass
+    return tag
 
 
 def _proxy_request(ctx: Context, target: str) -> Result:
@@ -139,6 +205,26 @@ def check(ctx: Context) -> list[Result]:
                     f"{version} ({code}) is not this checkout's "
                     f"{tree_name or '?'} ({tree_code}); run phone-proxy-install",
                 )
+            )
+        latest = _latest_tag(ctx) if version else ""
+        if not version:
+            pass
+        elif not latest:
+            results.append(
+                skip("app_release", "newer release", "unknown (cannot reach GitHub)")
+            )
+        elif _version_tuple(latest) > _version_tuple(version):
+            results.append(
+                warn(
+                    "app_release",
+                    "newer release",
+                    f"{latest} is out, installed {version}; "
+                    "run phone-proxy-install --release",
+                )
+            )
+        else:
+            results.append(
+                ok("app_release", "newer release", f"nothing newer than {latest}")
             )
         if min_sdk and phone_sdk:
             if int(min_sdk) <= int(phone_sdk):

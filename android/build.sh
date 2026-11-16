@@ -103,6 +103,22 @@ if [ -z "${PHONE_APP_KEYSTORE:-}" ] && [ ! -f "$keystore" ]; then
         -dname "CN=phone-link proxy debug" >/dev/null 2>&1
 fi
 
+# The project's version, stamped into the manifest at build time: a phone that
+# reports 0.1.0 for every release cannot be asked which one it runs. The tracked
+# manifest is a template, `android/version` is the one source, and
+# `nix flake check` refuses it drifting from the flake's `version`.
+app_version=$(tr -d '[:space:]' <"$here/version")
+case $app_version in
+    [0-9]*.[0-9]*.[0-9]*) ;;
+    *)
+        echo "build.sh: android/version is not X.Y.Z: '$app_version'" >&2
+        exit 2
+        ;;
+esac
+# Only ever up: 0.8.1 must sort above 0.8.0 on the phone too.
+app_code=$(printf '%s' "$app_version" \
+    | awk -F. '{ printf "%d%02d%02d", $1, $2, $3 }')
+
 # build_apk NAME SOURCE_DIR RESOURCE_DIR MANIFEST [PACKAGE]
 #
 # PACKAGE relinks the manifest under another application id. The classes keep
@@ -114,6 +130,13 @@ build_apk() {
     res=$3
     manifest=$4
     package=${5:-}
+    # The stamped copy, not the template: unaligned.apk is what ships.
+    stamped="$build/$name/AndroidManifest.xml"
+    mkdir -p "$build/$name"
+    sed -e "s/android:versionCode=\"[^\"]*\"/android:versionCode=\"$app_code\"/" \
+        -e "s/android:versionName=\"[^\"]*\"/android:versionName=\"$app_version\"/" \
+        "$manifest" >"$stamped"
+    manifest=$stamped
     work="$build/$name"
     mkdir -p "$work/res" "$work/gen" "$work/classes" "$work/dex"
 
