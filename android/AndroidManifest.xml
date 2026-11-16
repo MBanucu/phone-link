@@ -6,6 +6,14 @@
   shell user holds and ordinary apps do not, so a wired or wireless adb session
   can start and stop the listener without the phone being unlocked, and nothing
   else on the network can.
+
+  The components are named in full rather than as `.Name`, because build.sh
+  relinks this manifest under a second package (`org.phonelink.proxy.test`) for
+  the build the live harness installs: a relative name would follow the package
+  and point at a class that does not exist, while a full one keeps pointing at
+  the code this manifest was written for. The class package and the application
+  id are then two different things, which is also why a component is addressed
+  as `org.phonelink.proxy.test/org.phonelink.proxy.ProxyService`.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.phonelink.proxy"
@@ -54,7 +62,7 @@
         android:supportsRtl="true">
 
         <activity
-            android:name=".MainActivity"
+            android:name="org.phonelink.proxy.MainActivity"
             android:exported="true"
             android:label="@string/app_name"
             android:theme="@style/AppTheme">
@@ -70,7 +78,7 @@
              service from BOOT_COMPLETED, which is exactly where auto_start
              needs it. -->
         <service
-            android:name=".ProxyService"
+            android:name="org.phonelink.proxy.ProxyService"
             android:exported="true"
             android:foregroundServiceType="location"
             android:permission="android.permission.DUMP" />
@@ -78,7 +86,7 @@
         <!-- Quick Settings tile: the system binds it, so the permission is the
              contract rather than a gate we apply. -->
         <service
-            android:name=".ProxyTile"
+            android:name="org.phonelink.proxy.ProxyTile"
             android:exported="true"
             android:icon="@drawable/ic_stat_proxy"
             android:label="@string/tile_label"
@@ -89,7 +97,7 @@
         </service>
 
         <receiver
-            android:name=".BootReceiver"
+            android:name="org.phonelink.proxy.BootReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

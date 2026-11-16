@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The app builds twice, so a test build can live beside the one the phone runs.
+  `build.sh` writes `phone-link-proxy.apk` under `org.phonelink.proxy` and
+  `phone-link-proxy-test.apk` under `org.phonelink.proxy.test` from the same
+  sources, and a phone holds both: testing an unstable build used to replace the
+  daily proxy and run every save, delete and listener against the real
+  configuration, and now the two are separate apps with their own store, their
+  own listeners, their own notification and their own Quick Settings tile — the
+  daily proxy on 1081 and a test build on 18080 answered at the same time, and
+  neither listed the other's saved proxies. The manifest names its components in
+  full, because a relative `.ProxyService` would follow the relinked id to a
+  class that does not exist; the resource table is *not* renamed with it, so an
+  id stays `org.phonelink.proxy:id/…` while a component becomes
+  `org.phonelink.proxy.test/org.phonelink.proxy.ProxyService`, and the help
+  text, the `dumpsys` line it documents and the on-device checks all read the
+  package they are running as. The label says which is which — "Phone link
+  proxy (test)", "Proxy (test)" — in the launcher, the notification and the
+  tile. The live harness installs only the test package and proves the other
+  instance is untouched, by reading its dump before the run and requiring the
+  same dump after it.
+
 - `dumpsys` says which network the tunnel leaves by. The app pins its egress to
   cellular on purpose — a socket on the default route would come back down the
   Wi-Fi link the requester is on — but nothing said so, and from outside the
@@ -43,6 +63,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and a green run prints nothing.
 
 ### Fixed
+
+- `RENAME_PROFILE renames from adb` waited two seconds after the intent and then
+  asked the dump once, which is a guess at whose write lands second: the panel
+  is open at that moment and rewrites its own view of the store, and in a full
+  run the check lost the race and read the old name. It watches for the change
+  now, as the checks that watch the screen already did.
 
 - A run leaves nothing on the phone's card. The screen dumps `uiautomator` was
   asked for (`/sdcard/proxy-app-ui.xml`, `/sdcard/proxy-app-shot.xml`) stayed

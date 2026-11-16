@@ -10,9 +10,27 @@ package org.phonelink.proxy;
  */
 final class Help {
 
-    /** The one command that prints this text over adb. */
-    static final String ADB_DUMP =
-            "adb shell dumpsys activity service org.phonelink.proxy/.ProxyService";
+    /**
+     * The package the classes and the adb actions are named in, which is the
+     * same whatever this app is installed as: build.sh relinks the manifest
+     * under a second id for the build the live harness installs, and the code
+     * keeps its package.
+     */
+    static final String CODE = "org.phonelink.proxy";
+
+    /** The one command that prints this text over adb, for the package asked for. */
+    static String adbDump(String pkg) {
+        return "adb shell dumpsys activity service " + component(pkg, "ProxyService");
+    }
+
+    /**
+     * A component as adb wants it: `org.phonelink.proxy/.ProxyService` when the
+     * id is the code package, and the long form when a test build carries
+     * another id — the class keeps its package, the id does not.
+     */
+    static String component(String pkg, String name) {
+        return pkg.equals(CODE) ? pkg + "/." + name : pkg + "/" + CODE + "." + name;
+    }
 
     /** The activity extra that opens the Info dialog, for a phone in one's hand. */
     static final String EXTRA_HELP = "help";
@@ -20,7 +38,8 @@ final class Help {
     private Help() {
     }
 
-    static String text() {
+    static String text(String pkg) {
+        String service = component(pkg, "ProxyService");
         return String.join("\n",
                 "Phone link proxy — a SOCKS5 listener that lets the laptop use this",
                 "phone's mobile connection.",
@@ -69,10 +88,10 @@ final class Help {
                 "                         All events has everything, whatever it was about.",
                 "",
                 "Over adb, no unlock needed",
-                "  adb shell am start-foreground-service -n org.phonelink.proxy/.ProxyService \\",
+                "  adb shell am start-foreground-service -n " + service + " \\",
                 "    -a org.phonelink.proxy.action.START --ei port 1081 --es user proxy \\",
                 "    --es password … --es ssid PhoneLink",
-                "  adb shell am start-foreground-service -n org.phonelink.proxy/.ProxyService \\",
+                "  adb shell am start-foreground-service -n " + service + " \\",
                 "    -a org.phonelink.proxy.action.STOP",
                 "",
                 "  A stop with --es profile NAME stops that proxy and leaves the rest;",
@@ -99,7 +118,7 @@ final class Help {
                 "                            with any other extra applied on top",
                 "",
                 "  The configuration the service has becomes a saved one with",
-                "  adb shell am start-foreground-service -n org.phonelink.proxy/.ProxyService \\",
+                "  adb shell am start-foreground-service -n " + service + " \\",
                 "    -a org.phonelink.proxy.action.SAVE_PROFILE --es profile NAME",
                 "  the same command with",
                 "    -a org.phonelink.proxy.action.RENAME_PROFILE --es profile NAME \\",
@@ -120,9 +139,10 @@ final class Help {
                 "  start the proxy; it just does not come back by itself.",
                 "",
                 "This text",
-                "  " + ADB_DUMP,
+                "  " + adbDump(pkg),
                 "  or the Info button in the panel. With the app stopped,",
-                "  adb shell am start -n org.phonelink.proxy/.MainActivity --ez help true",
+                "  adb shell am start -n " + component(pkg, "MainActivity")
+                            + " --ez help true",
                 "  opens the panel with this dialog.");
     }
 }

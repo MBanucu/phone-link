@@ -95,8 +95,13 @@ installed by a test run and removed by it.
   `tests/live/phone.sh` beside it holding how to look at and drive the phone
   (captures, gestures, sequences, the panel's navigation, unlock and settings),
   so a step reads as a claim. It needs a phone with a Wi-Fi client link and the
-  built APK (by default `android/build/phone-link-proxy.apk`, or the file named
-  by `PROXY_APP_APK`). It unlocks the phone through `bin/phone-unlock` when
+  built APK — the *test* one, `android/build/phone-link-proxy-test.apk` (or the
+  file named by `PROXY_APP_APK`), which installs as
+  `org.phonelink.proxy.test`. The id is the whole of the second instance: its
+  own store, its own listeners, its own notification and tile, so a run leaves
+  the proxy the phone lives on alone — and the run checks that, by reading the
+  other instance's dump before it starts and requiring it to read the same
+  when it ends. It unlocks the phone through `bin/phone-unlock` when
   `sudo -n` allows it (the shade ignores tile clicks and uiautomator cannot dump
   a sleeping panel), then: install, open the list, require a card to open its
   proxy, `auto_start` showing on the `Service` segment, the header warning and
@@ -266,6 +271,22 @@ adb shell am start-foreground-service -n org.phonelink.proxy/.ProxyService \
 `-g` grants `POST_NOTIFICATIONS` at install; the foreground notification is
 what keeps the service out of the background-start rules, and it carries a Stop
 action.
+
+`build.sh` writes two APKs of this app: `phone-link-proxy.apk` under
+`org.phonelink.proxy`, and `phone-link-proxy-test.apk` under
+`org.phonelink.proxy.test`, which is the one the live harness installs. They are
+the same code — one release build and one for testing — and a phone can hold
+both, listening on their own ports with their own stores, so testing a build
+never replaces the proxy the phone lives on. Only the label differs ("Phone link
+proxy" and "Phone link proxy (test)"), in the launcher, the notification and the
+tile, because two identical entries in a list are a thing to avoid.
+
+The second id is a relinked manifest, so the classes keep the package they were
+compiled in and only the application id moves: a component of the test build is
+`org.phonelink.proxy.test/org.phonelink.proxy.ProxyService`, not
+`org.phonelink.proxy.test/.ProxyService`, and the resource ids stay
+`org.phonelink.proxy:id/...` because the resource table is not renamed with it.
+The help text says which form belongs to the build it is printed from.
 
 The same start and stop are on the phone: the app is a launcher entry ("Phone
 link proxy") and the notification opens it.

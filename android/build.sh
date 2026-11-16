@@ -3,9 +3,15 @@
 # apksigner. No AndroidX and no third-party dependencies means no repository to
 # resolve, so the build works offline once the SDK is in the store.
 #
-# Two APKs come out of it:
+# The APKs that come out of it:
 #
 #   build/phone-link-proxy.apk  the proxy itself (sources in src/, res/)
+#   build/phone-link-proxy-test.apk
+#                               the same app under its own package,
+#                               org.phonelink.proxy.test, so an unstable build
+#                               can be installed next to the one the phone lives
+#                               on: own store, own listeners, own notification,
+#                               own tile
 #   build/capture.apk           the test-only accessibility service that writes
 #                               the screen as XML for the live harness
 #                               (sources in capture/)
@@ -64,17 +70,27 @@ if [ ! -f "$keystore" ]; then
         -dname "CN=phone-link proxy debug" >/dev/null 2>&1
 fi
 
-# build_apk NAME SOURCE_DIR RESOURCE_DIR MANIFEST
+# build_apk NAME SOURCE_DIR RESOURCE_DIR MANIFEST [PACKAGE]
+#
+# PACKAGE relinks the manifest under another application id. The classes keep
+# the package they were compiled in, so a component is addressed by the full
+# class name as well — see the manifest's header.
 build_apk() {
     name=$1
     src=$2
     res=$3
     manifest=$4
+    package=${5:-}
     work="$build/$name"
     mkdir -p "$work/res" "$work/gen" "$work/classes" "$work/dex"
 
     "$build_tools/aapt2" compile --dir "$res" -o "$work/res/resources.zip"
-    "$build_tools/aapt2" link \
+    if [ -n "$package" ]; then
+        set -- link --rename-manifest-package "$package"
+    else
+        set -- link
+    fi
+    "$build_tools/aapt2" "$@" \
         --manifest "$manifest" \
         --java "$work/gen" \
         -I "$android_jar" \
@@ -116,5 +132,25 @@ build_apk() {
 }
 
 build_apk phone-link-proxy "$here/src" "$here/res" "$here/AndroidManifest.xml"
+
+# The same app under org.phonelink.proxy.test, which is what the live harness
+# installs, so a test run never replaces the proxy the phone uses every day.
+# Only the label differs: two identical "Phone link proxy" entries in the
+# launcher and two identical "Proxy" tiles are a thing to avoid.
+test_res="$build/phone-link-proxy-test-res"
+cp -r "$here/res" "$test_res"
+sed -i \
+    -e 's|<string name="app_name">[^<]*</string>|<string name="app_name">Phone link proxy (test)</string>|' \
+    -e 's|<string name="tile_label">[^<]*</string>|<string name="tile_label">Proxy (test)</string>|' \
+    "$test_res/values/strings.xml"
+build_apk phone-link-proxy-test "$here/src" "$test_res" \
+    "$here/AndroidManifest.xml" org.phonelink.proxy.test
 build_apk capture "$here/capture/src" "$here/capture/res" "$here/capture/AndroidManifest.xml"
-build_apk devicetest "$here/devicetest/src" "$here/devicetest/res" "$here/devicetest/AndroidManifest.xml"
+# The instrumentation runs inside the app under test, so its manifest has to
+# name that application id: the live harness drives the test package, and
+# PROXY_APP_ID names another build for a run against it.
+proxy_id=${PROXY_APP_ID:-org.phonelink.proxy.test}
+test_manifest="$build/devicetest-manifest.xml"
+sed -e "s|android:targetPackage=\"[^\"]*\"|android:targetPackage=\"$proxy_id\"|" \
+    "$here/devicetest/AndroidManifest.xml" >"$test_manifest"
+build_apk devicetest "$here/devicetest/src" "$here/devicetest/res" "$test_manifest"

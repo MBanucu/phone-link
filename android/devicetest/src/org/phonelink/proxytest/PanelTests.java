@@ -39,8 +39,17 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public final class PanelTests extends Instrumentation {
 
-    private static final String TARGET = "org.phonelink.proxy";
-    private static final String ACTIVITY = TARGET + ".MainActivity";
+    /**
+     * The package the app's classes and its adb actions are named in. It stays
+     * this whatever the app is installed as: build.sh relinks the manifest
+     * under a second id (org.phonelink.proxy.test) and the classes keep their
+     * package, so a component is the installed id plus a class from here, and
+     * an action string is a literal from here.
+     */
+    private static final String CODE = "org.phonelink.proxy";
+
+    /** The application id of the app under test, which is whatever it is installed as. */
+    private String target;
     /** Long enough for a foreground service to come up and the page to hear it. */
     private static final long RUN_TIMEOUT_MS = 20000;
     /** How many claims the run above makes, so a run that stopped early says so. */
@@ -67,6 +76,7 @@ public final class PanelTests extends Instrumentation {
         String first = args == null ? null : args.getString("first");
         String second = args == null ? null : args.getString("second");
         try {
+            target = getTargetContext().getPackageName();
             res = getTargetContext().getResources();
             if (first == null || second == null) {
                 check("the harness names two saved proxies", false,
@@ -173,7 +183,7 @@ public final class PanelTests extends Instrumentation {
 
     private void launch() {
         Intent intent = new Intent(Intent.ACTION_MAIN)
-                .setClassName(TARGET, ACTIVITY)
+                .setClassName(target, CODE + ".MainActivity")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
         activity = startActivitySync(intent);
         waitForIdleSync();
@@ -349,11 +359,13 @@ public final class PanelTests extends Instrumentation {
     // -- the app's own words ---------------------------------------------
 
     private int id(String name) {
-        return res.getIdentifier(name, "id", TARGET);
+        // The resource table is not renamed with the app id, so an id keeps the
+        // code package whatever the app is installed as.
+        return res.getIdentifier(name, "id", CODE);
     }
 
     private String string(String name, Object... args) {
-        int id = res.getIdentifier(name, "string", TARGET);
+        int id = res.getIdentifier(name, "string", CODE);
         return args.length == 0 ? res.getString(id) : res.getString(id, args);
     }
 
@@ -361,8 +373,8 @@ public final class PanelTests extends Instrumentation {
     private void stopEverything() {
         try {
             getTargetContext().startService(new Intent()
-                    .setClassName(TARGET, TARGET + ".ProxyService")
-                    .setAction(TARGET + ".action.STOP"));
+                    .setClassName(target, CODE + ".ProxyService")
+                    .setAction(CODE + ".action.STOP"));
         } catch (RuntimeException e) {
             // The service may already be gone with the activity; nothing to do.
         }

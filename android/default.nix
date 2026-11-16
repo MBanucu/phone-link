@@ -72,6 +72,10 @@ in
         chmod -R u+w app
         ./app/build.sh
         install -Dm644 app/build/phone-link-proxy.apk $out/phone-link-proxy.apk
+        # The same app under org.phonelink.proxy.test: what a live run installs,
+        # so testing an unstable build never replaces the proxy the phone lives
+        # on. A phone can hold both at once.
+        install -Dm644 app/build/phone-link-proxy-test.apk $out/phone-link-proxy-test.apk
         # The test-only accessibility service the live harness takes its dumps
         # from, and the test-only instrumentation that runs the panel's checks
         # inside the proxy's process; nothing installs them but a test run.

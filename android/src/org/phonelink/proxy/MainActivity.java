@@ -561,7 +561,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     private void showHelp() {
         new AlertDialog.Builder(this)
                 .setTitle(R.string.info_title)
-                .setMessage(Help.text())
+                .setMessage(Help.text(getPackageName()))
                 .setPositiveButton(android.R.string.ok, null)
                 .show();
     }

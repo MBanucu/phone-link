@@ -205,7 +205,7 @@ public final class ProxyService extends Service implements Port.Host {
      */
     @Override
     protected void dump(FileDescriptor fd, PrintWriter writer, String[] args) {
-        writer.println(Help.text());
+        writer.println(Help.text(getPackageName()));
         writer.println();
         writer.println("Right now");
         List<Port> all = ports.all();

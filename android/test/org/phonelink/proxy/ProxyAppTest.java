@@ -246,7 +246,7 @@ public final class ProxyAppTest {
         });
 
         test("the help text an agent reads names the whole adb contract", () -> {
-            String text = Help.text();
+            String text = Help.text("org.phonelink.proxy");
             for (String extra : List.of("--ei port", "--es user", "--es password",
                     "--es ssid", "--ez anonymous", "--ez any_network",
                     "--ez auto_start", "--ez adb_wifi", "--es profile")) {
@@ -260,7 +260,22 @@ public final class ProxyAppTest {
                     "no delete-profile action");
             // The panel and the service print this same text, so the command
             // that reaches it from adb has to be in it.
-            assertTrue(text.contains(Help.ADB_DUMP), "help does not say how to print it");
+            assertTrue(text.contains(Help.adbDump("org.phonelink.proxy")),
+                    "help does not say how to print it");
+        });
+
+        test("the help text names the package the app is installed as", () -> {
+            String text = Help.text("org.phonelink.proxy.test");
+            // The id is what adb is given, the class keeps its package, so both
+            // halves have to be there for a command that would actually work.
+            assertTrue(text.contains("org.phonelink.proxy.test/org.phonelink.proxy.ProxyService"),
+                    "a test build points at the wrong service");
+            assertTrue(text.contains("org.phonelink.proxy.test/org.phonelink.proxy.MainActivity"),
+                    "a test build points at the wrong activity");
+            assertFalse(text.contains("org.phonelink.proxy/.ProxyService"),
+                    "a test build still prints the stable component");
+            // The actions are literals in the code, so they do not move with the id.
+            assertTrue(text.contains("org.phonelink.proxy.action.START"), "no start action");
         });
 
         test("the traffic counters and the window the sparkline draws", () -> {
@@ -566,6 +581,12 @@ public final class ProxyAppTest {
 
     private static void assertTrue(boolean condition, String what) {
         if (!condition) {
+            throw new AssertionError(what);
+        }
+    }
+
+    private static void assertFalse(boolean condition, String what) {
+        if (condition) {
             throw new AssertionError(what);
         }
     }
