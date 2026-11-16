@@ -98,24 +98,3 @@ list is empty.
   `org.phonelink.proxy` as its default, so one variable still says which app
   the tools mean. The old app's uninstall and data-clear steps must not stop
   working for whoever still runs it.
-
-## A run says how long it has left
-
-- [ ] A full run is twenty-odd steps and a quarter of an hour, and the only
-  progress the log gives while it goes is which step started and which checks
-  passed: a number that would come from what is already on disk —
-  `result-live/timings.csv` has one row
-  per step per run, seconds included — is never used, so watching from a
-  terminal means guessing when it will be done, and a step that is stuck
-  looks exactly like a step that is slow. The estimate should be printed
-  often enough to watch: a line every fifteen seconds or so with the step it
-  is in, how long that step has been running and how much is left, the steps
-  still to come each at their median over the last few runs, and the total.
-  The current step's own elapsed time has to be part of it, or the number
-  freezes exactly while it matters; a step the history has never seen — every
-  new check writes one — takes the median of the others rather than making
-  the line blank; and a filtered run estimates only the steps it will run, so
-  `PHONE_LIVE_ONLY` does not promise a quarter of an hour for one step. The
-  last line should say what the run actually took, so the next estimate can
-  be judged against it. The cost is one read of a small CSV at the start and
-  a ticker that never touches the phone.

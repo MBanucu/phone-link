@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A live run says how much of it is left. `result-live/timings.csv` kept one row
+  per step per run and was only ever read after the fact; the harness now prices
+  the steps it is about to take at the median of their last five runs, marks a
+  step with no history of its own (`~`) and lends it the median of the others,
+  prints the plan once, and then a line every fifteen seconds naming the step it
+  is in, how long that step has been running, what it usually takes and what the
+  run has left. A step that outlives its estimate makes the rest of the run look
+  slower rather than pinning the number at zero, which is what a run stuck on one
+  step would otherwise read as, and the last line compares the two: the first
+  full run planned 6m59s and took 7m01s (+1%). A filtered run is priced as the
+  steps it asked for, not as all of them. The arithmetic is `tests/live/eta.sh`,
+  plain bash and awk, and `tests/eta.test.sh` covers it without a phone;
+  `PHONE_LIVE_ETA=0` turns the estimate off, `PHONE_LIVE_ETA_EVERY` and
+  `PHONE_LIVE_ETA_RUNS` are the knobs.
+
 - The Quick Settings tile can take more than one press to turn off. A press
   used to have two states — start the tile's set, stop it — so a phone whose
   proxies are really two sets, a narrow one that is always on and a wider one

@@ -83,6 +83,16 @@
 # test port), and says in the log and in timings.csv that it was partial: it
 # writes a PARTIAL row where a full run writes TOTAL, so the
 # history can never mistake it for a run that was green all the way through.
+#
+# While it runs it says how much is left, from that same history: the plan line
+# prices every step at the median of its last few runs, and a line every fifteen
+# seconds names the step it is in, how long that step has been running, what it
+# usually takes and what the run has left. A step that outlives its estimate
+# makes the whole run look slower instead of leaving a number that stopped
+# moving, and the last line says what the run really took, which is what the
+# next plan is judged against. PHONE_LIVE_ETA=0 turns it off;
+# PHONE_LIVE_ETA_EVERY (seconds) and PHONE_LIVE_ETA_RUNS (how many runs a median
+# is taken over) are the knobs.
 set -u
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -254,6 +264,7 @@ step() {
   step_name=$1
   step_start=$(now_ms)
   printf '\n== %s\n' "$*"
+  eta_mark "$1" "$step_start"
 }
 
 serial=${PHONE_SERIAL:-}
@@ -291,6 +302,8 @@ printf 'decided_ms,port,ping_ip,ping_host,egress,verdict\n' >"$UPLINK"
 # How to look at and drive the phone lives in its own file; this one decides
 # what the phone showed means.
 . "$ROOT/tests/live/phone.sh"
+# How much of the run is left, from the step timings of the runs before it.
+. "$ROOT/tests/live/eta.sh"
 
 # Set when this run woke the phone, so it can be put back to sleep.
 unlocked=0
@@ -301,6 +314,16 @@ finished=0
 partial=0
 # Set when this run changed the screen timeout, so the old one can go back.
 screen_timeout=""
+# The estimate of what is left: the file the ticker reads, the step prices it
+# reads them from, and the plan the last line is judged against.
+eta_on=${PHONE_LIVE_ETA:-1}
+eta_every=${PHONE_LIVE_ETA_EVERY:-15}
+eta_pid=""
+eta_state=""
+eta_planned=""
+ETA_STATE=""
+ETA_ORDER=()
+ETA_PLAN_MS=0
 
 # --- the evidence a failed run leaves behind -----------------------------
 
@@ -317,6 +340,12 @@ clock_failed=""
 
 cleanup() {
   stop_capture
+  # The estimate stops before the epilogue: its checks are part of the run's
+  # verdict, and a ticker line between them would read as one of them.
+  if [ -n "${eta_pid:-}" ]; then
+    kill "$eta_pid" 2>/dev/null || true
+    eta_pid=""
+  fi
   # Which profiles are there has to be read before the service is stopped: the
   # dump is empty afterwards, and a guard that reads nothing deletes nothing.
   # Two spaces after the name: the help text above the facts also has a line
@@ -413,6 +442,16 @@ cleanup() {
   else
     timing_row TOTAL "$total" "$pass" "$fail" \
       "$([ "$fail" -eq 0 ] && echo ok || echo failed)"
+  fi
+  if [ -n "${eta_state:-}" ]; then
+    rm -f "$eta_state" "$eta_state.part"
+  fi
+  if [ -n "${eta_planned:-}" ] && [ "$eta_planned" -gt 0 ]; then
+    printf 'eta %s taken, %s planned (%s)\n' \
+      "$(eta_fmt "$(awk -v s="$total" 'BEGIN { printf "%d", s * 1000 }')")" \
+      "$(eta_fmt "$eta_planned")" \
+      "$(awk -v taken="$total" -v planned="$eta_planned" \
+        'BEGIN { printf "%+.0f%%", (taken * 1000 - planned) * 100 / planned }')"
   fi
   printf 'timings: %s\n' "$TIMINGS"
   printf 'artifacts: %s\n' "$ARTIFACTS"
@@ -1952,6 +1991,35 @@ if [ -n "$only" ]; then
     exit 2
   fi
   printf 'a partial run: only %s, and the preamble every step assumes\n' "$only"
+fi
+
+# What this run should cost, priced before the first step: the steps the loop
+# below will take, each at the median of its last runs. A filtered run pays for
+# the steps it asked for and not for the whole suite.
+if [ "$eta_on" = 1 ]; then
+  ETA_ORDER=()
+  for planned_step in "${STEPS[@]}"; do
+    case $planned_step in
+      unlock | install) ;;
+      *)
+        wanted "$planned_step" || continue
+        ;;
+    esac
+    ETA_ORDER+=("$planned_step")
+  done
+  eta_load "$TIMINGS" "${PHONE_LIVE_ETA_RUNS:-5}"
+  declare -A ETA_EST=()
+  eta_borrowed=$(eta_fallback)
+  for planned_step in "${ETA_ORDER[@]}"; do
+    ETA_EST[$planned_step]=${ETA_MEDIAN[$planned_step]:-$eta_borrowed}
+    ETA_EST[$planned_step]=${ETA_EST[$planned_step]:-0}
+  done
+  eta_plan "${ETA_ORDER[@]}"
+  eta_planned=$ETA_PLAN_MS
+  eta_state=$(mktemp)
+  ETA_STATE=$eta_state
+  eta_ticker "$eta_state" "$eta_every" &
+  eta_pid=$!
 fi
 
 # The loop keeps its own name: a step's body is free to use `name` for its own
