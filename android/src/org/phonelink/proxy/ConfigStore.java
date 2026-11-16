@@ -50,6 +50,7 @@ final class ConfigStore {
     /** What a click on the tile starts, and what it stops, as {@link TileScope}. */
     private static final String KEY_TILE_START = "tile_start";
     private static final String KEY_TILE_STOP = "tile_stop";
+    private static final String KEY_TILE_CYCLE = "tile_cycle";
     static final String KEY_SELECTED_PROFILE = "selected_profile";
     static final String KEY_IN_USE = "in_use";
 
@@ -223,6 +224,18 @@ final class ConfigStore {
 
     static void setTileStop(Context context, TileScope scope) {
         prefs(context).edit().putString(KEY_TILE_STOP, scope.name()).apply();
+    }
+
+    /**
+     * The sets a click brings up between the start side and the stop side, in
+     * the order it walks them; empty is the switch the tile always was.
+     */
+    static List<TileScope> tileCycle(Context context) {
+        return TileCycle.parse(prefs(context).getString(KEY_TILE_CYCLE, null));
+    }
+
+    static void setTileCycle(Context context, List<TileScope> cycle) {
+        prefs(context).edit().putString(KEY_TILE_CYCLE, TileCycle.format(cycle)).apply();
     }
 
     /** The proxies the tile starts and stops, by name; empty means none bound. */

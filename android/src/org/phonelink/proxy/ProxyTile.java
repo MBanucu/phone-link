@@ -22,6 +22,9 @@ import java.util.List;
  * which proxies are on it and how far a click reaches in each direction: the
  * ones on the tile, the one in use, or all of them. A click while something it
  * starts is up takes the stop side; a proxy it does not name is left as it is.
+ * With a {@link TileCycle} the presses in between bring up the sets it lists —
+ * the tile's proxies, then every saved proxy, then off — and the subtitle names
+ * the set that is up.
  * With nothing configured the tile is what it always was: a click starts the
  * proxy in use and stops everything. What that means is {@link TilePlan}'s
  * decision, in plain Java, so the rules are covered without a phone.
@@ -60,7 +63,9 @@ public final class ProxyTile extends TileService implements ProxyRuntime.Listene
             start(null);
             return;
         }
-        if (!plan.up) {
+        // Everything the click starts: the start side while nothing of it is
+        // up, and the set of the cycle that the last press left missing.
+        if (!plan.start.isEmpty()) {
             for (String name : plan.start) {
                 start(name);
             }
@@ -98,6 +103,7 @@ public final class ProxyTile extends TileService implements ProxyRuntime.Listene
                 ConfigStore.inUse(this),
                 ConfigStore.profileNames(this),
                 ConfigStore.tileStart(this),
+                ConfigStore.tileCycle(this),
                 ConfigStore.tileStop(this),
                 ProxyRuntime.states());
     }
@@ -127,17 +133,36 @@ public final class ProxyTile extends TileService implements ProxyRuntime.Listene
         tile.setLabel(getString(R.string.tile_label));
         tile.setIcon(Icon.createWithResource(this, R.drawable.ic_stat_proxy));
         tile.setState(plan.listening ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE);
-        tile.setSubtitle(subtitle(plan.listening, plan.up));
+        tile.setSubtitle(subtitle(plan));
         tile.updateTile();
     }
 
-    private String subtitle(boolean listening, boolean up) {
-        if (listening) {
-            return getString(R.string.tile_listening);
+    /**
+     * What the shade says under the label. A set the cycle brought up names
+     * itself once it is complete — with one tile and three possible meanings,
+     * "listening" says which switch is on but not how far it reached.
+     */
+    private String subtitle(TilePlan plan) {
+        if (plan.listening) {
+            return switched(plan.cycleUp);
         }
-        if (up) {
+        if (plan.up) {
             return getString(R.string.tile_paused);
         }
         return getString(R.string.tile_off);
+    }
+
+    private String switched(TileScope up) {
+        if (up == null) {
+            return getString(R.string.tile_listening);
+        }
+        switch (up) {
+            case IN_USE:
+                return getString(R.string.tile_listening_in_use);
+            case ALL:
+                return getString(R.string.tile_listening_all);
+            default:
+                return getString(R.string.tile_listening_tile);
+        }
     }
 }

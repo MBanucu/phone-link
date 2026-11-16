@@ -247,6 +247,8 @@ public final class ProxyService extends Service implements Port.Host {
                 + (bound.isEmpty() ? "nothing bound" : String.join(", ", bound)));
         writer.println("  tile_start  " + ConfigStore.tileStart(this).name().toLowerCase());
         writer.println("  tile_stop   " + ConfigStore.tileStop(this).name().toLowerCase());
+        writer.println("  tile_cycle  "
+                + TileCycle.shown(ConfigStore.tileCycle(this)));
         List<String> saved = ConfigStore.profileNames(this);
         if (saved.isEmpty()) {
             writer.println("  saved       none");

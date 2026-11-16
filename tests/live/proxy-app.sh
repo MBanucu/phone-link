@@ -1647,6 +1647,30 @@ step_tile() {
       bad 'the tile settings go back to their narrow default'
     fi
 
+    # The cycle is empty until one is asked for, and a run that died before its
+    # untick would leave it on: the store says which box is ticked, so each
+    # visit clears one. Nothing to clear is the common case and costs no visit.
+    for attempt in 1 2 3; do
+      cycle=$(shell dumpsys activity service "$SERVICE" 2>/dev/null |
+        sed -n 's/^ *tile_cycle  *//p' | head -1)
+      case ",$cycle," in
+        *,tile,*) box=cycle_tile ;;
+        *,in_use,*) box=cycle_in_use ;;
+        *,all,*) box=cycle_all ;;
+        *) box="" ;;
+      esac
+      [ -n "$box" ] || break
+      if open_panel && menu_pick 'The tile' && panel_tap "$box"; then :; fi
+      back >/dev/null 2>&1
+      settle
+    done
+    if shell dumpsys activity service "$SERVICE" 2>/dev/null |
+      grep -q 'tile_cycle  none'; then
+      ok 'the tile has no cycle until one is asked for'
+    else
+      bad 'the tile has no cycle until one is asked for'
+    fi
+
     # Nothing is on the tile, so it is the switch it always was: a click starts
     # the configuration the last start stored, and the next one stops
     # everything.
@@ -1771,7 +1795,7 @@ step_tile() {
       else
         bad 'the page has a start side and a stop side'
       fi
-      if ui_tap_id stop_all; then
+      if panel_tap stop_all; then
         # The radios store as they are tapped, so the service's own view of the
         # tile says what the next click will stop.
         sleep 1
@@ -1785,10 +1809,69 @@ step_tile() {
       else
         bad 'the stop side can be chosen'
       fi
+      if panel_tap cycle_all && sleep 1 &&
+        shell dumpsys activity service "$SERVICE" |
+        grep -q 'tile_cycle  all'; then
+        ok 'a cycle asks for every saved proxy between the two ends'
+      else
+        bad 'a cycle asks for every saved proxy between the two ends'
+      fi
       back >/dev/null 2>&1
       settle
     else
       bad "the menu offers the tile's page"
+      panel_where
+    fi
+
+    # Three presses now: the tile's own set, then the set the cycle adds, then
+    # the stop side. The third proxy is saved but not on the tile, so the second
+    # press is the only one that starts it — and the first must not, or the
+    # press before it already meant everything.
+    shell am start-foreground-service -n "$SERVICE" -a "$STOP" >/dev/null 2>&1
+    sleep 2
+    tile_click
+    sleep 3
+    if through "$PORT_T1" "$USER_NAME" "$PASSWORD" &&
+      through "$PORT_T2" "$USER_NAME" "$PASSWORD" && closed "$PORT_T3"; then
+      ok "the first press is the tile's own set"
+    else
+      bad "the first press is the tile's own set"
+    fi
+    tile_click
+    sleep 3
+    if through "$PORT_T3" "$USER_NAME" "$PASSWORD" &&
+      through "$PORT_T1" "$USER_NAME" "$PASSWORD" &&
+      through "$PORT_T2" "$USER_NAME" "$PASSWORD"; then
+      ok 'the second press adds the set the cycle names and starts only what is missing'
+    else
+      bad 'the second press adds the set the cycle names and starts only what is missing'
+    fi
+    tile_click
+    sleep 3
+    if closed "$PORT_T1" && closed "$PORT_T2" && closed "$PORT_T3" && ! foreground; then
+      ok 'the third press is the stop side'
+    else
+      bad 'the third press is the stop side'
+    fi
+
+    # The cycle goes back to empty, so the tile the next run meets has the two
+    # states it always had. The store answers while the service runs, so a
+    # start goes first.
+    start_app --es ssid "$SSID" --ez any_network false
+    sleep 2
+    shell cmd statusbar collapse >/dev/null 2>&1
+    sleep 1
+    if open_panel && menu_pick 'The tile' && panel_tap cycle_all; then
+      sleep 1
+      if shell dumpsys activity service "$SERVICE" | grep -q 'tile_cycle  none'; then
+        ok 'unticking the cycle leaves the tile with two states again'
+      else
+        bad 'unticking the cycle leaves the tile with two states again'
+      fi
+      back >/dev/null 2>&1
+      settle
+    else
+      bad 'unticking the cycle leaves the tile with two states again'
       panel_where
     fi
 

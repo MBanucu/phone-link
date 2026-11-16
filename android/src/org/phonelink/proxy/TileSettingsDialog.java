@@ -9,6 +9,8 @@ import android.widget.LinearLayout;
 import android.widget.RadioGroup;
 import android.widget.TextView;
 
+import java.util.List;
+
 /**
  * The Quick Settings tile's own page: what a click starts, what it stops, and
  * which proxies are on it.
@@ -34,6 +36,23 @@ final class TileSettingsDialog {
         RadioGroup start = view.findViewById(R.id.start_scope);
         RadioGroup stop = view.findViewById(R.id.stop_scope);
         LinearLayout profiles = view.findViewById(R.id.tile_profiles);
+
+        List<TileScope> cycle = ConfigStore.tileCycle(activity);
+        CheckBox cycleTile = view.findViewById(R.id.cycle_tile);
+        CheckBox cycleInUse = view.findViewById(R.id.cycle_in_use);
+        CheckBox cycleAll = view.findViewById(R.id.cycle_all);
+        cycleTile.setChecked(TileCycle.has(cycle, TileScope.TILE));
+        cycleInUse.setChecked(TileCycle.has(cycle, TileScope.IN_USE));
+        cycleAll.setChecked(TileCycle.has(cycle, TileScope.ALL));
+        cycleTile.setOnCheckedChangeListener((button, checked) ->
+                ConfigStore.setTileCycle(activity,
+                        TileCycle.with(ConfigStore.tileCycle(activity), TileScope.TILE, checked)));
+        cycleInUse.setOnCheckedChangeListener((button, checked) ->
+                ConfigStore.setTileCycle(activity, TileCycle.with(
+                        ConfigStore.tileCycle(activity), TileScope.IN_USE, checked)));
+        cycleAll.setOnCheckedChangeListener((button, checked) ->
+                ConfigStore.setTileCycle(activity,
+                        TileCycle.with(ConfigStore.tileCycle(activity), TileScope.ALL, checked)));
 
         start.check(startRadio(ConfigStore.tileStart(activity)));
         stop.check(stopRadio(ConfigStore.tileStop(activity)));

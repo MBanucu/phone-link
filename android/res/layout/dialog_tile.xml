@@ -43,6 +43,36 @@
         <TextView
             style="@style/SectionHeader"
             android:paddingTop="12dp"
+            android:text="@string/tile_cycle_label" />
+
+        <LinearLayout
+            android:id="@+id/tile_cycle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <CheckBox
+                android:id="@+id/cycle_tile"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/tile_scope_tile" />
+
+            <CheckBox
+                android:id="@+id/cycle_in_use"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/tile_scope_in_use" />
+
+            <CheckBox
+                android:id="@+id/cycle_all"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/tile_scope_all_saved" />
+        </LinearLayout>
+
+        <TextView
+            style="@style/SectionHeader"
+            android:paddingTop="12dp"
             android:text="@string/tile_stop_label" />
 
         <RadioGroup

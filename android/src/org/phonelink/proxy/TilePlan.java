@@ -15,6 +15,13 @@ import java.util.List;
  * use, or every saved proxy. The start side is what "the tile is on" means, so
  * the icon follows it; a click while anything of it is up takes the stop side.
  *
+ * <p>Between the two ends a click can bring up more than one set: the
+ * {@link TileCycle} lists sets to add on the way, so a tile can mean "the tile's
+ * proxies, then every saved proxy, then off" in three presses. A set that is
+ * already fully up is left alone, and a wider one only adds what is missing — a
+ * listener that is already up would be replaced on its port and lose its
+ * clients.
+ *
  * <p>A tile whose start side names nothing keeps the behaviour it always had —
  * {@link #fallback}, where the caller starts the configuration the last start
  * stored and stops everything — so a phone with one proxy needs no
@@ -39,15 +46,22 @@ final class TilePlan {
     final List<String> stop;
     /** Whether the click stops everything, which is a stop with no name. */
     final boolean stopAll;
+    /**
+     * The widest set of the cycle that is fully up, or null when only the start
+     * side is. The subtitle names it, because a cycle nobody can read is a cycle
+     * people get lost in.
+     */
+    final TileScope cycleUp;
 
     private TilePlan(boolean fallback, boolean up, boolean listening,
-            List<String> start, List<String> stop, boolean stopAll) {
+            List<String> start, List<String> stop, boolean stopAll, TileScope cycleUp) {
         this.fallback = fallback;
         this.up = up;
         this.listening = listening;
         this.start = start;
         this.stop = stop;
         this.stopAll = stopAll;
+        this.cycleUp = cycleUp;
     }
 
     /**
@@ -60,7 +74,8 @@ final class TilePlan {
      *     somebody else's and is ignored
      */
     static TilePlan of(List<String> bound, String inUse, List<String> saved,
-            TileScope startScope, TileScope stopScope, List<ProxyState> states) {
+            TileScope startScope, List<TileScope> cycle, TileScope stopScope,
+            List<ProxyState> states) {
         List<String> start = names(startScope, bound, inUse, saved);
         boolean stopAll = stopScope == TileScope.ALL;
         // Everything is one stop with no name, so it needs no list of names.
@@ -71,7 +86,11 @@ final class TilePlan {
 
         boolean up = false;
         boolean listening = false;
+        List<String> live = new ArrayList<>();
         for (ProxyState state : states) {
+            if (state.listening) {
+                live.add(state.name);
+            }
             // The fallback has no names to compare with, so it speaks for all
             // of them: that is what "the tile is on" meant before settings.
             if (fallback || start.contains(state.name)) {
@@ -83,15 +102,41 @@ final class TilePlan {
         }
         if (fallback) {
             return new TilePlan(true, up, listening,
-                    Collections.emptyList(), Collections.emptyList(), false);
+                    Collections.emptyList(), Collections.emptyList(), false, null);
         }
         // A click does one thing, so only the direction it takes is filled:
-        // the start side while nothing of it is up, the stop side while it is.
-        return up
-                ? new TilePlan(false, true, listening,
-                        Collections.emptyList(), Collections.unmodifiableList(stop), stopAll)
-                : new TilePlan(false, false, false,
-                        Collections.unmodifiableList(start), Collections.emptyList(), false);
+        // the start side while nothing of it is up, a set of the cycle that is
+        // not up yet, and the stop side once every set of it is.
+        if (!up) {
+            return new TilePlan(false, false, false,
+                    Collections.unmodifiableList(start), Collections.emptyList(), false, null);
+        }
+        TileScope cycleUp = null;
+        List<String> missing = Collections.emptyList();
+        for (TileScope scope : cycle) {
+            List<String> names = names(scope, bound, inUse, saved);
+            if (names.isEmpty()) {
+                continue;
+            }
+            List<String> absent = new ArrayList<>();
+            for (String name : names) {
+                if (!live.contains(name)) {
+                    absent.add(name);
+                }
+            }
+            if (absent.isEmpty()) {
+                cycleUp = scope;
+                continue;
+            }
+            missing = absent;
+            break;
+        }
+        if (!missing.isEmpty()) {
+            return new TilePlan(false, true, listening,
+                    Collections.unmodifiableList(missing), Collections.emptyList(), false, cycleUp);
+        }
+        return new TilePlan(false, true, listening,
+                Collections.emptyList(), Collections.unmodifiableList(stop), stopAll, cycleUp);
     }
 
     /** The proxies a scope reaches, in a stable order; TILE's order is the store's. */

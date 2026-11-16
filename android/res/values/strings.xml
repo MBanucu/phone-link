@@ -21,7 +21,8 @@
     <string name="menu_tile">The tile</string>
     <string name="tile_settings_title">Quick Settings tile</string>
     <string name="tile_start_label">A click while the tile is off starts</string>
-    <string name="tile_stop_label">A click while the tile is on stops</string>
+    <string name="tile_cycle_label">A click while the tile is on brings up, in this order</string>
+    <string name="tile_stop_label">A click once every set is up stops</string>
     <string name="tile_scope_tile">The proxies on the tile</string>
     <string name="tile_scope_started">The ones it started</string>
     <string name="tile_scope_in_use">The proxy in use</string>
@@ -29,7 +30,7 @@
     <string name="tile_scope_every">Every proxy</string>
     <string name="tile_profiles_label">On the tile</string>
     <string name="tile_profiles_empty">No saved proxies yet: save one in the app and it appears here.</string>
-    <string name="tile_settings_footnote">A proxy the tile does not name is left as it is. With nothing on the tile, a click starts the proxy in use and stops everything — what the tile did before it had settings.</string>
+    <string name="tile_settings_footnote">A proxy the tile does not name is left as it is. A set that is already up is skipped, and a wider one only starts what is missing, because a listener that is already on its port would be replaced. With nothing on the tile, a click starts the proxy in use and stops everything — what the tile did before it had settings.</string>
     <string name="warning_description">The proxy will not restart after a reboot: tap to change that</string>
     <string name="tab_listener">Listener</string>
     <string name="tab_service">Service</string>
@@ -126,6 +127,9 @@
 
     <string name="tile_label">Proxy</string>
     <string name="tile_listening">listening</string>
+    <string name="tile_listening_tile">listening: the tile\'s</string>
+    <string name="tile_listening_in_use">listening: in use</string>
+    <string name="tile_listening_all">listening: every saved proxy</string>
     <string name="tile_paused">paused</string>
     <string name="tile_off">off</string>
     <string name="tile_open_app">Open the app to start the proxy</string>

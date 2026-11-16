@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The Quick Settings tile can take more than one press to turn off. A press
+  used to have two states — start the tile's set, stop it — so a phone whose
+  proxies are really two sets, a narrow one that is always on and a wider one
+  for the laptop, had to start the second from the panel. "The tile" now has a
+  cycle: sets (the tile's proxies, the proxy in use, every saved proxy) that a
+  press brings up in that order before the stop side. A set that is already
+  fully up is skipped and a wider one starts only what is missing, because a
+  listener that is already up would be replaced on its port and lose its
+  clients — the second press of "the tile's proxies, then every saved proxy,
+  then off" adds the saved ones and leaves the running ones alone, and the
+  third stops them all. The subtitle names the set that is up, since a cycle
+  nobody can read is a cycle people get lost in: "listening: the tile's",
+  "listening: every saved proxy". Empty by default, so the tile is what it
+  always was until someone asks for a cycle; `dumpsys` says
+  `tile_cycle  none` or names the sets, and the live tile step ticks the box,
+  presses three times and requires the tile's set, then the saved ones, then
+  nothing, before unticking it again.
+
 - The app builds twice, so a test build can live beside the one the phone runs.
   `build.sh` writes `phone-link-proxy.apk` under `org.phonelink.proxy` and
   `phone-link-proxy-test.apk` under `org.phonelink.proxy.test` from the same

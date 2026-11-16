@@ -4,21 +4,6 @@ Ideas taken from the user's messages, in the order they are being built.
 Delete an item once it is implemented and committed; delete the file when the
 list is empty.
 
-## A tile with more than two states
-
-- [ ] A press can only choose between off and listening — the phone's third
-  state, paused, belongs to the SSID gate and not to a click — so "more
-  states" here can only mean more than one *set* to have on: the proxies on
-  the tile, the proxy in use, every saved proxy. A cycle is then a list of
-  those sets plus off, each of them toggleable so the phone can skip one:
-  press 1 the tile's set, press 2 every saved proxy, press 3 off. Two things
-  would have to be true for it to be worth it: the subtitle has to name the
-  set that is up, because a cycle nobody can read is a cycle people get lost
-  in, and a wider set may only add what is missing — starting a listener that
-  is already up replaces it on its port and drops its clients. Today's start
-  and stop sides already say "start everything, stop only my own"; the cycle
-  is for a third press that is genuinely wanted.
-
 ## A failure brings its own pictures
 
 - [ ] When a check fails, pull the frames that explain it out of the recording
