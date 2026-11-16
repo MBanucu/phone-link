@@ -99,6 +99,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A filtered run counted its preamble nowhere: the seconds that start a proxy on
+  the test port and save it — the thing every filtered step opens by — were spent
+  but never priced, so the estimate ran short. The second run of `PHONE_LIVE_ONLY
+  ="stop"` planned 19.2 s and took 32.9 s (+71%). The preamble is a step of its
+  own now — `== preamble` in the log and a row in `timings.csv` — so it is timed,
+  priced and borrowed like every other step until it has a history: the next run
+  planned 31.9 s against 32.0 s taken (+0%).
+
 - `RENAME_PROFILE renames from adb` waited two seconds after the intent and then
   asked the dump once, which is a guess at whose write lands second: the panel
   is open at that moment and rewrites its own view of the store, and in a full

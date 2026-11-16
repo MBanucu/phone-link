@@ -79,8 +79,9 @@
 # name the log prints, instead of all twenty-three. The steps are not
 # independent — most assume the phone is awake, the app is installed and a
 # proxy is saved under the name their page opens by — so a filtered run always
-# does that preamble (the `unlock` and `install` steps, then one proxy on the
-# test port), and says in the log and in timings.csv that it was partial: it
+# does that preamble (the `unlock` and `install` steps, then a step of its own
+# that starts one proxy on the test port and saves it), and says in the log and
+# in timings.csv that it was partial: it
 # writes a PARTIAL row where a full run writes TOTAL, so the
 # history can never mistake it for a run that was green all the way through.
 #
@@ -92,7 +93,9 @@
 # moving, and a step that runs away — twice its usual time and half a minute
 # over it — says so in a line of its own, once, so a hang is not just a number
 # that keeps growing. The last line says what the run really took, which is what
-# the next plan is judged against. PHONE_LIVE_ETA=0 turns it off;
+# the next plan is judged against. A filtered run is priced as the steps it
+# asked for plus the preamble it pays, which is a step of its own for exactly
+# that reason. PHONE_LIVE_ETA=0 turns it off;
 # PHONE_LIVE_ETA_EVERY (seconds) and PHONE_LIVE_ETA_RUNS (how many runs a median
 # is taken over) are the knobs.
 set -u
@@ -1957,6 +1960,10 @@ wanted() { # wanted NAME
 # two are steps of their own; the third is this, and it is what a filtered run
 # does between them.
 preamble() {
+  # A step of its own, because it is what a filtered run pays on top of the
+  # steps it asked for: timed, written to timings.csv and priced like the rest,
+  # instead of a cost no estimate and no history ever saw.
+  step 'preamble'
   start_app --es ssid "$SSID" --ez any_network false --ei port "$PORT"
   sleep 2
   save_profile harness-panel
@@ -2008,6 +2015,10 @@ if [ "$eta_on" = 1 ]; then
         ;;
     esac
     ETA_ORDER+=("$planned_step")
+    # The preamble runs after install, and only a filtered run pays for it.
+    if [ "$planned_step" = install ] && [ -n "$only" ]; then
+      ETA_ORDER+=("preamble")
+    fi
   done
   eta_load "$TIMINGS" "${PHONE_LIVE_ETA_RUNS:-5}"
   declare -A ETA_EST=()
