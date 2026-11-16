@@ -14,43 +14,23 @@
       eachSystem = f: lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
       version = "0.8.0";
 
-      scripts = [
-        "adb-wifi-connect"
-        "net-check"
-        "phone-adb-wifi"
-        "phone-ap-create"
-        "phone-ap-delete"
-        "phone-ap-down"
-        "phone-ap-up"
-        "phone-doctor"
-        "phone-doctor-fix"
-        "phone-fix-apk"
-        "phone-fix-forwarding"
-        "phone-fix-internet"
-        "phone-fix-mobile-data"
-        "phone-fix-tunnel"
-        "phone-link-uninstall"
-        "phone-net-status"
-        "phone-proxy-battery-whitelist"
-        "phone-proxy-boot"
-        "phone-proxy-check"
-        "phone-proxy-data-clear"
-        "phone-proxy-install"
-        "phone-proxy-setup"
-        "phone-proxy-start"
-        "phone-proxy-stop"
-        "phone-proxy-uninstall"
-        "phone-reboot-unlock"
-        "phone-tether-cycle"
-        "phone-tunnel-run"
-        "phone-unlock"
-        "phone-usb-tether-check"
-        "phone-usb-tether-default"
-        "phone-wifi-concurrency"
-        "phone-wifi-connect"
-        "phone-wifi-enable"
-        "phone-wifi-forget"
-      ];
+      # Every script in bin/ is packaged, except the entry points that are not
+      # actions: the CLI, which is coreScripts, and the GUI's two, which its own
+      # package installs. Generated from the directory, because the typed list
+      # drifted — phone-proxy-boot was in bin/ and in the action registry and not
+      # here, so it worked from a checkout and did not exist once installed, and
+      # only a full `nix flake check` said anything.
+      scripts =
+        let
+          entries = builtins.readDir ./bin;
+          regular = lib.filterAttrs (_: type: type == "regular") entries;
+          notActions = [
+            "phone-link"
+            "phone-link-gui"
+            "phone-link-gui-screenshots"
+          ];
+        in
+        builtins.filter (name: !builtins.elem name notActions) (builtins.attrNames regular);
 
       # Installed next to the scripts but deliberately outside the registry:
       # the registry check requires exactly one action per script, and these

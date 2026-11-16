@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The flake packages every script in `bin/` instead of a typed list. The list
+  had already drifted — `phone-proxy-boot` was in `bin/` and in the action
+  registry but not in the package, so it worked from a checkout and did not
+  exist once installed — and only `nix flake check` said so. `phone-link` and
+  the GUI stay out by name.
+
 - `phone-doctor-fix` starts the proxy after the AP and the phone's link are
   back. The app only listens on the network the phone joined, so a `SETUP` sent
   while the AP was down was refused by its own SSID gate and the repair reported
