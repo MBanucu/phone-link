@@ -17,9 +17,6 @@ from pathlib import Path
 from .. import phone, settings
 from ..shell import capture, die, have, log, run_both, run_text, status
 
-# The repository a release is published from: --release reads its latest
-# release, or the tag it is given, rather than guessing at F-Droid or GitHub.
-PHONE_LINK_REPO = os.environ.get("PHONE_LINK_REPO", "MBanucu/phone-link")
 
 USAGE_MOBILE_DATA = """usage: phone-fix-mobile-data [--check]
 
@@ -736,19 +733,19 @@ def phone_proxy_install(args: list[str]) -> int:
         tag = extra[0] if extra else ""
         wanted = tag or "latest"
         api = (
-            f"https://api.github.com/repos/{PHONE_LINK_REPO}/releases/tags/{tag}"
+            f"https://api.github.com/repos/{settings.PHONE_LINK_REPO}/releases/tags/{tag}"
             if tag
-            else f"https://api.github.com/repos/{PHONE_LINK_REPO}/releases/latest"
+            else f"https://api.github.com/repos/{settings.PHONE_LINK_REPO}/releases/latest"
         )
         code, body = run_text(["curl", "-fsSL", "--max-time", "30", api], timeout=40)
         if code != 0:
-            die(f"cannot read the {wanted} release of {PHONE_LINK_REPO}")
+            die(f"cannot read the {wanted} release of {settings.PHONE_LINK_REPO}")
         # The release's assets are the only thing needed from the document, and
         # the APK is the one asset without a suffix.
         urls = re.findall(r'"browser_download_url":\s*"([^"]+)"', body)
         apk_url = next((url for url in urls if url.endswith(".apk")), "")
         if not apk_url:
-            die(f"the {wanted} release of {PHONE_LINK_REPO} has no APK attached")
+            die(f"the {wanted} release of {settings.PHONE_LINK_REPO} has no APK attached")
         name = apk_url.rsplit("/", 1)[-1]
         log(f"release: {wanted} ({name})")
 

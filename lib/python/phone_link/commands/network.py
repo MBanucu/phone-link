@@ -9,15 +9,17 @@ tunnel repairs wrap just the `sysctl`/`systemctl` call.
 from __future__ import annotations
 
 import glob
+import hashlib
 import os
 import re
 import secrets as random_secrets
+import shutil
 import sys
 import tempfile
 import time
 
 from .. import actions, phone, settings
-from ..shell import capture, die, log, must, run, status
+from ..shell import capture, die, log, must, run, run_text, status
 
 USAGE_FORWARDING = """usage: phone-fix-forwarding [--check]
 
@@ -61,12 +63,18 @@ USB tethering and the phone hotspot (the laptop joining as a client), checking
 HTTPS after each step. --check only reports whether internet already works.
 """
 
-USAGE_FIX_APK = """usage: phone-fix-apk [--refresh] [--check]
+USAGE_FIX_APK = """usage: phone-fix-apk [--refresh] [--releases [N]] [--check]
 
 Caches this checkout's proxy APK (or PHONE_PROXY_APK) in the ambulance cache
 (default /var/cache/phone-link) so a repair can reinstall the app when the tree
-is not here. Nothing is downloaded: a build is a file. --refresh replaces an
-older copy; --check only reports.
+is not here: a build is a file, so keeping one is a copy.
+
+--releases also keeps the APKs attached to the newest N releases of this
+repository (5 when no number is given) — several versions to fall back on when
+the app the phone needs is not the one this tree builds. Each is checked against
+the .sha256 the release carries and named after its tag, so two releases of the
+same app version do not overwrite each other. --refresh does it too, since
+activation runs that; --check only lists what the box holds.
 """
 
 
@@ -661,23 +669,100 @@ def phone_fix_internet(args: list[str]) -> int:
     return 1
 
 
+def _releases(limit: int) -> list[tuple[str, str]]:
+    """(tag, APK URL) for the newest releases, newest first."""
+    api = (
+        f"https://api.github.com/repos/{settings.PHONE_LINK_REPO}"
+        f"/releases?per_page={limit}"
+    )
+    code, body = run_text(["curl", "-fsSL", "--max-time", "30", api], timeout=40)
+    if code != 0:
+        return []
+    found: list[tuple[str, str]] = []
+    for match in re.finditer(
+        r'"tag_name"\s*:\s*"([^"]+)"(.*?)(?="tag_name"|\Z)', body, re.S
+    ):
+        apk = re.search(r'"browser_download_url"\s*:\s*"([^"]+\.apk)"', match.group(2))
+        if apk:
+            found.append((match.group(1), apk.group(1)))
+    return found[:limit]
+
+
+def _stock_releases(limit: int) -> int:
+    """Keep the newest releases' APKs in the box; returns how many are there.
+
+    Every failure here is a warning: this is the repair kit for a host whose
+    network may be the thing that is broken, and its absence must not stop the
+    build that is already a file here from being kept.
+    """
+    releases = _releases(limit)
+    if not releases:
+        log(
+            f"warning: cannot read the releases of {settings.PHONE_LINK_REPO}; "
+            "the box keeps what it has"
+        )
+        return 0
+    kept = 0
+    for tag, url in releases:
+        name = f"{tag}-{url.rsplit('/', 1)[-1]}"
+        target = os.path.join(settings.PHONE_APK_CACHE, name)
+        if os.path.isfile(target) and os.path.getsize(target) > 0:
+            log(f"kept: {name}")
+            kept += 1
+            continue
+        part = f"{target}.part"
+        code, _ = run_text(
+            ["curl", "-fsSL", "--max-time", "300", "-o", part, url], timeout=330
+        )
+        if code != 0:
+            log(f"warning: cannot download {tag} from {url}")
+            continue
+        expected = ""
+        code, sums = run_text(
+            ["curl", "-fsSL", "--max-time", "30", url + ".sha256"], timeout=40
+        )
+        if code == 0 and sums.strip():
+            expected = sums.split()[0]
+        with open(part, "rb") as handle:
+            digest = hashlib.sha256(handle.read()).hexdigest()
+        if expected and digest != expected:
+            os.unlink(part)
+            log(f"warning: {tag} does not match its checksum; not kept")
+            continue
+        os.replace(part, target)
+        log(f"kept: {name} ({os.path.getsize(target)} bytes)")
+        kept += 1
+    return kept
+
+
 def phone_fix_apk(args: list[str]) -> int:
     """Stock the ambulance box with a proxy APK that works offline."""
-    _only_help(
-        [value for value in args if value not in ("--refresh", "--check")],
-        USAGE_FIX_APK,
-    )
+    if any(value in ("-h", "--help") for value in args):
+        print(USAGE_FIX_APK, end="", file=sys.stderr)
+        return 0
+    rest = [
+        value for value in args if value not in ("--refresh", "--check", "--releases")
+    ]
+    if len(rest) > 1 or (rest and not rest[0].isdigit()):
+        print(USAGE_FIX_APK, end="", file=sys.stderr)
+        die(f"unknown argument: {rest[0]}")
     refresh = "--refresh" in args
     check_only = "--check" in args
+    # --refresh is what activation runs, so the kit is refreshed with the build
+    # rather than only when somebody remembers to ask for it.
+    limit = int(rest[0]) if rest else (5 if ("--releases" in args or refresh) else 0)
 
     cached = phone.apk_cached()
     if check_only:
-        if cached:
-            log(f"ambulance APK: {cached}")
-            return 0
-        log(f"ambulance APK: none cached in {settings.PHONE_APK_CACHE}")
-        return 1
-    if not refresh and cached:
+        boxed = sorted(glob.glob(os.path.join(settings.PHONE_APK_CACHE, "*.apk")))
+        if not boxed:
+            log(f"ambulance APK: none cached in {settings.PHONE_APK_CACHE}")
+            return 1
+        log(f"ambulance APKs: {len(boxed)} in {settings.PHONE_APK_CACHE}")
+        for path in boxed:
+            log(f"  {path}")
+        return 0
+    if not refresh and limit == 0 and cached:
         log(f"ambulance APK already stocked: {cached}")
         return 0
 
@@ -690,23 +775,24 @@ def phone_fix_apk(args: list[str]) -> int:
         die(f"cannot create {settings.PHONE_APK_CACHE}")
 
     source = phone.app_apk()
-    if not source:
+    if source and not os.path.isfile(source):
+        die(f"not a file: {source}")
+    if source:
+        target = os.path.join(settings.PHONE_APK_CACHE, os.path.basename(source))
+        if os.path.abspath(source) == os.path.abspath(target):
+            log(f"ambulance APK already stocked: {target}")
+        else:
+            log(f"copying {source} into {settings.PHONE_APK_CACHE}")
+            shutil.copy2(source, target)
+            log(f"ambulance APK ready: {target}")
+    elif limit == 0:
         die(
             "no APK to cache: build this checkout's app "
             "(nix develop .#android -c ./android/build.sh), "
             "or name one with PHONE_PROXY_APK"
         )
-    if not os.path.isfile(source):
-        die(f"not a file: {source}")
 
-    target = os.path.join(settings.PHONE_APK_CACHE, os.path.basename(source))
-    if os.path.abspath(source) == os.path.abspath(target):
-        log(f"ambulance APK already stocked: {target}")
-        return 0
-
-    log(f"copying {source} into {settings.PHONE_APK_CACHE}")
-    import shutil
-
-    shutil.copy2(source, target)
-    log(f"ambulance APK ready: {target}")
+    if limit:
+        kept = _stock_releases(limit)
+        log(f"repair kit: {kept} release APK(s) in {settings.PHONE_APK_CACHE}")
     return 0

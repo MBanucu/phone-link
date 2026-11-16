@@ -40,6 +40,9 @@ PHONE_APP_PKG = _env("PHONE_APP_PKG", PHONE_PROXY_PKG)
 # one whose namespace this is: the vendored proxy is not, and must not be handed
 # a development permission it has no use for.
 PHONE_APP_NAMESPACE = "org.phonelink.proxy"
+# Where the app's release APKs come from: `phone-proxy-install --release` and
+# the ambulance box's repair kit both read this repository's releases.
+PHONE_LINK_REPO = _env("PHONE_LINK_REPO", "MBanucu/phone-link")
 PHONE_ADB_PORT = _env("PHONE_ADB_PORT", "5555")
 PHONE_SECRETS = _env("PHONE_SECRETS", "/etc/nixos/phone-socks-secrets")
 PHONE_NM_SYSTEM_CONNECTIONS = _env(

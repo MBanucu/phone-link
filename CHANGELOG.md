@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The ambulance box keeps a repair kit, not just one APK. Installing the app on
+  a machine with no tree needed a copy of the build that host made, and that is
+  the one version that may no longer be what the phone wants: an older release
+  is often the thing that works. `phone-fix-apk --releases [N]` keeps the APKs
+  attached to the newest N releases (5 by default) beside the build, each
+  checked against the `.sha256` the release carries and named after its tag, so
+  two releases of the same app version do not overwrite each other; activation
+  runs it with `--refresh`, so the kit follows new releases without anyone
+  remembering to ask, and every failure is a warning rather than a blocked
+  repair — the box exists for the moment the network is what broke.
+
 - The installer knows about the release APK, and about the key it is signed
   with. A tagged release is the signed copy of this app, but the only way to get
   it was `gh release download` and the only way onto it from a locally built
