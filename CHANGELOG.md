@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-16
+
 ### Changed
 
 - `phone-doctor-fix` starts the proxy after the AP and the phone's link are
@@ -901,6 +903,7 @@ with it.
 - The proxy APK cache is found when `HOME` is unset during activation.
 
 [Unreleased]: https://github.com/MBanucu/phone-link/compare/v0.6.0...HEAD
+[0.7.0]: https://github.com/MBanucu/phone-link/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/MBanucu/phone-link/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/MBanucu/phone-link/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/MBanucu/phone-link/compare/v0.3.8...v0.4.0
