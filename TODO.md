@@ -103,24 +103,6 @@ list is empty.
   reopened history. SQLite in `result-live/` would do: one file, no daemon,
   and `sqlite3` reads it without the project.
 
-## The saved proxies can leave and come back
-
-- [ ] Every proxy the panel holds — its name, port, SSID, user and password,
-  `anonymous`, auto-start and the wireless-debugging switch — lives only in the
-  app's own store, so an uninstall (the only way onto a differently signed
-  build, which the release APK now is), a lost phone or a factory reset takes
-  the lot, and setting it up again means typing passwords on a phone keyboard.
-  The panel should export all of them to one file the user picks and import
-  them back: `ACTION_CREATE_DOCUMENT` and `ACTION_OPEN_DOCUMENT` rather than a
-  fixed path, a small versioned document (the fields above, per name, plus the
-  running configuration), and on import a choice between replacing what is
-  there and merging by name. It is the only way out through the UI worth
-  having: the adb interface deliberately prints no password —
-  `phone-proxy-setup --check` says as much — so a `dumpsys`-based export would
-  bring back proxies that cannot connect. The file holds passwords, so the
-  export should say that plainly and the app should not put it anywhere by
-  itself.
-
 ## The app comes back when the AP does
 
 - [ ] The app's listener stops when the network it listens on goes away and does

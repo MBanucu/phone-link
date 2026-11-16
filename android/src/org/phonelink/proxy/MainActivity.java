@@ -22,6 +22,10 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
@@ -50,6 +54,9 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     private static final String STATE_PROFILE = "open_profile";
     /** The segment that was showing for the same reason. */
     private static final String STATE_TAB = "tab";
+    /** The system picker that writes an export, and the one that reads an import. */
+    private static final int REQUEST_EXPORT = 1;
+    private static final int REQUEST_IMPORT = 2;
 
     private View back;
     private TextView headerTitle;
@@ -501,6 +508,8 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         items.add(0, 6, 5, R.string.menu_all_events);
         items.add(0, 7, 6, R.string.menu_tile);
         items.add(0, 8, 7, R.string.menu_info);
+        items.add(0, 9, 8, R.string.action_export);
+        items.add(0, 10, 9, R.string.action_import);
         menu.setOnMenuItemClickListener(item -> {
             switch (item.getItemId()) {
                 case 1:
@@ -531,11 +540,146 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
                 case 8:
                     showHelp();
                     return true;
+                case 9:
+                    confirmExport();
+                    return true;
+                case 10:
+                    confirmImport();
+                    return true;
                 default:
                     return false;
             }
         });
         menu.show();
+    }
+
+    // -- every saved proxy, out and back --------------------------------
+
+    /**
+     * The file holds the passwords of every saved proxy, so the panel says so
+     * before it asks where to put one: an export is the only way these leave the
+     * phone, and the user is entitled to know that before, not after.
+     */
+    private void confirmExport() {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.export_title)
+                .setMessage(R.string.export_message)
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                            .addCategory(Intent.CATEGORY_OPENABLE)
+                            .setType("application/json")
+                            .putExtra(Intent.EXTRA_TITLE, "phone-link-proxies.json");
+                    start(intent, REQUEST_EXPORT);
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void confirmImport() {
+        start(new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("*/*"), REQUEST_IMPORT);
+    }
+
+    /** The picker, or a line explaining that this phone has none. */
+    @SuppressWarnings("deprecation")
+    private void start(Intent intent, int request) {
+        try {
+            startActivityForResult(intent, request);
+        } catch (ActivityNotFoundException e) {
+            explain(R.string.export_title, R.string.export_no_picker);
+        }
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        Uri uri = result == RESULT_OK && data != null ? data.getData() : null;
+        if (uri == null) {
+            return;
+        }
+        if (request == REQUEST_EXPORT) {
+            exportTo(uri);
+        } else if (request == REQUEST_IMPORT) {
+            importFrom(uri);
+        }
+    }
+
+    private void exportTo(Uri uri) {
+        try (OutputStream out = getContentResolver().openOutputStream(uri)) {
+            if (out == null) {
+                throw new IOException("no stream");
+            }
+            out.write(ConfigStore.exportDocument(this).getBytes(StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            report(R.string.export_title, R.string.export_failed, e);
+            return;
+        }
+        EventLog.add("exported every saved proxy");
+        Toast.makeText(this, R.string.export_done, Toast.LENGTH_SHORT).show();
+    }
+
+    private void importFrom(Uri uri) {
+        String text;
+        try (InputStream in = getContentResolver().openInputStream(uri)) {
+            if (in == null) {
+                throw new IOException("no stream");
+            }
+            text = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            report(R.string.import_title, R.string.import_unreadable, e);
+            return;
+        }
+        int carried;
+        try {
+            // Read it before asking anything: a file that is not one of ours
+            // should say so, not offer a choice about what to do with it.
+            carried = ProfileDocument.parse(text).byName().size();
+        } catch (IllegalArgumentException e) {
+            report(R.string.import_title, R.string.import_not_ours, e);
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.import_title)
+                .setMessage(getString(R.string.import_message, carried, plural(carried)))
+                .setPositiveButton(R.string.import_replace,
+                        (dialog, which) -> applyImport(text, true))
+                .setNeutralButton(R.string.import_merge,
+                        (dialog, which) -> applyImport(text, false))
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void applyImport(String text, boolean replace) {
+        int count;
+        try {
+            count = ConfigStore.importDocument(this, text, replace);
+        } catch (IllegalArgumentException e) {
+            report(R.string.import_title, R.string.import_not_ours, e);
+            return;
+        }
+        EventLog.add(getString(R.string.import_done, count, plural(count)));
+        Toast.makeText(this, getString(R.string.import_done, count, plural(count)),
+                Toast.LENGTH_SHORT).show();
+        showHome();
+        render();
+    }
+
+    /** The tail of "1 saved proxy" against "3 saved prox" + this. */
+    private static String plural(int count) {
+        return count == 1 ? "y" : "ies";
+    }
+
+    /** A failed file operation, with the platform's reason beside ours. */
+    private void report(int title, int message, Exception cause) {
+        String detail = cause.getMessage();
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(detail == null ? getString(message)
+                        : getString(message) + "\n\n" + detail)
+                .setPositiveButton(android.R.string.ok, null)
+                .show();
     }
 
     /** Everything, not just this proxy's events, in one scrollable dialog. */

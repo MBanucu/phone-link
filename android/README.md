@@ -639,6 +639,28 @@ argument, and the reason `phone-link` keeps it in the root-only secrets file
 rather than the Nix store. `anonymous=true` is refused by default because a
 wildcard listener on a Wi-Fi LAN is an open relay.
 
+### Taking them off the phone, and putting them back
+
+The menu's **Export every proxy…** writes all of it — every saved proxy with its
+port, SSID, user, password, `anonymous`, `any_network`, `auto_start`,
+`adb_wifi` and tile mark, plus the configuration in use and the two names that
+mark it — to one file the system picker chooses. **Import proxies…** reads such a
+file back and asks whether to replace every proxy on the phone or to merge by
+name. Nothing is written until the file has been read and understood, so a file
+that is not one of ours says so instead of leaving a half-imported store.
+
+This is the answer to the two ways a phone loses them: changing the signing key
+(`phone-proxy-install --replace-signer` uninstalls first) and a lost or reset
+phone. adb cannot do it: the contract deliberately never prints a password, so a
+`dumpsys`-based export would bring back proxies that cannot connect.
+
+The format is JSON, `{"app": "phone-link-proxy", "version": 1, "active": …, "saved": […]}`,
+written field-per-line by `ProfileDocument` and read by the same class, so it is
+unit-tested on a JVM. A missing field keeps its default, unknown fields are
+ignored, and a file whose `version` is newer than the app is refused with the
+reason. The file holds passwords in plain text: the panel says so before it
+writes one, and the app never puts it anywhere by itself.
+
 ## What this scaffold does not do yet
 
 - Tethering is excluded on purpose, so a phone in hotspot or USB-tether mode has

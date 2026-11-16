@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The panel can export every saved proxy to one file and import it back. The
+  saved configurations — names, ports, SSIDs, users, passwords, `anonymous`,
+  `any_network`, `auto_start`, `adb_wifi`, the tile marks, the configuration in
+  use — lived only in the app's own store, so an uninstall (the only way onto a
+  differently signed build, which the release APK now is), a lost phone or a
+  factory reset took the lot and setting them up again meant typing passwords on
+  a phone keyboard. The menu writes them through `ACTION_CREATE_DOCUMENT` and
+  reads them through `ACTION_OPEN_DOCUMENT`, a versioned JSON document that says
+  plainly that it holds plain-text passwords, with replace-all or merge-by-name
+  on the way back in. adb cannot: the contract deliberately never prints a
+  password, so a `dumpsys`-based export would bring back proxies that cannot
+  connect.
+
 ## [0.7.0] - 2026-11-16
 
 ### Changed

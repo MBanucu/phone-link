@@ -296,6 +296,80 @@ final class ConfigStore {
                 .apply();
     }
 
+    // -- leaving and coming back ----------------------------------------
+
+    /**
+     * Every saved proxy and the configuration in use, as one document.
+     *
+     * <p>The store is the only place these live, and the only way onto a
+     * differently signed build is an uninstall, which takes them with it: this
+     * is what makes that survivable without typing passwords on a phone.
+     */
+    static String exportDocument(Context context) {
+        ProfileDocument document = new ProfileDocument();
+        for (String name : profileNames(context)) {
+            ProxyConfig config = profile(context, name);
+            if (config == null) {
+                continue;
+            }
+            ProfileDocument.Entry entry = new ProfileDocument.Entry();
+            entry.name = name;
+            entry.config = config;
+            entry.autoStart = profileAutoStart(context, name);
+            entry.adbWireless = profileAdbWireless(context, name);
+            entry.tile = profileTile(context, name);
+            document.saved.add(entry);
+        }
+        String running = inUse(context);
+        document.inUse = running == null ? "" : running;
+        String selected = selectedProfile(context);
+        document.selected = selected == null ? "" : selected;
+        if (isConfigured(context)) {
+            ProfileDocument.Entry active = new ProfileDocument.Entry();
+            active.name = document.inUse;
+            active.config = load(context);
+            active.autoStart = autoStart(context);
+            active.adbWireless = adbWireless(context);
+            document.active = active;
+        }
+        return document.write();
+    }
+
+    /**
+     * Write a document's proxies into the store.
+     *
+     * @param replace delete every saved proxy first, instead of merging by name
+     * @return how many saved proxies the document carried
+     * @throws IllegalArgumentException when the text is not a document this app
+     *     reads; nothing is written in that case, the parse comes first
+     */
+    static int importDocument(Context context, String text, boolean replace) {
+        ProfileDocument document = ProfileDocument.parse(text);
+        List<ProfileDocument.Entry> entries = document.byName();
+        if (replace) {
+            for (String name : profileNames(context)) {
+                deleteProfile(context, name);
+            }
+        }
+        for (ProfileDocument.Entry entry : entries) {
+            saveProfile(context, entry.name, entry.config, entry.autoStart,
+                    entry.adbWireless);
+            setProfileTile(context, entry.name, entry.tile);
+        }
+        if (document.active != null) {
+            save(context, document.active.config);
+            setAutoStart(context, document.active.autoStart);
+            setAdbWireless(context, document.active.adbWireless);
+        }
+        if (!document.inUse.isEmpty()) {
+            setInUse(context, document.inUse);
+        }
+        if (!document.selected.isEmpty()) {
+            setSelectedProfile(context, document.selected);
+        }
+        return entries.size();
+    }
+
     /** Which saved configuration the picker had selected, across restarts. */
     static String selectedProfile(Context context) {
         return prefs(context).getString(KEY_SELECTED_PROFILE, null);

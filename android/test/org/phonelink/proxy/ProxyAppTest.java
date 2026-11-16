@@ -612,6 +612,81 @@ public final class ProxyAppTest {
             assertEqual("ALL", TileScope.named("ALL", TileScope.TILE).name(), "stored");
         });
 
+        test("an export carries every proxy, passwords and switches", () -> {
+            ProfileDocument document = new ProfileDocument();
+            ProfileDocument.Entry laptop = new ProfileDocument.Entry();
+            laptop.name = "laptop";
+            laptop.config = ProxyConfig.raw(1081, "proxy", "s3cret", "PhoneLink", true, false);
+            laptop.autoStart = true;
+            laptop.adbWireless = false;
+            laptop.tile = true;
+            document.saved.add(laptop);
+            ProfileDocument.Entry hotel = new ProfileDocument.Entry();
+            hotel.name = "hotel \"the\" \\ one";
+            hotel.config = ProxyConfig.raw(1082, "user", "pass\tword", "Hotel", false, true);
+            document.saved.add(hotel);
+            document.inUse = "laptop";
+            document.selected = "hotel";
+            document.active = laptop;
+
+            ProfileDocument read = ProfileDocument.parse(document.write());
+            assertEqual(2, read.saved.size(), "saved proxies");
+            ProfileDocument.Entry first = read.saved.get(0);
+            assertEqual("laptop", first.name, "name");
+            assertEqual(1081, first.config.port, "port");
+            assertEqual("proxy", first.config.user, "user");
+            assertEqual("s3cret", first.config.password, "password");
+            assertEqual("PhoneLink", first.config.ssid, "ssid");
+            assertTrue(first.config.anyNetwork, "any network");
+            assertTrue(first.autoStart, "auto start");
+            assertFalse(first.adbWireless, "adb wifi");
+            assertTrue(first.tile, "tile");
+            ProfileDocument.Entry second = read.saved.get(1);
+            assertEqual("hotel \"the\" \\ one", second.name, "an escaped name");
+            assertEqual("pass\tword", second.config.password, "an escaped password");
+            assertTrue(second.config.anonymous, "anonymous");
+            assertEqual("laptop", read.inUse, "in use");
+            assertEqual("hotel", read.selected, "selected");
+            assertEqual(1081, read.active.config.port, "the configuration in use");
+        });
+
+        test("a document hands over its proxies by name, the last one winning", () -> {
+            ProfileDocument document = ProfileDocument.parse(
+                    "{\"saved\": ["
+                            + "{\"name\": \"a\", \"port\": 1081},"
+                            + "{\"name\": \"b\", \"port\": 1082},"
+                            + "{\"name\": \"a\", \"port\": 1083}]}");
+            assertEqual(2, document.byName().size(), "names");
+            assertEqual("a", document.byName().get(0).name, "first name");
+            assertEqual(1083, document.byName().get(0).config.port, "the later one wins");
+            assertEqual("b", document.byName().get(1).name, "second name");
+        });
+
+        test("a hand-written document keeps the defaults it leaves out", () -> {
+            ProfileDocument document = ProfileDocument.parse(
+                    "{\"saved\": [{\"name\": \"bare\"}]}");
+            ProfileDocument.Entry entry = document.saved.get(0);
+            assertEqual(ProxyConfig.DEFAULT_PORT, entry.config.port, "port");
+            assertEqual(ProxyConfig.DEFAULT_SSID, entry.config.ssid, "ssid");
+            assertTrue(entry.adbWireless, "the wireless-debugging switch defaults on");
+            assertFalse(entry.autoStart, "auto start");
+            assertTrue(document.active == null, "no configuration in use");
+        });
+
+        test("a nameless entry is skipped, not imported as an empty name", () -> {
+            ProfileDocument document = ProfileDocument.parse(
+                    "{\"saved\": [{\"port\": 1081}, {\"name\": \"  \"}, {\"name\": \"kept\"}]}");
+            assertEqual(1, document.saved.size(), "entries");
+            assertEqual("kept", document.saved.get(0).name, "name");
+        });
+
+        test("a document from a newer app is refused", () -> {
+            assertRejected("newer", () -> ProfileDocument.parse("{\"version\": 2}"));
+            assertRejected("not json", () -> ProfileDocument.parse("every saved proxy"));
+            assertRejected("an array", () -> ProfileDocument.parse("[\"a\"]"));
+            assertRejected("empty", () -> ProfileDocument.parse(""));
+        });
+
         System.out.printf("%n%d passed, %d failed%n", passed, failed);
         if (failed > 0) {
             System.exit(1);
@@ -664,6 +739,15 @@ public final class ProxyAppTest {
         if (!expected.equals(actual)) {
             throw new AssertionError(what + ": expected \"" + expected + "\" but was \"" + actual + "\"");
         }
+    }
+
+    private static void assertRejected(String what, Runnable action) {
+        try {
+            action.run();
+        } catch (IllegalArgumentException expected) {
+            return;
+        }
+        throw new AssertionError(what + ": the text was accepted");
     }
 
     private static void expectRejected(String what, Runnable action) {
