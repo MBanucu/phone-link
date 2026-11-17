@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The proxy app is a project of its own (`MBanucu/phone-link-proxy`) and this
+  checkout no longer builds it. `android/`, its flake shell, the `proxy-apk`
+  package and check, the release workflow that attached its APK, and the live
+  harness that drove it (`tests/live/proxy-app.sh` with `phone.sh`, `clock.sh`,
+  `frames.sh`, `pictures.py`, `remux.sh` and `results.py`) left for that
+  repository, with `tests/proxy-app.test.sh` and the tests of the harness's
+  tools. What stays is what drives it: the adb contract, the scripts, the
+  module and the GUI.
+- `phone-proxy-install` with no argument is the newest release of the app's
+  repository (`PHONE_PROXY_REPO` overrides it), checksum checked. `--build`
+  says where the build went instead of installing a file this checkout cannot
+  produce, and a file built in the app's checkout is still installed by naming
+  it.
+- `phone-doctor` reports the version the installed app says rather than warning
+  that it is not this checkout's build, and its "newer release" check reads the
+  app's repository. `phone-fix-apk` stocks that repository's releases.
+- `tests/live/doctor-fix-proxy.sh` takes the test build from a checkout of the
+  app's repository (`PHONE_PROXY_APP`, default `../phone-link-proxy`), so the
+  repair test no longer needs this tree to build the app.
+
 ## [0.10.0] - 2026-11-17
 
 ### Added

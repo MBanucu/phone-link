@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # Live end-to-end test of the doctor's self-repair, against the test build:
 #
-#   1. require a route that outlives the AP drop, this checkout's test APK and a
-#      healthy setup, with USB tether up,
+#   1. require a route that outlives the AP drop, the app checkout's test APK and
+#      a healthy setup, with USB tether up,
 #   2. park that APK in the ambulance box, so the repair needs no network,
 #   3. drop the laptop AP,
 #   4. uninstall the test app (`org.phonelink.proxy.test`),
 #   5. require phone-doctor to flag ap_address, proxy_app and proxy_request,
 #   6. run phone-doctor-fix --yes --required: it installs the test build from
 #      the parked file (AP + phone link are fixed last),
-#   7. require a clean doctor, the test app at this tree's version, the AP back
-#      up, the phone joined again — and the daily app listening on the port it
+#   7. require a clean doctor, a reported app version, the AP back up, the
+#      phone joined again — and the daily app listening on the port it
 #      had, without a command being run to start it: the network came back, so
 #      the listener did too.
 #
@@ -19,12 +19,12 @@
 # It runs as the test package (`org.phonelink.proxy.test`, port 18080) so a run
 # never costs the phone the proxies the daily build has saved. Destructive all
 # the same: the test app's data is lost, and the AP is dropped until the fixer
-# restores it. Needs the phone, root, the APK from `nix develop .#android -c
-# ./android/build.sh` (or PHONE_PROXY_APK=/path), a USB tether so the proxy can
-# answer while the AP is down, and an adb route that is not on the AP — dropping
-# it cuts every adb call on that address. Nothing is downloaded: the repair
-# installs the file this tree built. Deliberately not named *.test.sh, so
-# `nix flake check` never runs it.
+# restores it. Needs the phone, root, a checkout of the app's repository built
+# once (`PHONE_PROXY_APP`, default ../phone-link-proxy; or PHONE_PROXY_APK=/path),
+# a USB tether so the proxy can answer while the AP is down, and an adb route
+# that is not on the AP — dropping it cuts every adb call on that address.
+# Nothing is downloaded: the repair installs a file that is already here.
+# Deliberately not named *.test.sh, so `nix flake check` never runs it.
 set -u
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -84,12 +84,14 @@ serial=$(phone_serial) || {
 }
 export PHONE_SERIAL="$serial"
 
-# The app the repair installs is the one this checkout builds for the package
-# under test: `android/build.sh` writes both, and the test package comes from the
-# test build. PHONE_PROXY_APK names another file to put through the same test.
+# The app is a project of its own, so the build this tests is a build of that
+# checkout: `PHONE_PROXY_APP` names it (default: the sibling checkout), and its
+# `build.sh` writes both the daily and the test APK. PHONE_PROXY_APK names a
+# file to put through the same test instead.
+APP=${PHONE_PROXY_APP:-$(dirname "$ROOT")/phone-link-proxy}
 case $PHONE_PROXY_PKG in
-  org.phonelink.proxy.test) built=$ROOT/android/build/phone-link-proxy-test.apk ;;
-  *) built=$ROOT/android/build/phone-link-proxy.apk ;;
+  org.phonelink.proxy.test) built=$APP/build/phone-link-proxy-test.apk ;;
+  *) built=$APP/build/phone-link-proxy.apk ;;
 esac
 APP_APK=${PHONE_PROXY_APK:-$built}
 
@@ -171,13 +173,13 @@ else
 fi
 
 if [ -f "$APP_APK" ]; then
-  ok "this checkout's app APK is here ($APP_APK)"
+  ok "the app checkout's APK is here ($APP_APK)"
 else
   bad "no app APK at $APP_APK"
   if [ -n "${PHONE_PROXY_APK:-}" ]; then
     printf 'PHONE_PROXY_APK has to name a file\n' >&2
   else
-    printf 'build it first: nix develop .#android -c ./android/build.sh\n' >&2
+    printf 'build it first: (cd %s && nix develop -c ./build.sh)\n' "$APP" >&2
   fi
   exit 2
 fi
@@ -333,12 +335,12 @@ if installed; then
 else
   bad "the test app is still missing"
 fi
-# The doctor's own verdict, printed as "ok  proxy version  <v> (<code>), this
-# checkout's build": the app on the phone is the build that was just installed.
-if grep -qE "^ok +proxy version +.*this checkout's build" "$TMP/doctor"; then
-  ok "the test app on the phone is this checkout's build"
+# The doctor's own verdict on the app on the phone: the version it reports is
+# the one the build just installed stamped into its manifest.
+if grep -qE "^ok +proxy version +[0-9]" "$TMP/doctor"; then
+  ok "the doctor reports the installed app's version"
 else
-  bad "the phone is not running this checkout's build"
+  bad "the doctor does not report an app version"
   grep 'proxy version' "$TMP/doctor" >&2 || true
 fi
 # The point of running as the test package: the app the phone lives on was never

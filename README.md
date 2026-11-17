@@ -10,14 +10,11 @@ cable.
   0.2.0)
 - `nixosModules.default` — the tunnel, the declarative access-point profile and
   its firewall holes
-- `packages.<system>.proxy-apk` — the proxy APK, built from `android/` without
-  Gradle
-- `devShells.default`, `devShells.android` (the APK toolchain), `formatter`,
-  `checks`
-- `android/` — the SOCKS5 proxy APK of our own, with a panel and a Quick
-  Settings tile for on-device start/stop, several proxies listening at once on
-  their own ports, built without Gradle:
-  `nix develop .#android && ./android/build.sh`, see `android/README.md`
+- `devShells.default`, `formatter`, `checks`
+- the proxy app itself is not here any more: it is
+  [`MBanucu/phone-link-proxy`](https://github.com/MBanucu/phone-link-proxy),
+  with its own flake, tests, release workflow and store metadata, and
+  `phone-proxy-install` fetches its releases
 - `CHANGELOG.md` — released changes, Keep a Changelog format
 - `docs/phone-network.md` — measured behaviour, evidence and the traps
 
@@ -73,7 +70,7 @@ stopped proxy app cannot blackhole traffic.
 | `phoneLink.interfaceName` | `phone-tun` | TUN device name |
 | `phoneLink.tunAddress` | `172.19.0.1/30` | TUN address |
 | `phoneLink.logLevel` | `warn` | sing-box log level |
-| `phoneLink.cacheProxyApk` | `true` | stock the ambulance kit during activation: this checkout's proxy APK plus the APKs of the newest releases, so every install/update leaves versions a repair can fall back on |
+| `phoneLink.cacheProxyApk` | `true` | stock the ambulance kit during activation: the APKs of the newest app releases, so every install/update leaves versions a repair can fall back on |
 | `phoneLink.manageResolver` | `true` | pin `/etc/resolv.conf` to `1.1.1.1`/`9.9.9.9` |
 | `phoneLink.openApFirewall` | `true` | allow DHCP/DNS from AP clients |
 | `phoneLink.enableRelay` | `false` | run the local SOCKS/HTTP relay (`gost`) |
@@ -92,15 +89,15 @@ Or straight from the checkout: `./bin/phone-net-status`.
 | script | what it does |
 |---|---|
 | `phone-net-status` | links, routes, resolver, proxy probes, adb transports, phone state |
-| `phone-doctor` | check every runtime condition of the setup (forwarding, AP profile/address, adb, phone link, secrets, proxy, tunnel, tether, internet), the APK this checkout builds, the installed app versus this checkout's `android/AndroidManifest.xml` (or `PHONE_PROXY_MANIFEST`) and the phone SDK, and whether the source checkout is newer than the installed flake lock; exit non-zero if a required one is unmet; the adb check reconnects a phone whose wireless-debugging port changed by reading its `_adb-tls-connect._tcp` mDNS record; `--analyze` prints one `fail`/`warn` line with a stable problem id for scripts |
+| `phone-doctor` | check every runtime condition of the setup (forwarding, AP profile/address, adb, phone link, secrets, proxy, tunnel, tether, internet), the APK a repair would install, the version the installed app reports and the phone SDK, and whether the source checkout is newer than the installed flake lock; exit non-zero if a required one is unmet; the adb check reconnects a phone whose wireless-debugging port changed by reading its `_adb-tls-connect._tcp` mDNS record; `--analyze` prints one `fail`/`warn` line with a stable problem id for scripts |
 | `phone-doctor-fix` | list the fixes for the problems `phone-doctor --analyze` reports, run one dedicated script per problem in dependency order, then re-check (`--yes` skips the prompt, `--dry-run` only lists, `--required` leaves warnings alone, `--which-doctor` prints the `phone-doctor` it reads — the one beside the checkout unless `PHONE_DOCTOR` says otherwise; run with `sudo`) |
-| `phone-fix-apk` | stock the ambulance box: copy this checkout's proxy APK into `/var/cache/phone-link` so a repair on a machine without the tree can still reinstall the app; `--releases [N]` also keeps the APKs of the newest N releases (5 by default) as a repair kit of several versions, each checked against its `.sha256` and named after its tag, older ones pruned past three times N (`--refresh` replaces the copy and refreshes the kit, `--check` lists the box) |
+| `phone-fix-apk` | stock the ambulance box: copy the app APK the cache or `PHONE_PROXY_APK` names into `/var/cache/phone-link` so a repair on a machine without a download can still reinstall the app; `--releases [N]` also keeps the APKs of the newest N releases (5 by default) as a repair kit of several versions, each checked against its `.sha256` and named after its tag, older ones pruned past three times N (`--refresh` replaces the copy and refreshes the kit, `--check` lists the box) |
 | `phone-fix-forwarding` | set `net.ipv4.ip_forward=1` for the running kernel (`--check` reports only) |
 | `phone-fix-internet` | restore internet for the APK download/check by trying mobile data, USB tethering, then the phone hotspot with the laptop as a client, verifying HTTPS after each (`--check` reports only) |
 | `phone-fix-mobile-data` | enable the phone's mobile data and wait for a default route (`--check` reports only) |
 | `phone-fix-tunnel` | start `phone-tun`, or restart it when its route is missing, and wait for the route (`--check` reports only) |
 | `phone-proxy-check` | request through the proxy on the hotspot and AP addresses (needs root for the secret) |
-| `phone-proxy-install` | install/update the proxy app — this checkout's build (`android/build/phone-link-proxy.apk`) unless an APK is named; `--release [TAG]` takes the APK attached to a release of this repository (checksum checked), `--build` builds this checkout and installs what it produced (with `PHONE_APP_KEYSTORE` in the environment the build is signed with that key, so it goes over a release-signed app without an uninstall), `--fdroid` fetches the vendored F-Droid app instead, `--replace-signer` uninstalls a differently signed copy first (which clears its data), `--pull` copies the installed APK off the phone, `--status` reports the version |
+| `phone-proxy-install` | install/update the proxy app — with no argument the newest release of `MBanucu/phone-link-proxy` (`PHONE_PROXY_REPO` overrides), checksum checked, unless an APK is named; `--release [TAG]` takes a named release instead, `--build` names the app's repository and refuses (this checkout no longer builds it), `--fdroid` fetches the vendored F-Droid app instead, `--replace-signer` uninstalls a differently signed copy first (which clears its data), `--pull` copies the installed APK off the phone, `--status` reports the version |
 | `phone-proxy-uninstall` | remove the proxy app (`--check` previews, `--keep-data` keeps app data, `--yes` skips the prompt) |
 | `phone-proxy-data-clear` | wipe the proxy app's data, back to port 1080 with no auth (`--check` previews, `--yes` skips the prompt) |
 | `phone-proxy-battery-whitelist` | add the proxy app to the device-idle (Doze) whitelist so the proxy is not killed with the screen off (`--check` only reports) |
@@ -214,26 +211,24 @@ the same table, and `phone-link status` prints the doctor's JSON.
 | `gui-registry` | the packaged GUI imports GTK4/libadwaita and its table matches the scripts |
 | `gui` | the real window, every page and the log window construct under Xvfb |
 | `package` | every script in the flake exists, is executable, kept its wrapped `PATH`, and `phone-net-status` prints a status |
-| `proxy-apk` | the app in `android/` compiles and signs in the sandbox, so a break fails the check instead of a manual build |
 | `shellcheck` | every script and `lib/phone-net.sh` is clean at shellcheck warning level |
-| `format` | `flake.nix`, `modules/phone-link.nix` and `android/default.nix` are nixfmt-clean |
+| `format` | `flake.nix` and `modules/phone-link.nix` are nixfmt-clean |
 | `module` | the module generates the expected sing-box config and units (5 s probe, 20 s first run, AP DHCP/DNS holes, pinned resolver, never started at boot) and defines nothing when disabled |
-| `script` | hermetic tests with stub `adb`/`curl`/`avahi-browse`: for `phone-proxy-install` the F-Droid version selection, cache keying and reuse, `--check` staying read-only, the exact install argv and `--pull` naming; for `phone-proxy-uninstall` the confirm/`--yes` guard, `--keep-data`, idempotence and the exact uninstall argv; for `phone-proxy-data-clear` the prompt guard, `--check` staying read-only and the `pm clear` argv; for `phone-proxy-setup` the START intent's extras, the verification request, the settings `--check` against a stub service dump; for `phone-unlock` the keyguard check, PIN entry and wrong-PIN failure; for `phone-proxy-battery-whitelist` the idempotent add, `--check` and the device-idle argv; for `phone-proxy-start`/`phone-proxy-stop` the START/STOP intents, the dumped state, the already-running/stopped no-op, the gated start and the proxy that will not stop; for `phone-wifi-concurrency` the supported, unsupported and inconclusive verdicts and the read-only queries; for `phone-usb-tether-check` the rndis0/usb state, the host route and a source-bound request; for `net-check` the three fetches, their failure modes and the cache-busting URL; for `phone-reboot-unlock` the reboot/wait/unlock sequence, the slow-boot wait, the aborted prompt and the boot timeout; for `phone-usb-tether-default` the current and screen-unlocked functions, the `--check` report and an ineffective setter; for `phone-wifi-enable` the idempotent enable and `--check`; for `phone-wifi-forget` the saved-network table, the prompt/`--yes` guard and idempotence; for `phone-wifi-connect` the password sources, remote quoting of SSID/passphrase and the association wait; for `phone-tether-cycle` the MTP disable, the health check, the lock/unlock restore, an adb abort retry, the already-off case, an unhealthy restore and the prompt guard; for `phone-adb-wifi` the legacy/TLS split, the mDNS port lookup, the `adb_wifi_enabled` write, the already-on case and the missing-port failure; for `phone-doctor` the ready, hotspot, locked, missing-adb, missing-secrets and dead-proxy paths, the app that is off the battery allowlist or has `auto_start` off (named separately in `[app]`), plus a rotated adb port found over mDNS; ; and `tests/phone-adb-mdns.test.sh` the stale network serial that is rewritten to the advertised port, the retry after a transport vanished mid-command, the serial recovered from the record when `adb devices` is empty, the preferred address when two phones are advertised and `PHONE_ADB_MDNS=0`; and `tests/proxy-app.test.sh` compiles the app's Android-free classes and runs the SOCKS5 handshake, authentication, CONNECT/reply codes, relay, half-close and client counting against a local echo upstream, plus the configuration rules, the status text and the runtime listener |
+| `script` | hermetic tests with stub `adb`/`curl`/`avahi-browse`: for `phone-proxy-install` the F-Droid version selection, cache keying and reuse, `--check` staying read-only, the exact install argv and `--pull` naming; for `phone-proxy-uninstall` the confirm/`--yes` guard, `--keep-data`, idempotence and the exact uninstall argv; for `phone-proxy-data-clear` the prompt guard, `--check` staying read-only and the `pm clear` argv; for `phone-proxy-setup` the START intent's extras, the verification request, the settings `--check` against a stub service dump; for `phone-unlock` the keyguard check, PIN entry and wrong-PIN failure; for `phone-proxy-battery-whitelist` the idempotent add, `--check` and the device-idle argv; for `phone-proxy-start`/`phone-proxy-stop` the START/STOP intents, the dumped state, the already-running/stopped no-op, the gated start and the proxy that will not stop; for `phone-wifi-concurrency` the supported, unsupported and inconclusive verdicts and the read-only queries; for `phone-usb-tether-check` the rndis0/usb state, the host route and a source-bound request; for `net-check` the three fetches, their failure modes and the cache-busting URL; for `phone-reboot-unlock` the reboot/wait/unlock sequence, the slow-boot wait, the aborted prompt and the boot timeout; for `phone-usb-tether-default` the current and screen-unlocked functions, the `--check` report and an ineffective setter; for `phone-wifi-enable` the idempotent enable and `--check`; for `phone-wifi-forget` the saved-network table, the prompt/`--yes` guard and idempotence; for `phone-wifi-connect` the password sources, remote quoting of SSID/passphrase and the association wait; for `phone-tether-cycle` the MTP disable, the health check, the lock/unlock restore, an adb abort retry, the already-off case, an unhealthy restore and the prompt guard; for `phone-adb-wifi` the legacy/TLS split, the mDNS port lookup, the `adb_wifi_enabled` write, the already-on case and the missing-port failure; for `phone-doctor` the ready, hotspot, locked, missing-adb, missing-secrets and dead-proxy paths, the app that is off the battery allowlist or has `auto_start` off (named separately in `[app]`), plus a rotated adb port found over mDNS; ; and `tests/phone-adb-mdns.test.sh` the stale network serial that is rewritten to the advertised port, the retry after a transport vanished mid-command, the serial recovered from the record when `adb devices` is empty, the preferred address when two phones are advertised and `PHONE_ADB_MDNS=0`; and for `--build` the refusal that names the app's repository and a bare install fetching the newest release |
 
 The `script` check also covers `phone-doctor --analyze` (problem ids, AP down and
 a missing APK, warnings-only, no headers or `ok` lines),
-`phone-doctor-fix` (dry run, ordered application, an install from the tree's
-build, the manual APK step, manual-only and failed-fix paths) and the fix scripts (ambulance APK, AP
+`phone-doctor-fix` (dry run, ordered application, an install from the cached
+APK, the manual APK step, manual-only and failed-fix paths) and the fix scripts (ambulance APK, AP
 profile creation from the secret, forwarding, mobile data, tunnel: apply,
 no-op and read-only `--check`).
 
 ### Where the check's time goes
 
 `nix build .#checks.x86_64-linux.script` times itself: `timings.csv` in the
-output has a row per suite and, where a suite knows them, a row per part —
-`tests/proxy-app.test.sh` splits its `javac` from its `cases` — and the build
-log ends with the five slowest, so the question "which suite got slower" is
-answered by the log that asked it. A store path cannot be compared with the
+output has a row per suite and, where a suite knows them, a row per part, and
+the build log ends with the five slowest, so the question "which suite got
+slower" is answered by the log that asked it. A store path cannot be compared with the
 last one, so `tests/check-timings.sh` builds the check, appends the rows to
 `result-checks/timings.csv` (append-only, keyed by run, like
 `result-live/timings.csv`) and prints every suite beside the last time it was
@@ -259,15 +254,16 @@ checks passing.
 
 `tests/live/doctor-fix-proxy.sh` breaks the setup on purpose and checks that the
 doctor repairs it. It runs the app's **test build**
-(`org.phonelink.proxy.test`, from `android/build/phone-link-proxy-test.apk`,
-listening on 18080) so a run never costs the phone the proxies the daily build
-has saved, and it requires the daily app's state line to be the same at the end.
-It parks this checkout's build in the ambulance box, drops the laptop AP,
+(`org.phonelink.proxy.test`, from a checkout of the app's repository built
+once — `PHONE_PROXY_APP`, default `../phone-link-proxy` — listening on 18080) so
+a run never costs the phone the proxies the daily build has saved, and it
+requires the daily app's state line to be the same at the end.
+It parks that build in the ambulance box, drops the laptop AP,
 uninstalls the test app, requires `phone-doctor` to report `ap_address`,
 `proxy_app` and `proxy_request`, runs `phone-doctor-fix --yes --required`, and
-requires a clean doctor, the AP back up, the phone joined again, the app at
-this tree's version, and the daily app listening on the port it had *without* a
-command being run to start it — the phone rejoins the SSID on its own, and the
+requires a clean doctor, the AP back up, the phone joined again, the installed
+app's version reported, and the daily app listening on the port it had
+*without* a command being run to start it — the phone rejoins the SSID on its own, and the
 listener follows the network back. Nothing is downloaded: the repair installs
 the parked file,
 and the harness requires it to be byte for byte the build — which is what keeps
@@ -282,147 +278,18 @@ reinstalls and reconfigures the app on exit if the repair failed.
 sudo tests/live/doctor-fix-proxy.sh
 ```
 
-`tests/live/proxy-app.sh` exercises the app in `android/` end to end on a phone
-that has a Wi-Fi client link: it unlocks the phone when `sudo -n` can run
-`bin/phone-unlock`, installs the APK, opens the panel and requires its list of
-saved proxies with the `New proxy` button, saves a configuration over adb and
-requires its card to open that proxy and to show the `auto_start` it was saved
-with, takes the battery exemption away and requires the header's warning mark
-to appear and open the battery request, requires the panel's
-wireless-debugging line to be one of its known states, starts the listener on a
-spare port with throwaway credentials, requires `200` through the tunnel,
-requires a wrong password to be refused, requires the open proxy's "Listen
-without authentication" checkbox to drop the password on Start and unticking
-it to demand one again, requires an unrelated SSID to keep the port closed
-while the service stays up, requires `any_network=true` to bypass the
-predicate, requires `dumpsys` and the list to show a configuration saved over
-adb, starts it again by name (the two service switches come back with it),
-requires an unknown name to start nothing, removes it again with
-`DELETE_PROFILE`, opens a card, changes its port, requires the plain `Save` to
-write the form (a toggled auto-start switch included) into that proxy, requires
-a card's own button to start and stop its proxy and to say so, requires
-`Rename` in the menu and `RENAME_PROFILE` over adb to move a proxy to a new
-name, requires `Save as…` to copy the form under a new name and open the copy
-without touching the proxy it was copied from, and to ask before taking a name
-that is already saved (Cancel leaves it, OK replaces it), requires the info
-marks and `About this app` to open their dialogs, requires `All events` to say
-what it is when the log is empty and then to show another proxy's start that
-the open proxy's own log does not, requires that proxy's own log to show this
-run's counters, its events and their port and `Clear` to empty them, stops it,
-then
-starts and stops it again from the Quick Settings tile (skipped when the phone stays locked, since the shade
-ignores clicks there) and uninstalls. It leaves the vendored proxy alone
-(`KEEP_APP=1` keeps the new app installed, `PROXY_APP_PORT` picks another port).
+`tests/live/proxy-app.sh` — the app's own end-to-end run — lives in the app's
+repository (`MBanucu/phone-link-proxy`, under `tests/live/`), together with the
+phone plumbing it shares (`phone.sh`), the tools that read a run's evidence
+(`frames.sh`, `clock.sh`, `pictures.py`, `remux.sh`) and the one that makes the
+CSV history queryable (`results.py`). It installs the app's test build
+(`org.phonelink.proxy.test`, port 18080), so a run never touches the proxy the
+phone lives on, and `nix flake check` never runs it. That repository's README
+has the steps, the claims they make and the measurements behind them.
 
-Every run records the evidence a failure needs: `result-live/<timestamp>/`
-holds the phone's screen as `screen.mp4` for the length of the run and the
-screen as XML for every change the capture service recorded (`ui-index.csv`
-says when each was taken and what caused it);
-`tests/live/frames.sh result-live/<timestamp>/screen.mp4 0:42` turns any moment
-of the recording into a still. The recorder puts the MP4 index (`moov`) at the
-end, so the file it leaves cannot be played or seeked until the recorder has
-closed it — and a run cut short leaves no index at all. `tests/live/remux.sh`
-(which a run calls before it exits) does one copy pass with no decode to move
-the index to the front, and checks the first bytes instead of trusting the
-tool; `PHONE_LIVE_REMUX=0` keeps the raw file. Measured on the longest
-recording here: 143 MB and 379 s remuxed in 0.7 s, same duration, and the
-clock fit still passes. A live H.264 pipe from `screenrecord` would be
-readable while it is written, but raw H.264 carries no frame times, and the
-clock mapping needs them: the file is finished at the end rather than read
-live.
-
-A failed check leaves the frames that explain it, next to the run's XML:
-`tests/live/pictures.py` plans them from the step's start, the moment the check
-was decided and the step's end, plus one just before every action the harness
-took and one just after every change the capture service recorded, and pulls
-them out of `screen.mp4` through `clock.txt`, named after what they show
-(`frame-<check>-<offset>.png`). The run says how many it pulled as a check of
-its own. It costs one decode pass over the failed step's part of the video —
-`PHONE_LIVE_FRAME_BEFORE`/`PHONE_LIVE_FRAME_AFTER` move the two gaps — and a
-green run pays nothing. Measured on an artificial 16 s step with 54 frames out
-of the 379 s recording: 94 s; real steps are seconds and cost seconds.
-
-One row per step is appended to
-`result-live/timings.csv` with its seconds and its pass/fail counts, and the
-file is never rewritten, so a run's cost can be compared across runs.
-`PHONE_LIVE_CAPTURE=0` runs without the recording and the snapshots.
-
-### Asking the history a question
-
-The CSVs are the record and stay canonical — a run writes them as it goes and
-needs no database to start. `tests/live/results.py` reads them once into
-`result-live/results.sqlite3` (one file, no daemon, readable by `sqlite3`
-without this project), so the questions a flat file makes awkward are one
-query: what a step's median is for each kind of run, whether a check failed
-before, which steps got slower after a change, what a full run costs on this
-phone against that one.
-
-```sh
-tests/live/results.py              # fills result-live/results.sqlite3
-sqlite3 result-live/results.sqlite3 \
-  'select name, count(*), round(avg(seconds), 1) from steps group by name order by 3 desc'
-```
-
-It is one-way and repeatable: the CSVs are never written, importing a run again
-replaces its rows, and a schema change costs a re-import rather than the
-history. Three tables — `runs` (kind, the steps a filtered run asked for,
-started, seconds, passes, failures, device, app build, capture, and every other
-setting the run read as JSON), `steps` (run, name, position, seconds,
-pass/fail) and `checks` (run, step, verdict, claim, file, line, function, the
-instant the laptop decided it). A run writes those settings to `run.csv` in
-its own folder before the first step and again at the end; a run from before
-that file existed still imports, with what its timing rows say.
-
-What the phone did is stamped with the phone's own clock, so an action and the
-screen it changed sit on one timeline: `actions.csv` holds every tap and swipe
-with the instant the phone took it, `input.csv` the typing, which has to go
-through `input` and carries the interval its instant is inside, and
-`ui-index.csv` a time for every capture. That timeline is tied to the
-recording by the flashes — the service paints the screen magenta at instants it
-writes down, at the start and the end of a run, and `tests/live/clock.sh` finds
-them in `screen.mp4` and fits a line through the pairs into `clock.txt`:
-
-    video_seconds = offset_s + drift * (device_ns - ref_ns) / 1e9
-
-The screen only changes 60 times a second, so one flash can be placed to half a
-frame, about 8 ms; 16 of them fit to 4.5 ms in the run that added this, across
-the 308 s between the two bursts, drift included — 43 ppm over that long would
-be 13 ms at the end of a run, which is why the slope is part of the answer.
-The run fails if the fit is worse than 10 ms. The recording's start is not
-written anywhere, which is why it is measured rather than assumed.
-
-The steps themselves wait on the phone rather than on the clock: after a tap the
-harness asks the service to answer once the screen has stopped changing, and the
-page tabs are verified rather than assumed — a tab tap that landed while the
-page was redrawing was swallowed, and the scroll after it looked for
-`save_service` on a Service page that had never been opened (that is the
-`tap-scroll id=save_service` timeout the wishlist carried). `panel_tab` asks the
-page it wanted for the first control on it, from the top, and taps again if the
-page did not change; a `panel_tap` that comes back without its control gets one
-more try. Where a step knows what it caused — a dialog, a menu item, a card that
-should say `Running` — it waits for exactly that, so a quick phone is not made
-to wait
-for a second and a busy one is not failed by it. The same run that first used
-this took 324 s against 377 s of fixed sleeps, and the steps that wait for a
-dialog gained the most (the info marks, `Save` and `new proxy` steps each lost
-5–11 s).
-
-A step that is a known straight line goes to the phone in one message: filling
-a form and pressing its button used to be a broadcast per tap, per key and per
-wait — a tenth of a second of adb each — and is now one script the service runs
-on a thread of its own, answering with the instruction that stopped it. With
-those in place the run is 264 s, the whole new-proxy dialog (open, type, press,
-land on the page) is 0.9 s, and `rename`, `info marks` and `new proxy` lost
-another 3–8 s each. What the host decides — whether the port serves, whether
-dumpsys lists the profile — stays a step; the phone only does what it can see
-on its own screen.
-
-```sh
-tests/live/proxy-app.sh
-```
-
-It is not named `*.test.sh`, so `nix flake check` never runs it; it needs the
-phone and root (for the secrets), and it deletes the app's data.
+The two live runs meet at the same phone: this repository's doctor test breaks
+the setup and requires the repair, and the app's run requires the panel and the
+adb contract. Neither is part of `nix flake check`.
 
 The `module` check evaluates a NixOS configuration with non-default options, so
 it catches option or unit regressions without building a system or a VM.
@@ -512,18 +379,18 @@ to remove those (`phone-wifi-forget PhoneLink`, `phone-proxy-uninstall`). Use
 alternative for the profile, but it will not clear the caches or the secrets
 file.
 
-The app in `android/` is the default one now: `phone-proxy-install` installs
-this checkout's build, and the `phone-proxy-*` scripts talk to it over its own
+The app of our own is the default one: `phone-proxy-install` installs its
+newest release, and the `phone-proxy-*` scripts talk to it over its own
 adb interface — `start-foreground-service` with `org.phonelink.proxy.action.START`
 or `STOP` and the configuration as extras, and `dumpsys activity service` for
 what it is doing — so a start needs no screen, keyguard or taps. The vendored
 F-Droid app still works with `PHONE_PROXY_PKG=com.tokyoxpa3.androidproxy`, and
 its uninstall and data-clear are the same commands.
 
-The app's APK is built from this tree, and a tagged release carries it: a `v*`
-tag builds `android/build.sh` in CI, signs with the release key from the
-repository's secrets and attaches `phone-link-proxy-<version>.apk` (with its
-`.sha256`) to the release — `android/README.md` has the four secrets that needs.
+The app's APK is built and published by the app's own repository: a `v*` tag
+there builds `build.sh` in CI, signs with the release key from its secrets and
+attaches `phone-link-proxy-<version>.apk` (with its `.sha256`) to the release —
+that repository's README has the four secrets it needs.
 `phone-proxy-install --release` installs it without leaving the checkout:
 
 ```sh

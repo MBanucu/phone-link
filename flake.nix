@@ -63,13 +63,8 @@
         pkgs:
         let
           deps = runtimeDeps pkgs;
-          android = import ./android/default.nix { inherit pkgs nixpkgs; };
         in
         rec {
-          # The SOCKS5 proxy app the tunnel can talk to instead of the vendored
-          # one; built without Gradle, so no dependency resolution is involved.
-          proxy-apk = android.apk;
-
           phone-link =
             pkgs.runCommand "phone-link-${version}"
               {
@@ -199,7 +194,6 @@
           inherit (pkgs.stdenv.hostPlatform) system;
           package = self.packages.${system}.phone-link;
           gui = self.packages.${system}.phone-link-gui;
-          android = import ./android/default.nix { inherit pkgs nixpkgs; };
 
           # Evaluate the module without building a system: once with non-default
           # values so the generated units can be inspected, once untouched to
@@ -275,21 +269,6 @@
             touch $out
           '';
 
-          # The GUI's table and bin/ must agree: a script with no action fails
-          # here, which is what keeps "every CLI action is in the GUI" true.
-          # The app's stamped version and the project's are one number: build.sh
-          # reads android/version for the manifest, the release workflow names the
-          # asset after it, and the doctor compares it with the newest tag.
-          version-file = pkgs.runCommand "phone-link-version-check" { } ''
-            app=$(tr -d '[:space:]' < ${./android/version})
-            if [ "$app" != "${version}" ]; then
-              echo "android/version is $app, flake.nix says ${version}" >&2
-              echo "bump both in the release commit" >&2
-              exit 1
-            fi
-            touch $out
-          '';
-
           registry = pkgs.runCommand "phone-link-registry-check" { } ''
             ${package}/bin/phone-link check-registry ${lib.escapeShellArgs scripts}
             touch $out
@@ -330,18 +309,13 @@
                 touch $out
               '';
 
-          # Compiling the app is part of the check set: a break in android/
-          # then fails `nix flake check` instead of waiting for a manual build.
-          proxy-apk = android.apk;
-
           shellcheck = pkgs.runCommand "phone-link-shellcheck" { nativeBuildInputs = [ pkgs.shellcheck ]; } ''
               shellcheck -S warning ${./bin}/* ${./lib}/*.sh
             touch $out
           '';
 
           format = pkgs.runCommand "phone-link-format-check" { nativeBuildInputs = [ pkgs.nixfmt ]; } ''
-            nixfmt --check ${./flake.nix} ${./modules/phone-link.nix} \
-              ${./android/default.nix}
+            nixfmt --check ${./flake.nix} ${./modules/phone-link.nix}
             touch $out
           '';
 
@@ -415,9 +389,8 @@
           #
           # The check also times itself. `timings.csv` in the output has a row per
           # suite (`total`) plus whatever rows a suite contributes about its own
-          # parts — proxy-app.test.sh separates the `javac` from the `cases` — so
-          # a suite with a slow compile reads differently from one with slow
-          # tests. The build log ends with the slowest, because the question this
+          # parts, so a suite with a slow compile reads differently from one with
+          # slow tests. The build log ends with the slowest, because the question this
           # answers is asked mid-build: a check with no timing is a check nobody
           # can watch. `tests/check-timings.sh` keeps the history across builds.
           script =
@@ -430,9 +403,6 @@
                   pkgs.gnugrep
                   pkgs.gnused
                   pkgs.python3
-                  # tests/proxy-socks5.test.sh compiles the app's protocol
-                  # classes with javac; no Android SDK needed for that.
-                  pkgs.jdk17
                 ];
               }
               ''
@@ -486,44 +456,24 @@
         phone-link = import ./modules/phone-link.nix;
       };
 
-      devShells = eachSystem (
-        pkgs:
-        let
-          # The APK build needs a JDK and the Android SDK; both are in
-          # android/default.nix so this shell stays light and the flake thin.
-          android = import ./android/default.nix { inherit pkgs nixpkgs; };
-        in
-        {
-          android = android.shell;
-
-          default = pkgs.mkShell {
-            packages = runtimeDeps pkgs ++ [
-              pkgs.shellcheck
-              pkgs.nixfmt
-              (pkgs.python3.withPackages (ps: [ ps.pygobject3 ]))
-              pkgs.gtk4
-              pkgs.libadwaita
-              pkgs.gobject-introspection
-              pkgs.dbus
-              pkgs.xauth
-              pkgs.xvfb-run
-            ];
-            shellHook = ''
-              export PYTHONPATH="$PWD/lib/python''${PYTHONPATH:+:$PYTHONPATH}"
-              # `nix build` copies the git tree, so a source file nobody added is
-              # missing from the build and javac blames the code instead. Name
-              # those files once, on the way in.
-              if command -v git >/dev/null 2>&1; then
-                untracked=$(git ls-files --others --exclude-standard -- android 2>/dev/null |
-                  grep -E '\.(java|xml)$' || true)
-                if [ -n "$untracked" ]; then
-                  printf '\nnote: untracked files are invisible to nix build:\n%s\n\n' "$untracked" >&2
-                fi
-              fi
-            '';
-          };
-        }
-      );
+      devShells = eachSystem (pkgs: {
+        default = pkgs.mkShell {
+          packages = runtimeDeps pkgs ++ [
+            pkgs.shellcheck
+            pkgs.nixfmt
+            (pkgs.python3.withPackages (ps: [ ps.pygobject3 ]))
+            pkgs.gtk4
+            pkgs.libadwaita
+            pkgs.gobject-introspection
+            pkgs.dbus
+            pkgs.xauth
+            pkgs.xvfb-run
+          ];
+          shellHook = ''
+            export PYTHONPATH="$PWD/lib/python''${PYTHONPATH:+:$PYTHONPATH}"
+          '';
+        };
+      });
 
       formatter = eachSystem (
         pkgs:

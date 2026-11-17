@@ -4,39 +4,22 @@ Ideas taken from the user's messages, in the order they are being built.
 Delete an item once it is implemented and committed; delete the file when the
 list is empty.
 
-## The proxy app, a project of its own
+## The proxy app's own repository
 
-- [ ] Move `android/` out into its own repository, with its own build and its
-  own releases. It started as the other half of this setup — a SOCKS5
-  listener the laptop drives — and has become an app with a list of proxies,
-  per-proxy segments, its own log and counters, a Quick Settings tile, a
-  rename dialog and info marks on every control; none of that is NixOS, and
-  the only thing left that ties the two together is the adb contract between
-  `bin/` and the service, which the app documents itself (`About this app`)
-  and which is worth keeping that way. What moves with it: `build.sh`
-  (aapt2, javac, d8, apksigner — no Gradle, no dependencies),
-  `android/default.nix`'s APK derivation, the test-only capture app and the
-  live harness (`tests/live/proxy-app.sh`, `clock.sh`, `frames.sh`), which
-  drive this app and nothing else. What stays: the NixOS module, the
-  scripts, the GUI.
+- [ ] Push it. The split itself is done and committed on both sides: the app's
+  history (44 commits of it) is a repository of its own with a flake of its own
+  (shell, APK, unit, format and a changelog check), a `v*` release workflow, the
+  live harness and the fastlane metadata, and this checkout consumes its
+  releases. What is left is the part that is a decision rather than work:
+  creating `MBanucu/phone-link-proxy`, setting its four `ANDROID_*` secrets,
+  pushing `main` and `v0.10.0`, and pointing `phone-proxy-install` at it — it
+  already defaults to that name.
 
-  Then the distribution, which is most of the work: an AAB for Google Play
-  beside the APK, a `fastlane` metadata tree with description, screenshots and
-  per-version changelogs, and the stores themselves. F-Droid first: it is the
-  natural home for a dependency-free FOSS app that already builds from source
-  with no Gradle, and its inclusion policy fits; IzzyOnDroid is the faster
-  front door while F-Droid's own review and build queue is worked through.
-  Google Play needs an account, a target-API level to keep up with and Google's
-  app signing; Amazon Appstore, Huawei AppGallery and Samsung Galaxy Store take
-  the same APK with more paperwork.
+- [ ] The store listings. F-Droid wants an app id and a review round (the
+  metadata it reads is in the tree); Google Play wants a developer account, an
+  AAB and Google's app signing, which needs `bundletool` and a key that is not
+  in any checkout. Neither can be created from here.
 
-  Left here because it is not an agent's to finish: creating the repository is
-  a decision, and a store listing needs an identity (an F-Droid app id, a Play
-  account, the signing key) that this checkout cannot create. What was
-  buildable here is done: a `v*` tag already publishes a signed APK and its
-  `.sha256` (`.github/workflows/release.yml`), so the GitHub Releases plus
-  Obtainium path the wish names installs and updates on the phone today, and
-  the doctor's `app_release` check compares the installed build with the newest
-  tag. What waits on the repository: the move itself, the AAB beside the APK,
-  the fastlane metadata and the store listings.
-
+- [ ] Screenshots for the fastlane tree. The text is done, the pictures are
+  not: they need a phone showing proxies that are nobody's real ones, which is
+  a cleaning decision before it is a capture one.

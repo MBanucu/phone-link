@@ -4,8 +4,7 @@
 #   bash tests/check-timings.sh
 #
 # The check times itself and writes `timings.csv` into its output, one row per
-# suite plus the parts a suite knows about (proxy-app.test.sh splits its `javac`
-# from its `cases`). A store path is immutable, so nothing there can be compared
+# suite plus the parts a suite knows about. A store path is immutable, so nothing there can be compared
 # with the last build; this copies the rows into `result-checks/timings.csv`,
 # append-only and keyed by run like `result-live/timings.csv`, and prints each
 # suite beside the last time it was measured. The point is not a fast build
