@@ -61,16 +61,15 @@ MANUAL_HINTS = {
     "secrets": "write the secrets file with PHONE_SOCKS_PASS and PHONE_PIN (root, mode 600)",
     "ap_pass": "add PHONE_AP_PASS to the secrets file",
     "apk_cache": (
-        "build this checkout's app: nix develop .#android -c ./android/build.sh"
+        "download the app's newest release: phone-proxy-install --release "
+        "(this checkout does not build it)"
     ),
     "proxy_version": (
-        "reinstall this checkout's build: phone-proxy-install "
-        "(or phone-doctor-fix --yes)"
+        "update the app: phone-proxy-install --release (or phone-doctor-fix --yes)"
     ),
     "proxy_compat": "the installed app does not fit this phone; pick a compatible APK",
     "app_installed": (
-        "install this repository's app: phone-proxy-install <apk> "
-        "(nix build .#checks.x86_64-linux.proxy-apk -o result-apk)"
+        "install the app: phone-proxy-install, or name a release APK to install"
     ),
     "flake_update": "update the source and rebuild: nix flake update phone-link",
     "https": "retry after the proxy/tether fixes; net-check shows which fetch fails",

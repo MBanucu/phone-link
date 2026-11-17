@@ -672,9 +672,9 @@ def phone_fix_internet(args: list[str]) -> int:
 
 
 def _releases(limit: int) -> list[tuple[str, str]]:
-    """(tag, APK URL) for the newest releases, newest first."""
+    """(tag, APK URL) for the newest app releases, newest first."""
     api = (
-        f"https://api.github.com/repos/{settings.PHONE_LINK_REPO}"
+        f"https://api.github.com/repos/{settings.PHONE_PROXY_REPO}"
         f"/releases?per_page={limit}"
     )
     code, body = run_text(["curl", "-fsSL", "--max-time", "30", api], timeout=40)
@@ -700,7 +700,7 @@ def _stock_releases(limit: int) -> int:
     releases = _releases(limit)
     if not releases:
         log(
-            f"warning: cannot read the releases of {settings.PHONE_LINK_REPO}; "
+            f"warning: cannot read the releases of {settings.PHONE_PROXY_REPO}; "
             "the box keeps what it has"
         )
         return 0
@@ -820,8 +820,7 @@ def phone_fix_apk(args: list[str]) -> int:
             log(f"ambulance APK ready: {target}")
     elif limit == 0:
         die(
-            "no APK to cache: build this checkout's app "
-            "(nix develop .#android -c ./android/build.sh), "
+            "no APK to cache: run phone-proxy-install --release once, "
             "or name one with PHONE_PROXY_APK"
         )
 

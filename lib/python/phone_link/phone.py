@@ -172,27 +172,17 @@ def ap_declarative() -> bool:
 
 
 def app_apk() -> str | None:
-    """The APK a reinstall would use, and the one the app is measured against.
+    """The APK a reinstall would hand to adb, and the one the app is measured by.
 
-    An explicit file wins, then this checkout's build — the APK `android/build.sh`
-    writes and `phone-proxy-install` installs — then whatever the ambulance box
-    holds, which is what a repair falls back on when the tree is not here.
+    An explicit file wins, then whatever the ambulance box holds. There is no
+    build in this checkout to prefer: the app is a project of its own, and
+    `phone-proxy-install` fetches its releases.
     """
     override = os.environ.get("PHONE_PROXY_APK")
     if override:
         # Named explicitly, so it is the answer even when it is missing: the
         # caller says which file is not there rather than installing another.
         return override
-    root = os.path.dirname(  # .../lib/python/phone_link -> the checkout
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    )
-    built = os.path.join(root, "android", "build", "phone-link-proxy.apk")
-    if settings.PHONE_PROXY_PKG == "org.phonelink.proxy.test":
-        # The second build of the same app: pointed at the test package, this is
-        # the APK that package comes from, not the daily one it must replace.
-        built = os.path.join(root, "android", "build", "phone-link-proxy-test.apk")
-    if os.path.isfile(built):
-        return built
     return apk_cached()
 
 

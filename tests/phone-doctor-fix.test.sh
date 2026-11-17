@@ -154,25 +154,25 @@ grep -qx "phone-proxy-install $TMP/fake.apk" "$LOG/actions" && ok "installs the 
   || bad "installs the cached APK" "$(cat "$LOG/actions" 2>/dev/null)"
 unset PHONE_PROXY_APK
 
-# 10. A missing APK is the build's business, so it is a manual step: no script
-# fakes a build, and nothing is run for it.
-printf 'fail apk_cache not built (nix develop .#android -c ./android/build.sh)\n' >"$LOG/problems"
+# 10. A missing APK is a download's business, so it is a manual step: no
+# script fetches one behind the user's back, and nothing is run for it.
+printf 'fail apk_cache not downloaded (phone-proxy-install --release)\n' >"$LOG/problems"
 rm -f "$LOG/actions"
 if run --yes --required; then bad "a missing APK is not fixed by a script"; else
   ok "a missing APK is not fixed by a script"
 fi
-grep -q 'apk_cache .*build' "$LOG/out" && ok "prints how to build it" \
-  || bad "prints how to build it" "$(cat "$LOG/out")"
+grep -q 'apk_cache .*phone-proxy-install --release' "$LOG/out" && ok "prints how to fetch it" \
+  || bad "prints how to fetch it" "$(cat "$LOG/out")"
 [ -s "$LOG/actions" ] && bad "a manual step runs nothing" || ok "a manual step runs nothing"
 
-# 11. A proxy install names a file from the checkout's build or the ambulance
-# box, without being told which, and never a download.
+# 11. A proxy install names the file the ambulance box holds, without being
+# told which, and never a download.
 printf 'fail proxy_app org.phonelink.proxy not installed\n' >"$LOG/problems"
 rm -f "$LOG/actions"
 if run --yes --required; then ok "proxy reinstall exits 0"; else bad "proxy reinstall exits 0" "$(cat "$LOG/out")"; fi
-grep -Eq "phone-proxy-install (.*/android/build/phone-link-proxy\.apk|$PHONE_APK_CACHE/.*\.apk)$" "$LOG/actions" \
-  && ok "installs the APK the checkout or the cache names" \
-  || bad "installs the APK the checkout or the cache names" "$(cat "$LOG/actions" 2>/dev/null)"
+grep -Eq "phone-proxy-install ($PHONE_APK_CACHE/.*\.apk)$" "$LOG/actions" \
+  && ok "installs the APK the cache names" \
+  || bad "installs the APK the cache names" "$(cat "$LOG/actions" 2>/dev/null)"
 grep -q -- '--fdroid' "$LOG/actions" && bad "does not download to repair" || ok "does not download to repair"
 
 # 12. A missing AP profile is created from the secret.

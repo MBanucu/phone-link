@@ -209,34 +209,17 @@ class Context:
         return values.get("PHONE_SOCKS_PASS") or None
 
     @property
-    def proxy_manifest(self) -> Path:
-        """The manifest this checkout builds: where the app's version lives."""
-        return Path(
-            self.get(
-                "PHONE_PROXY_MANIFEST",
-                str(self.source_root / "android" / "AndroidManifest.xml"),
-            )
-        )
-
-    @property
     def proxy_apk(self) -> Path | None:
-        """The APK a reinstall would use, and the one the version is read from.
+        """The APK a repair would install: an explicit file, or the cache.
 
-        An explicit file wins, then this checkout's build, then whatever is
-        cached: the cache is what a repair falls back on when the tree is gone
-        or the network the app provides is the thing that broke.
+        An explicit file wins even when it is missing — the check says so
+        instead of quietly picking another — and the cache is what a repair
+        falls back on when this checkout never downloaded a release or the
+        network the app provides is the thing that broke.
         """
         override = self.env.get("PHONE_PROXY_APK") or ""
         if override:
-            # Named explicitly, so it is what a repair would use even if it is
-            # missing: the check says so instead of quietly picking another.
             return Path(override)
-        built = self.source_root / "android" / "build" / "phone-link-proxy.apk"
-        if self.proxy_pkg == "org.phonelink.proxy.test":
-            # The test build, for a doctor pointed at the test package.
-            built = self.source_root / "android" / "build" / "phone-link-proxy-test.apk"
-        if built.is_file():
-            return built
         return self.apk_cached()
 
     def apk_cached(self) -> Path | None:

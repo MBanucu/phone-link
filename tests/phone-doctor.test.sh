@@ -127,7 +127,7 @@ export PATH="$STUBS:$PATH"
 export PHONE_SECRETS=$TMP/secrets
 export PHONE_DOCTOR_RESOLV=$LOG/resolv.conf
 export PHONE_APK_CACHE=$TMP/cache
-export PHONE_PROXY_MANIFEST=$TMP/manifest.xml PHONE_PROXY_APK=$TMP/app.apk
+export PHONE_PROXY_APK=$TMP/app.apk
 export PHONE_NIXOS_DIR=$TMP/nixos PHONE_FLAKE_SRC=$TMP/no-src
 printf 'PHONE_SOCKS_PASS=pass\nPHONE_PIN=1234\nPHONE_AP_PASS=pass\n' >"$PHONE_SECRETS"
 chmod 600 "$PHONE_SECRETS"
@@ -153,9 +153,8 @@ fresh_state() {
     >"$LOG/app_state"
   printf 'user,org.phonelink.proxy,10332\n' >"$LOG/whitelist"
   printf '35\n' >"$LOG/sdk"
-  # The version the tree would build, and the APK a reinstall would use: both
-  # are files here so the test says what a checkout says and nothing else.
-  printf '    android:versionCode="1"\n    android:versionName="0.1.0">\n' >"$TMP/manifest.xml"
+  # The APK a repair would use is a file here, so the check reports what it was
+  # given and nothing else; the version is whatever the phone says.
   : >"$TMP/app.apk"
   : >"$LOG/avahi"
   : >"$LOG/connected"
@@ -298,17 +297,19 @@ if run; then ok "the named APK passes"; else bad "the named APK passes" "$(cat "
 grep -q "ok    app apk.*$TMP/app.apk" "$LOG/out" && ok "passes with the APK it was given" \
   || bad "passes with the APK it was given" "$(cat "$LOG/out")"
 
-# 12. The installed proxy version is compared with this checkout's manifest.
+# 12. The installed proxy version is reported as what the phone says: this
+#     checkout builds nothing to compare it with, so there is no warning to
+#     earn and no version it could be wrong about.
 fresh_state
-if run; then ok "the tree's build exits 0"; else bad "the tree's build exits 0"; fi
-grep -q "ok    proxy version.*0.1.0 (1), this checkout's build" "$LOG/out" \
-  && ok "accepts the build this checkout makes" || bad "accepts the build this checkout makes" \
+if run; then ok "the installed app exits 0"; else bad "the installed app exits 0" "$(cat "$LOG/out")"; fi
+grep -q "ok    proxy version.*0.1.0 (1)" "$LOG/out" \
+  && ok "reports the installed version" || bad "reports the installed version" \
   "$(cat "$LOG/out")"
 fresh_state
 printf '    versionCode=24 minSdk=26 targetSdk=34\n    versionName=1.7.4\n    ACCESS_BACKGROUND_LOCATION: granted=true\n' >"$LOG/dumpsys"
-if run; then ok "an older app still exits 0"; else bad "an older app still exits 0"; fi
-grep -q "warn  proxy version.*1.7.4 (24) is not this checkout's 0.1.0 (1); run phone-proxy-install" \
-  "$LOG/out" && ok "says which build the tree makes" || bad "says which build the tree makes" \
+if run; then ok "another version still exits 0"; else bad "another version still exits 0"; fi
+grep -q "ok    proxy version.*1.7.4 (24)" "$LOG/out" \
+  && ok "reports it without comparing" || bad "reports it without comparing" \
   "$(cat "$LOG/out")"
 grep -q 'ok    proxy compat.*minSdk 26 <= phone SDK 35' "$LOG/out" \
   && ok "checks the SDK compatibility" || bad "checks the SDK compatibility" "$(cat "$LOG/out")"

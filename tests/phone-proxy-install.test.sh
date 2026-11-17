@@ -92,8 +92,9 @@ for stub in "$WORK/stub/adb" "$WORK/stub/curl"; do
   sed -i "1s|.*|#!${BASH}|" "$stub"
 done
 
-# --fdroid is for the vendored app, which is the one a store still has; the
-# default package is this checkout's own build.
+# --fdroid is for the vendored app, which is the one a store still has. The
+# default package is the app's own repository, whose releases a bare install
+# fetches: this checkout no longer builds it.
 run() {
   HOME="$WORK/home" PATH="$WORK/stub:$PATH" PHONE_APK_DIR="$WORK/cache" \
     PHONE_PROXY_PKG=com.tokyoxpa3.androidproxy bash "$SCRIPT" "$@" 2>&1
@@ -213,11 +214,11 @@ else
   ok "the vendored proxy is granted nothing"
 fi
 
-# 24. --release takes the APK a release of this repository carries, checks the
-#     .sha256 beside it, and installs that file.
+# 24. --release takes the APK a release of the app's repository carries, checks
+#     the .sha256 beside it, and installs that file.
 release_run() {
   HOME="$WORK/home" PATH="$WORK/stub:$PATH" PHONE_APK_DIR="$WORK/cache" \
-    PHONE_PROXY_PKG=org.phonelink.proxy PHONE_LINK_REPO=example/phone-link \
+    PHONE_PROXY_PKG=org.phonelink.proxy PHONE_PROXY_REPO=example/phone-link-proxy \
     bash "$SCRIPT" "$@" 2>&1
 }
 release_cache="$WORK/cache/phone-link-proxy-0.1.0.apk"
@@ -262,7 +263,7 @@ rm -f "$release_cache"
 : > "$WORK/adb.log"
 out=$(CURL_STUB_BAD_SUM=1 HOME="$WORK/home" PATH="$WORK/stub:$PATH" \
   PHONE_APK_DIR="$WORK/cache" PHONE_PROXY_PKG=org.phonelink.proxy \
-  PHONE_LINK_REPO=example/phone-link bash "$SCRIPT" --release 2>&1)
+  PHONE_PROXY_REPO=example/phone-link-proxy bash "$SCRIPT" --release 2>&1)
 rc=$?
 [ "$rc" = 1 ] && ok "a bad checksum exits 1" || bad "a bad checksum exits 1" "exit $rc"
 case $out in
@@ -315,12 +316,41 @@ expect_exit "--fdroid --release is rejected" 1 --fdroid --release
 expect_exit "--release with two tags is rejected" 1 --release v0.5.0 v0.4.0
 expect_exit "--replace-signer --check is rejected" 1 --replace-signer --check "$WORK/local.apk"
 
-build_out=$(run --build --release 2>&1) && bad "--build with --release exits 1" \
-  || ok "--build with --release exits 1"
-printf '%s' "$build_out" | grep -q 'drop the path and the other sources' \
-  && ok "--build says what to drop" || bad "--build says what to drop" "$build_out"
-if run --build --check >/dev/null 2>&1; then bad "--build with --check exits 1"; else
-  ok "--build with --check exits 1"
+# 32. This checkout does not build the app any more: a bare install is the
+#     newest release of its own repository, and --build says where the build
+#     went instead of failing as an unknown option.
+rm -f "$release_cache"
+: > "$WORK/adb.log"
+out=$(release_run --check)
+rc=$?
+[ "$rc" = 0 ] && ok "a bare --check exits 0" || bad "a bare --check exits 0" "exit $rc: $out"
+case $out in
+  *"release: latest"*) ok "a bare --check reads the newest release" ;;
+  *) bad "a bare --check reads the newest release" "$out" ;;
+esac
+if grep -q ' install ' "$WORK/adb.log"; then
+  bad "a bare --check never installs" "$(grep install "$WORK/adb.log" | tail -1)"
+else
+  ok "a bare --check never installs"
+fi
+rm -f "$release_cache"
+: > "$WORK/adb.log"
+release_run >/dev/null
+if grep -q -- "-s TESTPHONE install -r -g $release_cache" "$WORK/adb.log"; then
+  ok "a bare install fetches the newest release"
+else
+  bad "a bare install fetches the newest release" "$(grep install "$WORK/adb.log" | tail -1)"
+fi
+
+build_out=$(run --build 2>&1) && bad "--build exits 1" || ok "--build exits 1"
+printf '%s' "$build_out" | grep -q 'built in its own repository' \
+  && ok "--build names the app's repository" || bad "--build names the app's repository" "$build_out"
+case $build_out in
+  *MBanucu/phone-link-proxy*) ok "--build names where the app lives" ;;
+  *) bad "--build names where the app lives" "$build_out" ;;
+esac
+if run --build --check >/dev/null 2>&1; then bad "--build --check exits 1"; else
+  ok "--build --check exits 1"
 fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"

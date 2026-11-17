@@ -1,11 +1,9 @@
-"""Proxy checks: this repository's app, its version, compatibility, a request.
+"""Proxy checks: the app on the phone, its version, compatibility, a request.
 
-The phone's proxy is the app in `android/`, so the version it is measured
-against is the one in this checkout's manifest — the file `android/build.sh`
-builds from — and a reinstall is `phone-proxy-install`, which installs that
-build. No store is in the loop: an app that is not this checkout's build is
-simply out of date with it, and an offline host is no excuse for a check that
-cannot say which version the tree would produce.
+The app is a project of its own, so there is no build in this checkout to
+measure the phone against: the newest release of the app's repository is what
+a reinstall would fetch (`phone-proxy-install`), and the version on the phone
+is reported as what it is. No store is in the loop.
 
 What is asked of the phone is what the app answers for itself: `dumpsys
 package` for what is installed, and a request through the listener for whether
@@ -39,32 +37,6 @@ def _installed_versions(ctx: Context) -> tuple[str, str, str, str]:
     )
 
 
-def _tree_version(ctx: Context) -> tuple[str, str]:
-    """The versionName and versionCode this checkout builds.
-
-    The manifest is a template — `android/build.sh` stamps the version into a
-    copy — so the number comes from `android/version`, the same file the build
-    reads, and only a checkout without one falls back to the manifest.
-    """
-    version_file = ctx.proxy_manifest.parent / "version"
-    try:
-        text = version_file.read_text().strip()
-    except OSError:
-        text = ""
-    if re.fullmatch(r"\d+\.\d+\.\d+", text):
-        parts = [int(part) for part in text.split(".")]
-        # The same number build.sh's awk prints, and dumpsys reads back without
-        # its leading zeros: 0.9.0 is 900, not 00900.
-        return text, str(parts[0] * 10000 + parts[1] * 100 + parts[2])
-    try:
-        manifest = ctx.proxy_manifest.read_text()
-    except OSError:
-        return "", ""
-    name = re.search(r'android:versionName="([^"]+)"', manifest)
-    code = re.search(r'android:versionCode="(\d+)"', manifest)
-    return (name.group(1) if name else ""), (code.group(1) if code else "")
-
-
 def _version_tuple(text: str) -> tuple[int, ...]:
     numbers = [int(part) for part in re.findall(r"\d+", text)[:3]]
     return tuple(numbers)
@@ -95,7 +67,7 @@ def _latest_tag(ctx: Context, installed: str) -> str:
     # so it is worth one question rather than a day of a misleading answer.
     if tag and _version_tuple(tag) > _version_tuple(installed):
         return tag
-    repo = ctx.get("PHONE_LINK_REPO", "MBanucu/phone-link")
+    repo = ctx.get("PHONE_PROXY_REPO", "MBanucu/phone-link-proxy")
     proc = ctx.run(
         [
             "curl",
@@ -164,7 +136,7 @@ def check(ctx: Context) -> list[Result]:
             fail(
                 "apk_cache",
                 "app apk",
-                "not built (nix develop .#android -c ./android/build.sh)",
+                "not downloaded (phone-proxy-install --release)",
             )
         )
 
@@ -182,34 +154,10 @@ def check(ctx: Context) -> list[Result]:
     if serial:
         version, code, min_sdk, target_sdk = _installed_versions(ctx)
         phone_sdk = ctx.adb("shell", "getprop", "ro.build.version.sdk").strip()
-        tree_name, tree_code = _tree_version(ctx)
         if not code:
             results.append(skip("proxy_version", "proxy version", "app not installed"))
-        elif not tree_code:
-            results.append(
-                skip(
-                    "proxy_version",
-                    "proxy version",
-                    f"{version} ({code}); no manifest here to compare with",
-                )
-            )
-        elif code == tree_code:
-            results.append(
-                ok(
-                    "proxy_version",
-                    "proxy version",
-                    f"{version} ({code}), this checkout's build",
-                )
-            )
         else:
-            results.append(
-                warn(
-                    "proxy_version",
-                    "proxy version",
-                    f"{version} ({code}) is not this checkout's "
-                    f"{tree_name or '?'} ({tree_code}); run phone-proxy-install",
-                )
-            )
+            results.append(ok("proxy_version", "proxy version", f"{version} ({code})"))
         latest = _latest_tag(ctx, version) if version else ""
         if not version:
             pass

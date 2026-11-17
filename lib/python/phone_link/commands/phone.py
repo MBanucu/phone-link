@@ -12,7 +12,6 @@ import os
 import re
 import sys
 import time
-from pathlib import Path
 
 from .. import phone, settings
 from ..shell import capture, die, have, log, run_both, run_text, status
@@ -63,22 +62,18 @@ and refuses in a non-interactive shell. --check only reports what would go.
 USAGE_INSTALL = """usage: phone-proxy-install [APK...]
        phone-proxy-install --fdroid [--check]
        phone-proxy-install --release [TAG]
-       phone-proxy-install --build
        phone-proxy-install --pull [DIR]
        phone-proxy-install --status
        phone-proxy-install --check APK
 
 Installs or updates the phone's SOCKS proxy app over adb (-r -g) — with no
-argument, the APK this checkout builds (`android/build.sh` writes it) — pulls
-the installed APK off the phone for later reinstalls, or reports what is
-installed. --fdroid fetches the vendored proxy from F-Droid instead, for a
-phone that still runs it; --release takes the APK attached to a release of this
-repository (the latest one, or the tag given), and checks the .sha256 beside it
-before installing it. --build runs `android/build.sh` and installs what it
-produced, so a change to the app goes onto the phone in one step: with
-PHONE_APP_KEYSTORE and PHONE_APP_KEYSTORE_PASS in the environment the APK is
-signed with that key, which is what makes it installable over a release-signed
-app without an uninstall.
+argument, the newest release of the app's own repository
+(MBanucu/phone-link-proxy, PHONE_PROXY_REPO to override) — pulls the installed
+APK off the phone for later reinstalls, or reports what is installed. --fdroid
+fetches the vendored proxy from F-Droid instead, for a phone that still runs
+it; --release takes the latest release, or the one named by the tag given, and
+checks the .sha256 beside it before installing it. An APK built from a
+checkout of the app's repository is installed by naming the file.
 
 An app signed with a different key cannot be updated in place — adb refuses the
 install — so --replace-signer uninstalls it first. That also clears the app's
@@ -606,7 +601,6 @@ def phone_proxy_install(args: list[str]) -> int:
     mode = "install"
     use_fdroid = False
     use_release = False
-    use_build = False
     replace_signer = False
     assume_yes = False
     extra: list[str] = []
@@ -626,7 +620,15 @@ def phone_proxy_install(args: list[str]) -> int:
         elif value == "--release":
             use_release = True
         elif value == "--build":
-            use_build = True
+            # The app has its own repository and its own build now, so this
+            # checkout cannot produce the APK. Say where it comes from instead
+            # of failing as if the option were never ours.
+            print(USAGE_INSTALL, end="", file=sys.stderr)
+            die(
+                "the app is built in its own repository "
+                f"({settings.PHONE_PROXY_REPO}): install a release with "
+                "--release, or name an APK you built there"
+            )
         elif value == "--replace-signer":
             replace_signer = True
         elif value in ("-y", "--yes"):
@@ -658,10 +660,6 @@ def phone_proxy_install(args: list[str]) -> int:
         die("--release takes one tag at most")
     if replace_signer and mode == "check":
         die("--check installs nothing; drop --replace-signer")
-    if use_build and (use_fdroid or use_release or extra):
-        die("--build builds the APK from this checkout; drop the path and the other sources")
-    if use_build and mode != "install":
-        die(f"--{mode} installs nothing; drop --build")
 
     serial = _serial()
     package = settings.PHONE_PROXY_PKG
@@ -691,79 +689,6 @@ def phone_proxy_install(args: list[str]) -> int:
             log(f"  {path}")
         return 0
 
-    def find_apk() -> str | None:
-        # This checkout's build is what the phone should be running, so it wins
-        # over a stray APK in the current directory.
-        built = phone.app_apk()
-        if built:
-            return built
-        # The current directory, the usual download spots, then the
-        # repository's apk/ folder; prefer a file whose name says "proxy".
-        script_dir = Path(__file__).resolve().parents[3] / "bin"
-        candidates = [
-            os.getcwd(),
-            os.environ.get("PHONE_APK_DIR", ""),
-            str(Path.home() / "Downloads") if os.environ.get("HOME") else "",
-            str(Path.home() / "Desktop") if os.environ.get("HOME") else "",
-            str(script_dir.parent / "apk"),
-        ]
-        for directory in candidates:
-            if not directory or not os.path.isdir(directory):
-                continue
-            files = sorted(Path(directory).glob("*.apk"))
-            if not files:
-                continue
-            for file in files:
-                if "proxy" in file.name:
-                    return str(file)
-            return str(files[0])
-        return None
-
-    def build_tree() -> str:
-        """Build this checkout's app, and say what it was signed with.
-
-        Signing comes from the environment, as `android/build.sh` reads it:
-        with PHONE_APP_KEYSTORE named the APK goes over a release-signed app
-        without an uninstall; without one it is debug-signed, and installing it
-        over a release APK means `--replace-signer` and its cost. Saying which
-        beforehand is the point of doing this here rather than in a shell.
-        """
-        # .../lib/python/phone_link/commands/phone.py -> the checkout
-        root = Path(__file__).resolve().parents[4]
-        script = root / "android" / "build.sh"
-        if not script.is_file():
-            die(f"no build script at {script}")
-        if os.environ.get("PHONE_APP_KEYSTORE"):
-            log("signing: PHONE_APP_KEYSTORE")
-        else:
-            log(
-                "warning: this build is debug-signed; installing it over a "
-                "release-signed app needs --replace-signer (and an uninstall)"
-            )
-        command = ["bash", str(script)]
-        if not have("javac"):
-            # The packaged scripts do not carry the SDK; the dev shell does.
-            if not have("nix"):
-                die(
-                    "cannot build here: run inside `nix develop .#android`, or "
-                    "install a JDK and the Android build tools"
-                )
-            log("building through `nix develop .#android`")
-            command = ["nix", "develop", f"{root}#android", "-c", *command]
-        if status(command) != 0:
-            die("the app did not build")
-        built = phone.app_apk()
-        if not built or not os.path.isfile(built):
-            die("the build produced no APK")
-        version = ""
-        try:
-            version = (root / "android" / "version").read_text().strip()
-        except OSError:
-            pass
-        log(f"built: {built} ({os.path.getsize(built)} bytes)"
-            + (f", version {version}" if version else ""))
-        return built
-
     def cache_dir() -> str:
         return os.environ.get("PHONE_APK_DIR") or (
             os.path.join(
@@ -789,23 +714,24 @@ def phone_proxy_install(args: list[str]) -> int:
         return True
 
     def release_apk() -> str:
-        """The APK attached to a release of this repository, checked."""
+        """The APK attached to a release of the app's repository, checked."""
+        repo = settings.PHONE_PROXY_REPO
         tag = extra[0] if extra else ""
         wanted = tag or "latest"
         api = (
-            f"https://api.github.com/repos/{settings.PHONE_LINK_REPO}/releases/tags/{tag}"
+            f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
             if tag
-            else f"https://api.github.com/repos/{settings.PHONE_LINK_REPO}/releases/latest"
+            else f"https://api.github.com/repos/{repo}/releases/latest"
         )
         code, body = run_text(["curl", "-fsSL", "--max-time", "30", api], timeout=40)
         if code != 0:
-            die(f"cannot read the {wanted} release of {settings.PHONE_LINK_REPO}")
+            die(f"cannot read the {wanted} release of {repo}")
         # The release's assets are the only thing needed from the document, and
         # the APK is the one asset without a suffix.
         urls = re.findall(r'"browser_download_url":\s*"([^"]+)"', body)
         apk_url = next((url for url in urls if url.endswith(".apk")), "")
         if not apk_url:
-            die(f"the {wanted} release of {settings.PHONE_LINK_REPO} has no APK attached")
+            die(f"the {wanted} release of {repo} has no APK attached")
         name = apk_url.rsplit("/", 1)[-1]
         log(f"release: {wanted} ({name})")
 
@@ -977,24 +903,18 @@ def phone_proxy_install(args: list[str]) -> int:
     if mode == "pull":
         return pull_apks(extra[0] if extra else os.path.join(os.getcwd(), "apk"))
 
+    # A bare install is the newest release of the app's own repository: this
+    # checkout used to build it, and no longer does.
     local_apks: list[str] = []
     if use_release:
+        # extra[0], when there is one, is the tag to take.
         local_apks = [release_apk()]
     elif use_fdroid:
         local_apks = [fdroid_latest()]
-    elif use_build:
-        local_apks = [build_tree()]
     elif extra:
         local_apks = list(extra)
     else:
-        found = find_apk()
-        if not found:
-            die(
-                "no APK found: build this checkout's app with "
-                "nix develop .#android -c ./android/build.sh, pass an APK, "
-                "or fetch the vendored one with --fdroid"
-            )
-        local_apks = [found]
+        local_apks = [release_apk()]
 
     for apk in local_apks:
         if not os.path.isfile(apk):
