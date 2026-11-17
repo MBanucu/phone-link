@@ -48,12 +48,17 @@ def _latest_tag(ctx: Context, installed: str) -> str:
     The one check that asks a network question, because "is this release the
     newest" is not a fact the phone has. A cached answer lasts a day and a host
     that cannot reach GitHub says so instead of stalling: three seconds, once.
+
+    The cache is per repository: `PHONE_PROXY_REPO` can point at a fork or at
+    the repository the app lived in before it had one, and an answer about one
+    of those is not an answer about the other.
     """
+    repo = ctx.get("PHONE_PROXY_REPO", "MBanucu/phone-link-proxy")
     cache = os.path.join(
         os.environ.get("XDG_CACHE_HOME")
         or os.path.join(os.path.expanduser("~"), ".cache"),
         "phone-link",
-        "latest-release",
+        "latest-release-" + repo.replace("/", "-"),
     )
     tag = ""
     try:
@@ -67,7 +72,6 @@ def _latest_tag(ctx: Context, installed: str) -> str:
     # so it is worth one question rather than a day of a misleading answer.
     if tag and _version_tuple(tag) > _version_tuple(installed):
         return tag
-    repo = ctx.get("PHONE_PROXY_REPO", "MBanucu/phone-link-proxy")
     proc = ctx.run(
         [
             "curl",

@@ -402,9 +402,10 @@ grep -q 'USB only' "$LOG/out" && bad "does not fall back to USB only" \
 # 19. --help exits 0.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 
-# The release check: the answer is cached for a day, so the case starts without
-# one, and a queued GitHub answer stands in for the network.
-release_cache=$XDG_CACHE_HOME/phone-link/latest-release
+# The release check: the answer is cached for a day, per repository, so the
+# case starts without one, and a queued GitHub answer stands in for the
+# network.
+release_cache=$XDG_CACHE_HOME/phone-link/latest-release-MBanucu-phone-link-proxy
 rm -f "$release_cache"
 printf '{"tag_name": "v9.9.9"}' >"$LOG/release_json"
 fresh_state
