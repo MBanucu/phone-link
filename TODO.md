@@ -74,7 +74,16 @@ list is empty.
   new, so a phone on 0.9.x needs `--replace-signer` once, which clears its
   saved proxies; the release notes say so.
 
-- [ ] The store listings. F-Droid wants an app id and a review round (the
-  metadata it reads is in the tree); Google Play wants a developer account, an
-  AAB and Google's app signing, which needs `bundletool` and a key that is not
-  in any checkout. Neither can be created from here.
+- [ ] The F-Droid merge request. Everything F-Droid asked for is now in
+  `MBanucu/phone-link-proxy`: the licence (GPL-3.0-or-later, tag `v0.11.1`),
+  the store text and images the fastlane tree already carried, and
+  `fdroid/org.phonelink.proxy.yml`, a 0.11.1 entry that lints clean and that
+  `fdroid rewritemeta` leaves alone. What is left is a GitLab account, the
+  fork and branch `org.phonelink.proxy`, that file copied to `metadata/`, and
+  their review — the first inclusion takes weeks. Their build re-signs the
+  APK, so an install from f-droid.org cannot replace the GitHub one without an
+  uninstall, which clears the app's saved proxies.
+
+- [ ] The Play listing. A developer account, an AAB and Google's app signing,
+  which needs `bundletool` and a key that is not in any checkout. Not an
+  agent's to create.
