@@ -1,6 +1,6 @@
-"""This repository's own app: installed, and will it come back at boot?
+"""The app of our own: installed, and will it come back at boot?
 
-The app in `android/` is the one whose boot restart depends on things outside
+The app is the one whose boot restart depends on things outside
 itself — the device-idle allowlist and background location — so a phone that
 serves `200` today can still come up with no listener tomorrow. The check names
 exactly which of those facts is missing; `phone-proxy-boot` fixes them.

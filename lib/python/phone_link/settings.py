@@ -30,10 +30,10 @@ PHONE_HOTSPOT_CON = _env("PHONE_HOTSPOT_CON", "XPLORE 2")
 PHONE_HOTSPOT_SSID = _env("PHONE_HOTSPOT_SSID", PHONE_HOTSPOT_CON)
 PHONE_PROXY_PORT = int(_env("PHONE_PROXY_PORT", "1080"))
 PHONE_PROXY_USER = _env("PHONE_PROXY_USER", "proxy")
-# The app in `android/`: it is the phone's proxy, and PHONE_PROXY_PKG is what a
-# command means by "the proxy app". The vendored `com.tokyoxpa3.androidproxy`
-# still works by overriding it, which is what the uninstall and data-clear
-# commands are for.
+# The app (`github:MBanucu/phone-link-proxy`): it is the phone's proxy, and
+# PHONE_PROXY_PKG is what a command means by "the proxy app". The vendored
+# `com.tokyoxpa3.androidproxy` still works by overriding it, which is what the
+# uninstall and data-clear commands are for.
 PHONE_PROXY_PKG = _env("PHONE_PROXY_PKG", "org.phonelink.proxy")
 PHONE_APP_PKG = _env("PHONE_APP_PKG", PHONE_PROXY_PKG)
 # Whatever id it is installed under (the `.test` build included), our app is the

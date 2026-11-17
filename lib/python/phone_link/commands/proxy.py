@@ -1,6 +1,6 @@
 """The proxy app's commands: start, stop and configure it over adb.
 
-The app in `android/` answers its own intents and prints what it is doing for
+The app answers its own intents and prints what it is doing for
 `dumpsys activity service`, so nothing here needs the screen, the keyguard or
 uiautomator: a start is `am start-foreground-service START` with the
 configuration as extras, a stop is `STOP`, and `--check` reads the dump.
