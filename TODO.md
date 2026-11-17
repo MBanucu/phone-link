@@ -33,6 +33,35 @@ list is empty.
   the refusal and a phone that fails to start, and the module check for the
   runtime file and the toggle reading it.
 
+## The app's proxies, over adb
+
+- [ ] Exporting and importing the app's saved proxies is a tap-through: the
+  menu's *Export every proxy…* opens the system picker, so someone has to choose
+  a folder — in practice a shared one, which the confirmation dialog itself
+  warns against, because the file holds every proxy's password in clear text —
+  and *Import proxies…* needs the same taps to get it back. The adb contract
+  cannot help: it never prints a password, by design, because anything on the
+  `am` command line or in a `dumpsys` dump is readable by every process that can
+  talk to adbd. So the two things that lose the proxies — a signing-key change
+  (`phone-proxy-install --replace-signer` uninstalls first) and a lost or reset
+  phone — are both recoverable only by hand, and the second only if the file
+  was exported recently. Done means the laptop can do it over adb: one command
+  that pulls every saved proxy with its port, SSID, credentials and flags into a
+  file the laptop keeps private (root-only, beside the secrets), and one that
+  puts them back after an install, so `--replace-signer` exports first and
+  imports after instead of asking someone to remember. The app side is the same
+  `ProfileDocument` JSON the menu already writes, so nothing new is trusted with
+  the passwords; what needs deciding is how it crosses: a file the app writes
+  where adb can read it, or a socket the laptop pulls through `adb forward` and
+  that leaves no plain-text file on the phone at all — and what bounds it, since
+  a command that hands out passwords is exactly what the contract refuses to
+  have: a panel toggle that adb can only flip while the screen is unlocked, say,
+  or an action only a debug build carries. What proves it: the Android-free unit
+  test for the document round trip, a hermetic suite with a stub `adb` for the
+  laptop side (export, install, import, and a phone that answers with nothing),
+  and a live step that exports, replaces the signer and checks the proxy answers
+  on the port it had before.
+
 ## The proxy app's own repository
 
 - [x] Pushed. `MBanucu/phone-link-proxy` exists, its `main` and `v0.10.0` are
