@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The doctor's one cached answer about releases is named after the repository
+  it is about. It was a single file, so pointing `PHONE_PROXY_REPO` at a fork —
+  or at the repository the app lived in before it had one of its own — could
+  answer with a tag cached from another repository.
+
 ## [0.11.0] - 2026-11-17
 
 ### Changed

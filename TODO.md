@@ -6,14 +6,15 @@ list is empty.
 
 ## The proxy app's own repository
 
-- [ ] Push it. The split itself is done and committed on both sides: the app's
-  history (44 commits of it) is a repository of its own with a flake of its own
-  (shell, APK, unit, format and a changelog check), a `v*` release workflow, the
-  live harness and the fastlane metadata, and this checkout consumes its
-  releases. What is left is the part that is a decision rather than work:
-  creating `MBanucu/phone-link-proxy`, setting its four `ANDROID_*` secrets,
-  pushing `main` and `v0.10.0`, and pointing `phone-proxy-install` at it — it
-  already defaults to that name.
+- [x] Pushed. `MBanucu/phone-link-proxy` exists, its `main` and `v0.10.0` are
+  there, its four `ANDROID_*` secrets are set with a key generated for it
+  (SHA-256 `8D:22:ED:6D:…:3B:B2`; the keystore and its password are in
+  `~/.config/phone-link/`, and they are the only copy outside the secret —
+  back them up), the tag's run built and attached
+  `phone-link-proxy-0.10.0.apk` and its `.sha256`, and a bare
+  `phone-proxy-install --check` fetches it and matches the checksum. The key is
+  new, so a phone on 0.9.x needs `--replace-signer` once, which clears its
+  saved proxies; the release notes say so.
 
 - [ ] The store listings. F-Droid wants an app id and a review round (the
   metadata it reads is in the tree); Google Play wants a developer account, an
