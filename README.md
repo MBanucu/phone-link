@@ -64,7 +64,7 @@ stopped proxy app cannot blackhole traffic.
 | `phoneLink.ap.band` / `channel` | `bg` / `1` | 802.11 band and channel |
 | `phoneLink.ap.address` | `192.168.77.1/24` | IPv4 address of the AP interface |
 | `phoneLink.proxyHost` | `192.168.77.232` | address of the phone's SOCKS proxy |
-| `phoneLink.proxyPort` | `1080` | SOCKS port |
+| `phoneLink.proxyPort` | `1080` | default SOCKS port; the port in use is `/run/phone-link/proxy-port` |
 | `phoneLink.proxyUser` | `proxy` | SOCKS username |
 | `phoneLink.secretsFile` | `/etc/nixos/phone-socks-secrets` | file with `PHONE_SOCKS_PASS=…` (and `PHONE_AP_PASS=…` with `ap.enable`) |
 | `phoneLink.interfaceName` | `phone-tun` | TUN device name |
@@ -75,6 +75,17 @@ stopped proxy app cannot blackhole traffic.
 | `phoneLink.openApFirewall` | `true` | allow DHCP/DNS from AP clients |
 | `phoneLink.enableRelay` | `false` | run the local SOCKS/HTTP relay (`gost`) |
 | `phoneLink.relaySocksPort` / `relayHttpPort` | `1081` / `1082` | relay ports |
+
+The port is the one setting that is not a rebuild: `phoneLink.proxyPort` is
+the default, and `phone-proxy-switch` (or the panel's **Proxy port** page)
+writes the port the phone is actually listening on to
+`/run/phone-link/proxy-port`. `phone-tun`'s `ExecStartPre`, the 5 s probe, the
+relay and every script read that file, so switching takes effect at the next
+start of those units — nothing in the store changes, and the timer keeps
+working. It lives in `/run`, so a reboot is back to `phoneLink.proxyPort`; the
+phone's auto-start may bring up another saved proxy at another port, which the
+doctor reports until you switch again. `PHONE_RUNTIME_PORT_FILE` moves the file
+for a test, and `PHONE_PROXY_PORT` overrides both for a one-off run.
 
 ## Use the scripts
 
@@ -89,7 +100,7 @@ Or straight from the checkout: `./bin/phone-net-status`.
 | script | what it does |
 |---|---|
 | `phone-net-status` | links, routes, resolver, proxy probes, adb transports, phone state |
-| `phone-doctor` | check every runtime condition of the setup (forwarding, AP profile/address, adb, phone link, secrets, proxy, tunnel, tether, internet), the APK a repair would install, the version the installed app reports and the phone SDK, and whether the source checkout is newer than the installed flake lock; exit non-zero if a required one is unmet; the adb check reconnects a phone whose wireless-debugging port changed by reading its `_adb-tls-connect._tcp` mDNS record; `--analyze` prints one `fail`/`warn` line with a stable problem id for scripts |
+| `phone-doctor` | check every runtime condition of the setup (forwarding, AP profile/address, adb, phone link, secrets, proxy, the port the laptop uses against the phone's listeners, tunnel, tether, internet), the APK a repair would install, the version the installed app reports and the phone SDK, and whether the source checkout is newer than the installed flake lock; exit non-zero if a required one is unmet; the adb check reconnects a phone whose wireless-debugging port changed by reading its `_adb-tls-connect._tcp` mDNS record; `--analyze` prints one `fail`/`warn` line with a stable problem id for scripts |
 | `phone-doctor-fix` | list the fixes for the problems `phone-doctor --analyze` reports, run one dedicated script per problem in dependency order, then re-check (`--yes` skips the prompt, `--dry-run` only lists, `--required` leaves warnings alone, `--which-doctor` prints the `phone-doctor` it reads — the one beside the checkout unless `PHONE_DOCTOR` says otherwise; run with `sudo`) |
 | `phone-fix-apk` | stock the ambulance box: copy the app APK the cache or `PHONE_PROXY_APK` names into `/var/cache/phone-link` so a repair on a machine without a download can still reinstall the app; `--releases [N]` also keeps the APKs of the newest N releases (5 by default) as a repair kit of several versions, each checked against its `.sha256` and named after its tag, older ones pruned past three times N (`--refresh` replaces the copy and refreshes the kit, `--check` lists the box) |
 | `phone-fix-forwarding` | set `net.ipv4.ip_forward=1` for the running kernel (`--check` reports only) |
@@ -103,6 +114,7 @@ Or straight from the checkout: `./bin/phone-net-status`.
 | `phone-proxy-battery-whitelist` | add the proxy app to the device-idle (Doze) whitelist so the proxy is not killed with the screen off (`--check` only reports) |
 | `phone-proxy-boot` | make this repository's app actually come back after a reboot: allowlist it, grant background location and turn `auto_start` on (`--check` reports which of the three is missing) |
 | `phone-proxy-setup` | start the proxy through the app's own intent with the port, credentials and auto-start as extras, then verify a request through the listener (`--check` reports the settings and checks the request) |
+| `phone-proxy-switch` | make the laptop use a port the phone listens on: `--profile NAME` starts that saved proxy when it is not running and `--port N` requires the phone to be listening there, a request through the new port has to answer 200 before the laptop changes, then the port is written to `/run/phone-link/proxy-port`, `phone-tun` and the relay are restarted if they were running, and the phone's listener on the old port is stopped last (`--check` compares the two ports, `--list` prints the phone's saved proxies and listeners as JSON for the panel) |
 | `phone-proxy-start` | start the proxy through the app's own intent and wait until the service says it is listening (`--check` only reports) |
 | `phone-proxy-stop` | stop the proxy through the app's own intent and wait until the service is gone (`--check` only reports) |
 | `net-check` | fetch a fresh URL with curl, Chrome and Nix, reporting which of the three reach the internet |
@@ -169,7 +181,11 @@ tunnel through `adb reverse`, legacy adb port, keep-cache uninstall, …) in the
 row's menu, and the output streams into a log window exactly as the script
 printed it, exit status included. The header searches every action by name or
 summary (Ctrl+F), the sidebar badges the number of failing checks, and Ctrl+R
-re-checks the setup. Failing and warning checks that have a repair carry
+re-checks the setup. The **Proxy port** page is the one thing a row cannot
+say: it reads the phone's saved proxies and the ports it is listening on, and
+choosing one runs `phone-proxy-switch` — with the phone asked first and the
+laptop following only once the new port answers. A saved proxy whose user the
+laptop has no password for is listed with the reason and cannot be chosen. Failing and warning checks that have a repair carry
 a **Fix** button that runs the same script the doctor's fixer uses; the
 root-only `secrets` rows offer Authenticate instead. Nothing is reimplemented: `phone_link.actions`
 decides the argv and `phone_link.runner` streams it for both the GUI and
@@ -214,7 +230,7 @@ the same table, and `phone-link status` prints the doctor's JSON.
 | `shellcheck` | every script and `lib/phone-net.sh` is clean at shellcheck warning level |
 | `format` | `flake.nix` and `modules/phone-link.nix` are nixfmt-clean |
 | `module` | the module generates the expected sing-box config and units (5 s probe, 20 s first run, AP DHCP/DNS holes, pinned resolver, never started at boot) and defines nothing when disabled |
-| `script` | hermetic tests with stub `adb`/`curl`/`avahi-browse`: for `phone-proxy-install` the F-Droid version selection, cache keying and reuse, `--check` staying read-only, the exact install argv and `--pull` naming; for `phone-proxy-uninstall` the confirm/`--yes` guard, `--keep-data`, idempotence and the exact uninstall argv; for `phone-proxy-data-clear` the prompt guard, `--check` staying read-only and the `pm clear` argv; for `phone-proxy-setup` the START intent's extras, the verification request, the settings `--check` against a stub service dump; for `phone-unlock` the keyguard check, PIN entry and wrong-PIN failure; for `phone-proxy-battery-whitelist` the idempotent add, `--check` and the device-idle argv; for `phone-proxy-start`/`phone-proxy-stop` the START/STOP intents, the dumped state, the already-running/stopped no-op, the gated start and the proxy that will not stop; for `phone-wifi-concurrency` the supported, unsupported and inconclusive verdicts and the read-only queries; for `phone-usb-tether-check` the rndis0/usb state, the host route and a source-bound request; for `net-check` the three fetches, their failure modes and the cache-busting URL; for `phone-reboot-unlock` the reboot/wait/unlock sequence, the slow-boot wait, the aborted prompt and the boot timeout; for `phone-usb-tether-default` the current and screen-unlocked functions, the `--check` report and an ineffective setter; for `phone-wifi-enable` the idempotent enable and `--check`; for `phone-wifi-forget` the saved-network table, the prompt/`--yes` guard and idempotence; for `phone-wifi-connect` the password sources, remote quoting of SSID/passphrase and the association wait; for `phone-tether-cycle` the MTP disable, the health check, the lock/unlock restore, an adb abort retry, the already-off case, an unhealthy restore and the prompt guard; for `phone-adb-wifi` the legacy/TLS split, the mDNS port lookup, the `adb_wifi_enabled` write, the already-on case and the missing-port failure; for `phone-doctor` the ready, hotspot, locked, missing-adb, missing-secrets and dead-proxy paths, the app that is off the battery allowlist or has `auto_start` off (named separately in `[app]`), plus a rotated adb port found over mDNS; ; and `tests/phone-adb-mdns.test.sh` the stale network serial that is rewritten to the advertised port, the retry after a transport vanished mid-command, the serial recovered from the record when `adb devices` is empty, the preferred address when two phones are advertised and `PHONE_ADB_MDNS=0`; and for `--build` the refusal that names the app's repository and a bare install fetching the newest release |
+| `script` | hermetic tests with stub `adb`/`curl`/`avahi-browse`: for `phone-proxy-install` the F-Droid version selection, cache keying and reuse, `--check` staying read-only, the exact install argv and `--pull` naming; for `phone-proxy-uninstall` the confirm/`--yes` guard, `--keep-data`, idempotence and the exact uninstall argv; for `phone-proxy-data-clear` the prompt guard, `--check` staying read-only and the `pm clear` argv; for `phone-proxy-setup` the START intent's extras, the verification request, the settings `--check` against a stub service dump; for `phone-proxy-switch` a listening port and a saved proxy started by name, the closed port and the proxy whose user the laptop has no password for refused, the failed start and the refused password rolled back, the request answered before the tunnel restart and the old port dropped only after it, and `--check`/`--list` staying read-only; for `phone-unlock` the keyguard check, PIN entry and wrong-PIN failure; for `phone-proxy-battery-whitelist` the idempotent add, `--check` and the device-idle argv; for `phone-proxy-start`/`phone-proxy-stop` the START/STOP intents, the dumped state, the already-running/stopped no-op, the gated start and the proxy that will not stop; for `phone-wifi-concurrency` the supported, unsupported and inconclusive verdicts and the read-only queries; for `phone-usb-tether-check` the rndis0/usb state, the host route and a source-bound request; for `net-check` the three fetches, their failure modes and the cache-busting URL; for `phone-reboot-unlock` the reboot/wait/unlock sequence, the slow-boot wait, the aborted prompt and the boot timeout; for `phone-usb-tether-default` the current and screen-unlocked functions, the `--check` report and an ineffective setter; for `phone-wifi-enable` the idempotent enable and `--check`; for `phone-wifi-forget` the saved-network table, the prompt/`--yes` guard and idempotence; for `phone-wifi-connect` the password sources, remote quoting of SSID/passphrase and the association wait; for `phone-tether-cycle` the MTP disable, the health check, the lock/unlock restore, an adb abort retry, the already-off case, an unhealthy restore and the prompt guard; for `phone-adb-wifi` the legacy/TLS split, the mDNS port lookup, the `adb_wifi_enabled` write, the already-on case and the missing-port failure; for `phone-doctor` the ready, hotspot, locked, missing-adb, missing-secrets and dead-proxy paths, the app that is off the battery allowlist or has `auto_start` off (named separately in `[app]`), plus a rotated adb port found over mDNS; ; and `tests/phone-adb-mdns.test.sh` the stale network serial that is rewritten to the advertised port, the retry after a transport vanished mid-command, the serial recovered from the record when `adb devices` is empty, the preferred address when two phones are advertised and `PHONE_ADB_MDNS=0`; and for `--build` the refusal that names the app's repository and a bare install fetching the newest release |
 
 The `script` check also covers `phone-doctor --analyze` (problem ids, AP down and
 a missing APK, warnings-only, no headers or `ok` lines),
@@ -248,7 +264,9 @@ do that in real seconds: `phone-unlock` spent 46 s of a 198 s check asleep in
 are now `PHONE_UNLOCK_POLL`, `PHONE_FIX_SETTLE` and `PHONE_ADB_POLL` (defaults
 unchanged, so a real phone waits exactly as before) and the three suites set
 them to 0, which is 86 s for the whole check instead of 198 s with the same
-checks passing.
+checks passing. `PHONE_PROXY_WAIT` and `PHONE_PROXY_SETTLE` are the same idea
+for `phone-proxy-switch`: how long the app gets to put a listener on a port,
+and the old one to go away.
 
 ### Live end-to-end test
 

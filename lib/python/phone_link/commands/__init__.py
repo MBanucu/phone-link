@@ -45,6 +45,7 @@ COMMANDS = {
     "phone-proxy-start": proxy.phone_proxy_start,
     "phone-proxy-stop": proxy.phone_proxy_stop,
     "phone-proxy-setup": proxy.phone_proxy_setup,
+    "phone-proxy-switch": proxy.phone_proxy_switch,
     "phone-doctor-fix": doctor_fix.phone_doctor_fix,
 }
 

@@ -29,6 +29,15 @@ PHONE_AP_ENSURE_UNIT = _env(
 PHONE_HOTSPOT_CON = _env("PHONE_HOTSPOT_CON", "XPLORE 2")
 PHONE_HOTSPOT_SSID = _env("PHONE_HOTSPOT_SSID", PHONE_HOTSPOT_CON)
 PHONE_PROXY_PORT = int(_env("PHONE_PROXY_PORT", "1080"))
+# The port the laptop is actually using. `phoneLink.proxyPort` is only the
+# default: `phone-proxy-switch` writes the chosen one here, and the units and
+# the commands read it so a switch needs no rebuild. It lives in /run, so a
+# reboot goes back to the module's value — which is the only one NixOS knows
+# about without asking the phone.
+PHONE_RUNTIME_DIR = _env("PHONE_RUNTIME_DIR", "/run/phone-link")
+PHONE_RUNTIME_PORT_FILE = _env(
+    "PHONE_RUNTIME_PORT_FILE", os.path.join(PHONE_RUNTIME_DIR, "proxy-port")
+)
 PHONE_PROXY_USER = _env("PHONE_PROXY_USER", "proxy")
 # The app (`github:MBanucu/phone-link-proxy`): it is the phone's proxy, and
 # PHONE_PROXY_PKG is what a command means by "the proxy app". The vendored
@@ -69,3 +78,28 @@ PHONE_FIX_SETTLE = float(_env("PHONE_FIX_SETTLE", "1"))
 # debugging endpoint advertises an old port for a moment, so phone-adb-wifi
 # retries. Two seconds each here; a test with a stub adb sets it to 0.
 PHONE_ADB_POLL = float(_env("PHONE_ADB_POLL", "2"))
+# How long to give the app to put a listener on a port, and an old one to go
+# away, before a switch gives up and says so. A test with a stub adb sets it
+# to 0: the answer is already in the dump it just wrote.
+PHONE_PROXY_WAIT = float(_env("PHONE_PROXY_WAIT", "15"))
+PHONE_PROXY_SETTLE = float(_env("PHONE_PROXY_SETTLE", "5"))
+
+
+def active_port() -> int:
+    """The SOCKS port the laptop uses.
+
+    PHONE_PROXY_PORT wins when it is set (a test, a one-off run), then the port
+    `phone-proxy-switch` put under /run, then the module's default. A file that
+    cannot be read or parsed is state, not a setting: it means nothing has
+    switched yet, so the default is the answer.
+    """
+    if os.environ.get("PHONE_PROXY_PORT"):
+        return PHONE_PROXY_PORT
+    try:
+        with open(PHONE_RUNTIME_PORT_FILE, encoding="utf-8") as handle:
+            value = handle.read().strip()
+    except OSError:
+        return PHONE_PROXY_PORT
+    if value.isdigit() and 1 <= int(value) <= 65535:
+        return int(value)
+    return PHONE_PROXY_PORT

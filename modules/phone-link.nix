@@ -13,6 +13,22 @@
 let
   cfg = config.phoneLink;
 
+  # The port the laptop is actually using. `phoneLink.proxyPort` is the default
+  # and the value after a reboot; `phone-proxy-switch` (and the panel's port
+  # page) writes the chosen one here, and every unit reads it when it starts,
+  # so a switch needs no rebuild and no restart of the timer.
+  runtimeDir = "/run/phone-link";
+  portFile = "${runtimeDir}/proxy-port";
+  runtimePort = pkgs.writeShellScript "phone-link-runtime-port" ''
+    # $1 is the file, $2 the module's default.
+    port=$(${pkgs.coreutils}/bin/cat "$1" 2>/dev/null || true)
+    case "$port" in
+      [0-9]*) ;;
+      *) port=$2 ;;
+    esac
+    printf '%s' "$port"
+  '';
+
   settings = ''
     {
       "log": { "level": "${cfg.logLevel}", "timestamp": true },
@@ -46,7 +62,7 @@ let
           "type": "socks",
           "tag": "phone",
           "server": "${cfg.proxyHost}",
-          "server_port": ${toString cfg.proxyPort},
+          "server_port": @PHONE_SOCKS_PORT@,
           "version": "5",
           "username": "${cfg.proxyUser}",
           "password": "@PHONE_SOCKS_PASS@"
@@ -65,20 +81,32 @@ let
   '';
   singboxConfig = pkgs.writeText "phone-tun.json" settings;
 
+  # The store config has placeholders for the two things that change at run
+  # time: the password (root-only secrets file) and the port (the panel).
+  tunConfig = pkgs.writeShellScript "phone-tun-config" ''
+    port=$(${runtimePort} ${portFile} ${toString cfg.proxyPort})
+    ${pkgs.gnused}/bin/sed \
+      -e "s|@PHONE_SOCKS_PASS@|$PHONE_SOCKS_PASS|" \
+      -e "s|@PHONE_SOCKS_PORT@|$port|" \
+      ${singboxConfig} > /run/phone-tun/config.json
+  '';
+
   toggle = pkgs.writeShellScript "phone-tun-toggle" ''
     set -u
+    port=$(${runtimePort} ${portFile} ${toString cfg.proxyPort})
     if ${pkgs.coreutils}/bin/timeout 3 \
-        ${pkgs.bash}/bin/bash -c "exec 3<>/dev/tcp/${cfg.proxyHost}/${toString cfg.proxyPort}" 2>/dev/null; then
+        ${pkgs.bash}/bin/bash -c "exec 3<>/dev/tcp/${cfg.proxyHost}/$port" 2>/dev/null; then
       exec ${config.systemd.package}/bin/systemctl start phone-tun.service
     fi
     exec ${config.systemd.package}/bin/systemctl stop phone-tun.service
   '';
 
   relay = pkgs.writeShellScript "phone-socks-relay" ''
+    port=$(${runtimePort} ${portFile} ${toString cfg.proxyPort})
     exec ${pkgs.gost}/bin/gost \
       -L socks5://127.0.0.1:${toString cfg.relaySocksPort} \
       -L http://127.0.0.1:${toString cfg.relayHttpPort} \
-      -F "socks5://${cfg.proxyUser}:$PHONE_SOCKS_PASS@${cfg.proxyHost}:${toString cfg.proxyPort}"
+      -F "socks5://${cfg.proxyUser}:$PHONE_SOCKS_PASS@${cfg.proxyHost}:$port"
   '';
 in
 {
@@ -134,7 +162,11 @@ in
     proxyPort = lib.mkOption {
       type = lib.types.port;
       default = 1080;
-      description = "Port of the phone's SOCKS proxy.";
+      description = ''
+        Default port of the phone's SOCKS proxy. `phone-proxy-switch` writes the
+        port in use to ${portFile}, which the units and the scripts read; this
+        is the value they use until one is chosen, and again after a reboot.
+      '';
     };
 
     proxyUser = lib.mkOption {
@@ -252,7 +284,7 @@ in
             serviceConfig = {
               RuntimeDirectory = "phone-tun";
               EnvironmentFile = cfg.secretsFile;
-              ExecStartPre = "${pkgs.bash}/bin/bash -c '${pkgs.gnused}/bin/sed \"s|@PHONE_SOCKS_PASS@|$PHONE_SOCKS_PASS|\" ${singboxConfig} > /run/phone-tun/config.json'";
+              ExecStartPre = tunConfig;
               ExecStart = "${pkgs.sing-box}/bin/sing-box run -c /run/phone-tun/config.json";
               Restart = "on-failure";
               RestartSec = 10;
@@ -277,6 +309,10 @@ in
           };
 
           boot.kernelModules = [ "tun" ];
+
+          # `/run/phone-link` holds the port the panel chose. tmpfiles rather
+          # than RuntimeDirectory: stopping the tunnel must not forget it.
+          systemd.tmpfiles.rules = [ "d ${runtimeDir} 0755 root root -" ];
         }
 
         (lib.mkIf cfg.ap.enable {

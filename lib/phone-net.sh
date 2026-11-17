@@ -22,7 +22,15 @@ PHONE_NM_RUN_CONNECTIONS=${PHONE_NM_RUN_CONNECTIONS:-/run/NetworkManager/system-
 PHONE_HOTSPOT_CON=${PHONE_HOTSPOT_CON:-XPLORE 2}
 PHONE_HOTSPOT_SSID=${PHONE_HOTSPOT_SSID:-$PHONE_HOTSPOT_CON}
 PHONE_AP_SUBNET=${PHONE_AP_SUBNET:-192.168.77.0/24}
-PHONE_PROXY_PORT=${PHONE_PROXY_PORT:-1080}
+# The port in use is the one `phone-proxy-switch` wrote under /run; the
+# environment (a test, a one-off run) wins, and 1080 is the module's default.
+PHONE_RUNTIME_PORT_FILE=${PHONE_RUNTIME_PORT_FILE:-/run/phone-link/proxy-port}
+if [ -z "${PHONE_PROXY_PORT:-}" ] && [ -r "$PHONE_RUNTIME_PORT_FILE" ]; then
+  PHONE_PROXY_PORT=$(cat "$PHONE_RUNTIME_PORT_FILE" 2>/dev/null || true)
+fi
+case ${PHONE_PROXY_PORT:-} in
+  '' | *[!0-9]*) PHONE_PROXY_PORT=1080 ;;
+esac
 PHONE_PROXY_USER=${PHONE_PROXY_USER:-proxy}
 # The phone-link proxy app is the proxy; set PHONE_PROXY_PKG to
 # com.tokyoxpa3.androidproxy to drive the vendored one instead.

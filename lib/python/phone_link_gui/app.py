@@ -26,15 +26,19 @@ from gi.repository import Adw, Gio, GObject, Gtk
 from phone_link import actions as registry
 
 from .log_window import RunWindow
+from .port_page import PortPage
 from .status_page import PROBLEM_FIXES, StatusPage
 
 APP_ID = "org.phonelink.Gui"
 # The doctor's findings get their own page, separate from the "status" action
-# group; the two titles would otherwise both read "Status".
-PAGES = (("doctor", "Status"),) + tuple(
+# group; the two titles would otherwise both read "Status". The port page is
+# the one control that is more than a form: choosing there has to reach the
+# phone before the laptop follows, so it is not an action row.
+PAGES = (("doctor", "Status"), ("port", "Proxy port")) + tuple(
     (group_id, "Status actions" if group_id == "status" else title)
     for group_id, title in registry.GROUPS
 )
+PAGE_ICONS = {**registry.GROUP_ICONS, "port": "network-server-symbolic"}
 
 
 def askpass_path() -> str | None:
@@ -196,10 +200,12 @@ class Window(Adw.ApplicationWindow):
             os.environ["SUDO_ASKPASS"] = askpass
 
         self._status = StatusPage(self)
+        self._port = PortPage(self)
         self._stack = Gtk.Stack(
             transition_type=Gtk.StackTransitionType.CROSSFADE, vexpand=True
         )
         self._stack.add_named(self._status, "doctor")
+        self._stack.add_named(self._port, "port")
         for group_id, _title in registry.GROUPS:
             self._stack.add_named(ActionsPage(self, group_id), group_id)
 
@@ -279,7 +285,7 @@ class Window(Adw.ApplicationWindow):
             box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
             box.append(
                 Gtk.Image.new_from_icon_name(
-                    registry.GROUP_ICONS.get(page_id, "dialog-information-symbolic")
+                    PAGE_ICONS.get(page_id, "dialog-information-symbolic")
                 )
             )
             box.append(Gtk.Label(label=title, xalign=0.0, hexpand=True))
@@ -327,6 +333,10 @@ class Window(Adw.ApplicationWindow):
         self._title.set_title(title)
         if page_id != "search":
             self._last_page = page_id
+        if page_id == "port":
+            # The phone's listeners change without this window doing anything,
+            # so the page asks the phone every time it is opened.
+            self._port.refresh()
         if self._split.get_collapsed():
             self._split.set_show_content(True)
 
@@ -501,7 +511,15 @@ class Window(Adw.ApplicationWindow):
         window.present()
         return window
 
+    def run_switch(self, args: tuple[str, ...]):
+        """Run phone-proxy-switch with a chosen target, from the port page."""
+        return self._launch(registry.BY_ID["phone-proxy-switch"], check=False, args=args)
+
     def _after_run(self, action, outcome) -> None:
+        if action.id == "phone-proxy-switch":
+            # The switch reports the port it landed on; the page re-reads it,
+            # and the doctor's port check may now disagree with nothing.
+            self._port.refresh()
         if outcome.cancelled:
             self._toasts.add_toast(Adw.Toast(title=f"{action.title}: stopped"))
         elif outcome.ok:

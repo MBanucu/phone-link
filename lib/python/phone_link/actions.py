@@ -302,6 +302,15 @@ ACTIONS: tuple[Action, ...] = (
         long_running=True,
     ),
     Action(
+        "phone-proxy-switch",
+        "proxy",
+        "Choose the proxy port",
+        "Make the tunnel and relay use a port the phone listens on, starting a saved proxy if needed.",
+        root=True,
+        supports_check=True,
+        long_running=True,
+    ),
+    Action(
         "phone-proxy-start",
         "proxy",
         "Start the proxy",

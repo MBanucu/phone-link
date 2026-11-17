@@ -128,6 +128,10 @@ export PHONE_SECRETS=$TMP/secrets
 export PHONE_DOCTOR_RESOLV=$LOG/resolv.conf
 export PHONE_APK_CACHE=$TMP/cache
 export PHONE_PROXY_APK=$TMP/app.apk
+# The port in use normally comes from /run/phone-link/proxy-port; the suite
+# keeps that inside its sandbox so a machine that has switched is not a
+# different test run.
+export PHONE_RUNTIME_PORT_FILE=$TMP/runtime-port
 export PHONE_NIXOS_DIR=$TMP/nixos PHONE_FLAKE_SRC=$TMP/no-src
 printf 'PHONE_SOCKS_PASS=pass\nPHONE_PIN=1234\nPHONE_AP_PASS=pass\n' >"$PHONE_SECRETS"
 chmod 600 "$PHONE_SECRETS"
@@ -148,7 +152,7 @@ fresh_state() {
   printf '200' >"$LOG/internet_code"
   printf 'nameserver 1.1.1.1\nnameserver 9.9.9.9\n' >"$LOG/resolv.conf"
   printf '    versionCode=1 minSdk=26 targetSdk=34\n    versionName=0.1.0\n    ACCESS_BACKGROUND_LOCATION: granted=true\n' >"$LOG/dumpsys"
-  printf '      auto-start  true\n' >"$LOG/service_dump"
+  printf '      running     port 1080 · 0 clients\n      auto-start  true\n' >"$LOG/service_dump"
   printf 'auto_start true\nadb_wifi true\nport 1080\nssid PhoneLink\nany_network false\nin_use \n' \
     >"$LOG/app_state"
   printf 'user,org.phonelink.proxy,10332\n' >"$LOG/whitelist"
@@ -177,6 +181,9 @@ grep -q '^FAIL' "$LOG/out" && bad "no failures" || ok "no failures"
 grep -q 'ok    adb device' "$LOG/out" && ok "reports the adb device" || bad "reports the adb device"
 grep -q 'proxy request.*192.168.77.232:1080 -> 200' "$LOG/out" && ok "reports the proxy request" \
   || bad "reports the proxy request" "$(cat "$LOG/out")"
+grep -q 'ok    proxy port.*laptop 1080, phone 1080' "$LOG/out" \
+  && ok "matches the laptop's port with the phone's" \
+  || bad "matches the laptop's port with the phone's" "$(cat "$LOG/out")"
 grep -q 'network transport' "$LOG/out" && ok "reports adb over Wi-Fi" || bad "reports adb over Wi-Fi"
 
 # 2. No phone: required failure, phone checks skipped, rest still checked.
@@ -218,6 +225,17 @@ printf '000' >"$LOG/proxy_code"
 if run; then bad "dead proxy exits 1"; else ok "dead proxy exits 1"; fi
 grep -q 'FAIL  proxy request.*-> 000' "$LOG/out" && ok "fails the proxy request" \
   || bad "fails the proxy request" "$(cat "$LOG/out")"
+
+# 6b. A port the phone is not listening on is named, with the command that
+#     moves the laptop.
+fresh_state
+printf '1081\n' >"$PHONE_RUNTIME_PORT_FILE"
+if run; then ok "a port mismatch still exits 0"; else bad "a port mismatch still exits 0" "$(cat "$LOG/out")"; fi
+grep -q 'warn  proxy port.*laptop 1081, phone listens on 1080' "$LOG/out" \
+  && ok "warns about the mismatch" || bad "warns about the mismatch" "$(cat "$LOG/out")"
+grep -q 'run phone-proxy-switch' "$LOG/out" && ok "says how to switch" \
+  || bad "says how to switch" "$(cat "$LOG/out")"
+rm -f "$PHONE_RUNTIME_PORT_FILE"
 
 # 7. Missing secrets: no proxy check, required failures.
 fresh_state

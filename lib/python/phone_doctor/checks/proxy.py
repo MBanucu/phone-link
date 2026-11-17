@@ -94,6 +94,53 @@ def _latest_tag(ctx: Context, installed: str) -> str:
     return tag
 
 
+def _listening_ports(ctx: Context) -> list[int]:
+    """The ports the service's own dump says are listening.
+
+    The app prints one `running` line per listener, named or not, so this is
+    what the phone is actually bound to — not what its saved configuration
+    would start, and not what the laptop hoped for.
+    """
+    dump = ctx.adb(
+        "shell",
+        "dumpsys",
+        "activity",
+        "service",
+        f"{ctx.proxy_pkg}/org.phonelink.proxy.ProxyService",
+    )
+    ports: list[int] = []
+    for line in dump.splitlines():
+        match = re.match(r"^[ \t]+running[ \t]+.*?\bport (\d+)\b", line)
+        if match and int(match.group(1)) not in ports:
+            ports.append(int(match.group(1)))
+    return ports
+
+
+def _port_match(ctx: Context) -> Result:
+    """The port the laptop uses has to be one the phone listens on.
+
+    A mismatch is a warning, not a failure: `proxy_request` already fails when
+    nothing answers, and this names the reason before the request does — the
+    tunnel is pointed at a port the phone is not on.
+    """
+    laptop = ctx.proxy_port
+    if not ctx.serial:
+        return skip("proxy_port", "proxy port", "no adb")
+    ports = _listening_ports(ctx)
+    if not ports:
+        return skip(
+            "proxy_port", "proxy port", f"laptop {laptop}, the phone is listening on nothing"
+        )
+    listed = ", ".join(str(port) for port in ports)
+    if laptop.isdigit() and int(laptop) in ports:
+        return ok("proxy_port", "proxy port", f"laptop {laptop}, phone {listed}")
+    return warn(
+        "proxy_port",
+        "proxy port",
+        f"laptop {laptop}, phone listens on {listed} (run phone-proxy-switch)",
+    )
+
+
 def _proxy_request(ctx: Context, target: str) -> Result:
     password = ctx.proxy_pass()
     if not password:
@@ -203,5 +250,6 @@ def check(ctx: Context) -> list[Result]:
     else:
         results.append(skip("proxy_version", "proxy version", "no adb"))
 
+    results.append(_port_match(ctx))
     results.append(_proxy_request(ctx, ctx.target_ip))
     return results

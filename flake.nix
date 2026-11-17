@@ -240,6 +240,14 @@
               };
             }
           ];
+          relayOn = evalModule [
+            {
+              phoneLink = {
+                enable = true;
+                enableRelay = true;
+              };
+            }
+          ];
           # A path with context, so the check builds the generated config.
           tunnelConfig = on.phoneLink.configFile;
         in
@@ -341,6 +349,9 @@
             assert lib.assertMsg (
               !(on.systemd.services ? phone-socks-relay)
             ) "the relay must stay off unless enableRelay is set";
+            assert lib.assertMsg (lib.any (
+              rule: lib.hasPrefix "d /run/phone-link " rule
+            ) on.systemd.tmpfiles.rules) "the runtime port directory must survive a stopped tunnel";
             assert lib.assertMsg (lib.hasInfix "1.1.1.1"
               on.environment.etc."resolv.conf".text
             ) "manageResolver must pin resolv.conf";
@@ -375,11 +386,19 @@
             ) "the AP profile must be opt-in";
             pkgs.runCommand "phone-link-module-check" { } ''
               grep -q '"server": "10.9.9.9"' ${tunnelConfig}
-              grep -q '"server_port": 1081' ${tunnelConfig}
+              grep -q '"server_port": @PHONE_SOCKS_PORT@' ${tunnelConfig}
               grep -q '"interface_name": "phone-tun"' ${tunnelConfig}
               grep -q '"password": "@PHONE_SOCKS_PASS@"' ${tunnelConfig}
               grep -qF 'sing-box run -c /run/phone-tun/config.json' \
                 ${pkgs.writeText "phone-tun-exec-start" on.systemd.services.phone-tun.serviceConfig.ExecStart}
+              # The port is not baked into the units: each one reads the file the
+              # panel writes, with phoneLink.proxyPort as its fallback.
+              grep -qF '/run/phone-link/proxy-port 1081' \
+                ${on.systemd.services.phone-tun.serviceConfig.ExecStartPre}
+              grep -qF '/run/phone-link/proxy-port 1081' \
+                ${on.systemd.services.phone-tun-toggle.serviceConfig.ExecStart}
+              grep -qF '/run/phone-link/proxy-port 1080' \
+                ${relayOn.systemd.services.phone-socks-relay.serviceConfig.ExecStart}
               touch $out
             '';
 

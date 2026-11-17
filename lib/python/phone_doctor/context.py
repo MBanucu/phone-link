@@ -47,7 +47,21 @@ class Context:
 
     @property
     def proxy_port(self) -> str:
-        return self.get("PHONE_PROXY_PORT", "1080")
+        """The port the laptop uses: PHONE_PROXY_PORT, the panel's choice, 1080.
+
+        The same order as `phone_link.settings.active_port`, kept here rather
+        than imported because a probe may be given its own environment and the
+        settings module reads the process's once, at import.
+        """
+        explicit = self.env.get("PHONE_PROXY_PORT")
+        if explicit:
+            return explicit
+        path = Path(self.get("PHONE_RUNTIME_PORT_FILE", "/run/phone-link/proxy-port"))
+        try:
+            value = path.read_text().strip()
+        except OSError:
+            return "1080"
+        return value if value.isdigit() else "1080"
 
     @property
     def proxy_user(self) -> str:

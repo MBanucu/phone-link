@@ -227,16 +227,25 @@ def phone_tunnel_run(args: list[str]) -> int:
     if not password:
         die(f"PHONE_SOCKS_PASS missing in {settings.PHONE_SECRETS}")
 
+    # The store config carries the module's default port; the one in use can be
+    # another (`phone-proxy-switch`), so it is filled in here the same way the
+    # unit's ExecStartPre does.
+    port = str(settings.active_port())
+    rewritten = text.replace("@PHONE_SOCKS_PASS@", password).replace(
+        "@PHONE_SOCKS_PORT@", port
+    )
+    # A config built before the placeholder existed still has a number.
+    rewritten = re.sub(r'"server_port":\s*\d+', f'"server_port": {port}', rewritten)
+
     handle, temporary = tempfile.mkstemp(
         prefix="phone-tun.", suffix=".json", dir="/run"
     )
     try:
         with os.fdopen(handle, "w", encoding="utf-8") as out:
-            out.write(text.replace("@PHONE_SOCKS_PASS@", password))
+            out.write(rewritten)
         os.chmod(temporary, 0o600)
 
         if via_adb:
-            port = str(settings.PHONE_PROXY_PORT)
             if status(["adb", "reverse", f"tcp:{port}", f"tcp:{port}"]) != 0:
                 die("adb reverse failed (is adb connected?)")
             with open(temporary, encoding="utf-8") as source:

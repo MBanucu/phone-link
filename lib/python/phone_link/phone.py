@@ -101,7 +101,7 @@ def tcp_open(ip: str, seconds: int = 3, port: int | None = None) -> bool:
                 str(seconds),
                 "bash",
                 "-c",
-                f"exec 3<>/dev/tcp/{ip}/{port or settings.PHONE_PROXY_PORT}",
+                f"exec 3<>/dev/tcp/{ip}/{port or settings.active_port()}",
             ]
         )
         == 0
@@ -211,8 +211,9 @@ def apk_cached() -> str | None:
 def proxy_check(ip: str) -> bool:
     """True if https://example.com loads through the proxy on `ip`."""
     password = proxy_pass()
-    if not tcp_open(ip, 3):
-        log(f"{ip}:{settings.PHONE_PROXY_PORT} closed")
+    port = settings.active_port()
+    if not tcp_open(ip, 3, port):
+        log(f"{ip}:{port} closed")
         return False
     credentials = urllib.parse.quote(settings.PHONE_PROXY_USER, safe="")
     secret = urllib.parse.quote(password, safe="")
@@ -224,7 +225,7 @@ def proxy_check(ip: str) -> bool:
             "-m",
             "20",
             "--socks5-hostname",
-            f"{credentials}:{secret}@{ip}:{settings.PHONE_PROXY_PORT}",
+            f"{credentials}:{secret}@{ip}:{port}",
             "-o",
             "/dev/null",
             "-w",
@@ -234,7 +235,7 @@ def proxy_check(ip: str) -> bool:
         timeout=30,
     )
     log(
-        f"{ip}:{settings.PHONE_PROXY_PORT} -> https://example.com = "
+        f"{ip}:{port} -> https://example.com = "
         f"{code or '000'}"
     )
     return code == "200"

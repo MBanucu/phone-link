@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The proxy port is a control instead of a rebuild. It used to be three facts
+  that never met: `phoneLink.proxyPort` was baked into the sing-box config, the
+  toggle's probe and the relay; the scripts read `PHONE_PROXY_PORT` from the
+  environment; and the phone listened on whatever port its last start or saved
+  proxy used — so changing ports was a module edit and a switch, and a phone
+  listening elsewhere was found by a failing request. `phone-proxy-switch`
+  makes the two ends agree: `--port N` takes a port the phone already listens
+  on and `--profile NAME` starts that saved proxy over the app's adb contract
+  when it is not running; either way a request through the new port has to
+  answer 200 before anything on the laptop changes, the port is written to
+  `/run/phone-link/proxy-port` (the default `phoneLink.proxyPort` now names)
+  which the tunnel's `ExecStartPre`, the 5 s probe, the relay and the scripts
+  read, `phone-tun` and the relay are restarted only if they were running, and
+  the phone's listener on the old port is stopped last. A phone that cannot
+  start the port, or refuses the laptop's credentials, has what the switch
+  started stopped again and the laptop left where it was. The panel has a
+  **Proxy port** page that lists the phone's saved proxies and the port in use.
+  A saved proxy with another user is refused up front with the reason: adb
+  never prints a proxy's password, so the laptop can only offer its own
+  `PHONE_SOCKS_PASS`. The doctor grows `proxy_port` — the laptop's port against
+  the phone's listeners — and `proxy_request` follows a switch without an
+  environment variable.
+
 ### Fixed
 
 - The doctor's one cached answer about releases is named after the repository
