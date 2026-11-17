@@ -49,7 +49,3 @@ list is empty.
   metadata it reads is in the tree); Google Play wants a developer account, an
   AAB and Google's app signing, which needs `bundletool` and a key that is not
   in any checkout. Neither can be created from here.
-
-- [ ] Screenshots for the fastlane tree. The text is done, the pictures are
-  not: they need a phone showing proxies that are nobody's real ones, which is
-  a cleaning decision before it is a capture one.
