@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from phone_link.adb import pinned_endpoint
+
 from ..context import Context
 from ..model import Result, ok, warn
 
@@ -20,6 +22,14 @@ def check(ctx: Context) -> list[Result]:
     transport = _network_transport(ctx)
     if transport:
         return [ok("network_transport", "network transport", transport)]
+
+    # A phone whose adbd was pinned to the fixed port answers there at every
+    # boot, so ask that before the mDNS record: no browse, and the serial it
+    # returns is the one the next command can keep using.
+    if pinned_endpoint():
+        transport = _network_transport(ctx)
+        if transport:
+            return [ok("network_transport", "network transport", transport)]
 
     # A reboot rotates the wireless-debugging port, so a phone that is on the
     # network but missing from `adb devices` is usually unreachable rather than

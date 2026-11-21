@@ -38,6 +38,13 @@ case "${args[0]:-}" in
     ;;
   connect)
     printf 'connect %s\n' "${args[1]}" >>"$LOG/actions"
+    # $LOG/deny lists addresses adbd does not answer on. The keeper app's
+    # pinned port is one of them here, so a test that expects "no phone"
+    # still gets none, while the legacy listener this command connects to is
+    # not affected.
+    if [ -f "$LOG/deny" ] && grep -qx "${args[1]:-}" "$LOG/deny"; then
+      exit 0
+    fi
     printf '%s\n' "${args[1]}" >>"$LOG/connected"
     ;;
   tcpip)
@@ -94,6 +101,9 @@ fresh_state() {
   : >"$LOG/tcp_port"
   rm -f "$LOG/actions" "$LOG/connected" "$LOG/tls_port"
   printf '43571' >"$LOG/tls_port"
+  # No pinned adbd unless a case says otherwise: the pinned probe is one
+  # refused connect and then the usual mDNS path.
+  printf '192.168.77.232:5555\n10.244.108.165:5555\n' >"$LOG/deny"
 }
 
 run() {

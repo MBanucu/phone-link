@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Hermetic tests for lib/python/phone_link/adb.py: the wireless-debugging port
-# is rediscovered from the phone's mDNS record when the serial in use went
-# away. Stub adb and avahi-browse, no phone, no network.
+# Hermetic tests for lib/python/phone_link/adb.py: a phone whose adbd was pinned
+# to a fixed port is asked there first, and the wireless-debugging port is
+# otherwise rediscovered from the phone's mDNS record when the serial in use
+# went away. Stub adb and avahi-browse, no phone, no network.
 set -u
 
 BASH_BIN=$(command -v bash)
@@ -36,7 +37,13 @@ case "${args[0]:-}" in
   devices) cat "$LOG/devices" ;;
   connect)
     printf '%s\n' "${args[1]:-}" >>"$LOG/connect.log"
-    if [ -f "$LOG/connect_ok" ]; then
+    # $LOG/deny lists addresses adbd does not answer on: a phone that never
+    # pinned its adbd, so the mDNS fallback is what the test is about.
+    denied=0
+    if [ -f "$LOG/deny" ] && grep -qx "${args[1]:-}" "$LOG/deny"; then
+      denied=1
+    fi
+    if [ "$denied" = 0 ] && [ -f "$LOG/connect_ok" ]; then
       printf '%s\tdevice\n' "${args[1]:-}" >>"$LOG/devices"
     fi
     ;;
@@ -85,7 +92,12 @@ fresh() {
   : >"$LOG/calls"
   : >"$LOG/connect.log"
   : >"$LOG/shell.log"
-  rm -f "$LOG/connect_ok" "$LOG/drop"
+  rm -f "$LOG/connect_ok" "$LOG/drop" "$LOG/deny"
+}
+
+# A phone that does not pin adbd: the fixed port answers nothing.
+unpinned() {
+  printf '192.168.77.232:5555\n10.244.108.165:5555\n' >"$LOG/deny"
 }
 
 advertise() { # advertise HOST PORT...
@@ -99,6 +111,7 @@ advertise() { # advertise HOST PORT...
 
 # 1. A stale network serial is retargeted at the advertised port.
 fresh
+unpinned
 advertise 192.168.77.232 44895
 : >"$LOG/connect_ok"
 out=$(py 'from phone_link import adb
@@ -130,18 +143,21 @@ print(" ".join(adb.prepare(["adb", "-s", "XPLO2EEA0001541", "shell", "true"])))'
   && ok "a USB serial costs nothing" || bad "a USB serial costs nothing" \
   "$(cat "$LOG/calls")"
 
-# 4. No advertised record leaves the command as it was.
+# 4. No advertised record leaves the command as it was, after the pinned port
+#    has been asked and found closed.
 fresh
 out=$(py 'from phone_link import adb
 print(" ".join(adb.prepare(["adb", "-s", "192.168.77.232:1111", "shell", "true"])))')
 [ "$out" = "adb -s 192.168.77.232:1111 shell true" ] \
   && ok "an unadvertised port is not guessed" || bad "an unadvertised port is not guessed" "$out"
-[ ! -s "$LOG/connect.log" ] && ok "nothing is connected to" \
-  || bad "nothing is connected to" "$(cat "$LOG/connect.log")"
+grep -qx '192.168.77.232:5555' "$LOG/connect.log" \
+  && ok "the pinned port is tried first" \
+  || bad "the pinned port is tried first" "$(cat "$LOG/connect.log")"
 
 # 5. A command that fails on a transport that vanished is run again on the new
 #    one, through the shell vocabulary every command uses.
 fresh
+unpinned
 printf 'List of devices attached\n192.168.77.232:1111\tdevice\n' >"$LOG/devices"
 printf '192.168.77.232:1111' >"$LOG/drop"
 advertise 192.168.77.232 44895
@@ -157,6 +173,7 @@ grep -q '^192.168.77.232:44895|' "$LOG/shell.log" \
 
 # 6. With nothing attached, the serial is resolved from the record.
 fresh
+unpinned
 printf 'List of devices attached\n' >"$LOG/devices"
 advertise 192.168.77.232 44895
 : >"$LOG/connect_ok"
@@ -167,6 +184,7 @@ print(phone.phone_serial() or "none")')
 
 # 7. The doctor resolves its serial the same way.
 fresh
+unpinned
 printf 'List of devices attached\n' >"$LOG/devices"
 advertise 192.168.77.232 44895
 : >"$LOG/connect_ok"
@@ -177,6 +195,7 @@ print(Context().serial or "none")')
 
 # 8. Two phones advertised: the one on the wanted address wins.
 fresh
+unpinned
 printf 'List of devices attached\n' >"$LOG/devices"
 advertise 192.168.77.99 5555 192.168.77.232 44895
 : >"$LOG/connect_ok"
@@ -217,6 +236,51 @@ adb devices" ] && ok "server commands are left alone" \
   || bad "server commands are left alone" "$out"
 [ ! -s "$LOG/calls" ] && ok "server commands run no extra adb" \
   || bad "server commands run no extra adb" "$(cat "$LOG/calls")"
+
+# 12. A phone that pinned adbd is used on that port, and mDNS is not browsed.
+fresh
+advertise 192.168.77.232 44895
+: >"$LOG/connect_ok"
+out=$(py 'from phone_link import adb
+print(" ".join(adb.prepare(["adb", "-s", "192.168.77.232:1111", "shell", "true"])))')
+[ "$out" = "adb -s 192.168.77.232:5555 shell true" ] \
+  && ok "the pinned port wins over mDNS" || bad "the pinned port wins over mDNS" "$out"
+[ ! -s "$LOG/avahi_calls" ] && ok "a pinned phone costs no browse" \
+  || bad "a pinned phone costs no browse" "$(cat "$LOG/avahi_calls")"
+
+# 13. Nothing attached: the pinned port is found without any record.
+fresh
+printf 'List of devices attached\n' >"$LOG/devices"
+: >"$LOG/connect_ok"
+out=$(py 'from phone_link import phone
+print(phone.phone_serial() or "none")')
+[ "$out" = "192.168.77.232:5555" ] \
+  && ok "an empty adb devices is recovered from the pinned port" \
+  || bad "an empty adb devices is recovered from the pinned port" "$out"
+[ ! -s "$LOG/avahi_calls" ] && ok "the pinned port needs no browse" \
+  || bad "the pinned port needs no browse" "$(cat "$LOG/avahi_calls")"
+
+# 14. The doctor resolves the pinned port the same way.
+fresh
+printf 'List of devices attached\n' >"$LOG/devices"
+: >"$LOG/connect_ok"
+out=$(py 'from phone_doctor.context import Context
+print(Context().serial or "none")')
+[ "$out" = "192.168.77.232:5555" ] \
+  && ok "the doctor recovers the pinned port" \
+  || bad "the doctor recovers the pinned port" "$out"
+
+# 15. PHONE_ADB_MDNS=0 switches the pinned probe off too: it is the same switch
+#     a test or an untrusted network uses to make adb calls stay as given.
+fresh
+printf 'List of devices attached\n' >"$LOG/devices"
+: >"$LOG/connect_ok"
+out=$(PHONE_ADB_MDNS=0 py 'from phone_link import phone
+print(phone.phone_serial() or "none")')
+[ "$out" = "none" ] && ok "the pinned probe follows the off switch" \
+  || bad "the pinned probe follows the off switch" "$out"
+[ ! -s "$LOG/connect.log" ] && ok "nothing is connected to when off" \
+  || bad "nothing is connected to when off" "$(cat "$LOG/connect.log")"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

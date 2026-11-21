@@ -100,7 +100,7 @@ Or straight from the checkout: `./bin/phone-net-status`.
 | script | what it does |
 |---|---|
 | `phone-net-status` | links, routes, resolver, proxy probes, adb transports, phone state |
-| `phone-doctor` | check every runtime condition of the setup (forwarding, AP profile/address, adb, phone link, secrets, proxy, the port the laptop uses against the phone's listeners, tunnel, tether, internet), the APK a repair would install, the version the installed app reports and the phone SDK, and whether the source checkout is newer than the installed flake lock; exit non-zero if a required one is unmet; the adb check reconnects a phone whose wireless-debugging port changed by reading its `_adb-tls-connect._tcp` mDNS record; `--analyze` prints one `fail`/`warn` line with a stable problem id for scripts |
+| `phone-doctor` | check every runtime condition of the setup (forwarding, AP profile/address, adb, phone link, secrets, proxy, the port the laptop uses against the phone's listeners, tunnel, tether, internet), the APK a repair would install, the version the installed app reports and the phone SDK, and whether the source checkout is newer than the installed flake lock; exit non-zero if a required one is unmet; the adb check reconnects a phone whose wireless-debugging port changed by reading its `_adb-tls-connect._tcp` mDNS record, and reports the pinned port first when the phone answers there; `--analyze` prints one `fail`/`warn` line with a stable problem id for scripts |
 | `phone-doctor-fix` | list the fixes for the problems `phone-doctor --analyze` reports, run one dedicated script per problem in dependency order, then re-check (`--yes` skips the prompt, `--dry-run` only lists, `--required` leaves warnings alone, `--which-doctor` prints the `phone-doctor` it reads — the one beside the checkout unless `PHONE_DOCTOR` says otherwise; run with `sudo`) |
 | `phone-fix-apk` | stock the ambulance box: copy the app APK the cache or `PHONE_PROXY_APK` names into `/var/cache/phone-link` so a repair on a machine without a download can still reinstall the app; `--releases [N]` also keeps the APKs of the newest N releases (5 by default) as a repair kit of several versions, each checked against its `.sha256` and named after its tag, older ones pruned past three times N (`--refresh` replaces the copy and refreshes the kit, `--check` lists the box) |
 | `phone-fix-forwarding` | set `net.ipv4.ip_forward=1` for the running kernel (`--check` reports only) |
@@ -319,7 +319,7 @@ it catches option or unit regressions without building a system or a VM.
 | who runs the AP | the phone | the laptop (`phonelink`) |
 | laptop uplink | phone's SOCKS proxy at `10.244.108.165:1080` | phone's SOCKS proxy at `192.168.77.232:1080` |
 | phone Wi-Fi client | **off** (`cmd wifi status`: "Wifi is disabled") | on, joined to `PhoneLink` |
-| adb over Wi-Fi | works until the phone reboots, then needs `adb tcpip` over USB | `phone-adb-wifi` re-enables wireless debugging and reconnects without a cable |
+| adb over Wi-Fi | keeps its port only if the keeper app pins 5555, otherwise works until the phone reboots | `phone-adb-wifi` re-enables wireless debugging and reconnects without a cable |
 
 Android cannot be hotspot and Wi-Fi client at once, and wireless debugging needs
 a Wi-Fi client link, which AP mode provides. There `phone-adb-wifi` enables it by
@@ -327,13 +327,22 @@ writing `adb_wifi_enabled`, so the Settings toggle is not needed once adb is
 reachable. The legacy `5555` listener does not survive a reboot. For hotspot mode
 set `phoneLink.proxyHost = "10.244.108.165"`.
 
-Either way the port is new after every reboot, so no adb call relies on the one
-it used a moment ago: `lib/python/phone_link/adb.py` leaves a working target
-alone, and when a network serial is gone it reads the phone's
-`_adb-tls-connect._tcp` record (`avahi-browse -rtp`, about a second), connects to
-the advertised port and runs the command again there. Resolving the serial in
-the first place goes through the same lookup, so a rebooted phone is found
-instead of reported missing. `PHONE_ADB_MDNS=0` disables the lookup for a
+Both ends deal with the port being new after every reboot. The first thing
+`lib/python/phone_link/adb.py` asks is the **pinned** port: the keeper app on
+the phone (`MBanucu/wireless-adb-keeper`) has adbd listen on `PHONE_ADB_PORT`
+(default `5555`) with the Termux adb it already has, so `192.168.77.232:5555`
+answers the next boot too. Whenever a serial has to be resolved or retargeted,
+that address is tried before anything else — one `adb connect` when it answers,
+no browse, and a serial the next command can keep using. A phone without the
+app answers nothing there, which costs one refused connect.
+
+After that, no adb call relies on the port it used a moment ago:
+`lib/python/phone_link/adb.py` leaves a working target alone, and when a
+network serial is gone it reads the phone's `_adb-tls-connect._tcp` record
+(`avahi-browse -rtp`, about a second), connects to the advertised port and runs
+the command again there. Resolving the serial in the first place goes through
+the same lookup, so a rebooted phone is found instead of reported missing.
+`PHONE_ADB_MDNS=0` disables both the pinned probe and the lookup, for a
 machine whose mDNS cannot be trusted.
 
 There has to be something to find, though: this phone clears wireless debugging

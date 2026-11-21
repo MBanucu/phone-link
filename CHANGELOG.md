@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The pinned adb port is asked first. The keeper app on the phone keeps adbd on
+  `PHONE_ADB_PORT` (5555) after every reboot, so `adb.py` now probes
+  `<AP or hotspot address>:5555` whenever a serial has to be resolved or
+  retargeted, and only falls back to the `_adb-tls-connect._tcp` record when
+  nothing answers there. A pinned phone costs one `adb connect` instead of a
+  browse, and the serial it returns is still the right one after the next
+  reboot. `phone-doctor` reports that transport as the network transport, and
+  the doctor's serial resolution uses the same probe. `PHONE_ADB_MDNS=0` still
+  switches both off.
+
 - The proxy port is a control instead of a rebuild. It used to be three facts
   that never met: `phoneLink.proxyPort` was baked into the sing-box config, the
   toggle's probe and the relay; the scripts read `PHONE_PROXY_PORT` from the

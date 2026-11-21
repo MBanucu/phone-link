@@ -35,7 +35,13 @@ case "${args[0]:-}" in
   connect)
     printf '%s\n' "${args[1]:-}" >>"$LOG/connected"
     printf 'connected to %s\n' "${args[1]:-}"
-    if [ -f "$LOG/connect_ok" ]; then
+    # $LOG/deny lists addresses adbd does not answer on: a phone that never
+    # pinned its adbd, so the mDNS fallback is what the test is about.
+    denied=0
+    if [ -f "$LOG/deny" ] && grep -qx "${args[1]:-}" "$LOG/deny"; then
+      denied=1
+    fi
+    if [ "$denied" = 0 ] && [ -f "$LOG/connect_ok" ]; then
       printf 'List of devices attached\nXPLO2EEA0001541\tdevice\n%s\tdevice\n' \
         "${args[1]:-}" >"$LOG/devices"
     fi
@@ -163,6 +169,9 @@ fresh_state() {
   : >"$LOG/avahi"
   : >"$LOG/connected"
   : >"$LOG/connect_ok"
+  # By default the phone has not pinned adbd: the pinned probe is a connect
+  # that fails, and the case that wants a pinned phone removes this file.
+  printf '192.168.77.232:5555\n10.244.108.165:5555\n' >"$LOG/deny"
   printf 'abc\n' >"$LOG/local_head"
   printf 'abc\n' >"$LOG/remote_head"
   printf '200\n' >"$LOG/head_time"
@@ -417,7 +426,21 @@ grep -q 'announced with no address: wireless debugging is off' "$LOG/out" \
 grep -q 'USB only' "$LOG/out" && bad "does not fall back to USB only" \
   || ok "does not fall back to USB only"
 
-# 19. --help exits 0.
+# 19. A phone whose adbd was pinned to the fixed port is reported there, with
+# no mDNS record to read and no random port to chase.
+fresh_state
+rm -f "$LOG/deny"
+printf 'List of devices attached\nXPLO2EEA0001541\tdevice\n' >"$LOG/devices"
+: >"$LOG/connect_ok"
+if run; then ok "a pinned adb port still exits 0"; else
+  bad "a pinned adb port still exits 0" "$(cat "$LOG/out")"
+fi
+grep -q 'network transport.*192.168.77.232:5555' "$LOG/out" \
+  && ok "reports the pinned port" || bad "reports the pinned port" "$(cat "$LOG/out")"
+grep -q '192.168.77.232:5555' "$LOG/connected" && ok "connects to the pinned port" \
+  || bad "connects to the pinned port" "$(cat "$LOG/connected")"
+
+# 20. --help exits 0.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 
 # The release check: the answer is cached for a day, per repository, so the

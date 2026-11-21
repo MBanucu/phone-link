@@ -17,6 +17,11 @@ Every adb invocation goes through `prepare()` (before it runs) and `retry()`
 * `phone_serial()` and the doctor resolve a serial through `discover()` first,
   so "no phone attached" is only reported when the phone really is absent.
 
+A phone whose wireless-adb-keeper app pinned adbd to a fixed port answers on
+that port at every reboot, so `pinned_endpoint()` is asked first and costs one
+`adb devices` when it works: no browse, no scan, and a serial that survives the
+reboot unchanged. mDNS is the fallback for a phone that randomises its port.
+
 `PHONE_ADB_MDNS=0` turns the lookup off, for a machine whose mDNS cannot be
 trusted or a test that must not see a real phone.
 """
@@ -28,7 +33,13 @@ import subprocess
 import time
 from typing import Sequence
 
+from . import settings
+
 SERVICE = "_adb-tls-connect._tcp"
+
+# The port phone-link's own app pins adbd to. Only a hint: on a phone without
+# it nothing answers here and the mDNS record still decides.
+PINNED_PORT = settings.PHONE_ADB_PORT
 
 # Commands that talk to the adb server or to a network address rather than to
 # one device. Retargeting them would change what the caller asked for.
@@ -114,11 +125,53 @@ def mdns_addresses(*, timeout: float = 5.0) -> list[str]:
     return addresses
 
 
-def discover(hint: str | None = None, *, force: bool = False) -> str | None:
-    """Connect to the advertised endpoint and return it once adb accepts it.
+def attach(address: str) -> bool:
+    """Whether adb reaches `address`, connecting to it first when it does not."""
+    if attached(address):
+        return True
+    _run(["adb", "connect", address], timeout=20.0)
+    return attached(address)
 
-    `hint` is the serial the caller wanted; its host part wins when several
-    phones are advertised, because a reboot changes the port, not the address.
+
+def pinned_addresses(hint: str | None = None) -> list[str]:
+    """The pinned port on the addresses this phone can hold, best guess first.
+
+    With a hint its host wins, because several phones on one network each pin
+    the same port and only that host is the one the caller meant. Without one,
+    the two addresses this checkout already knows for the phone are tried: the
+    AP it joins and its own hotspot.
+    """
+    hosts: list[str] = []
+    if hint and ":" in hint:
+        hosts.append(hint.rsplit(":", 1)[0])
+    else:
+        hosts += [settings.PHONE_AP_IP, settings.PHONE_HOTSPOT_IP]
+    addresses: list[str] = []
+    for host in hosts:
+        if not host or host in ("", "0.0.0.0"):
+            continue
+        address = f"{host}:{PINNED_PORT}"
+        if address not in addresses:
+            addresses.append(address)
+    return addresses
+
+
+def pinned_endpoint(hint: str | None = None) -> str | None:
+    """The pinned port when it answers, else None — no mDNS involved."""
+    if not enabled():
+        return None
+    for address in pinned_addresses(hint):
+        if attach(address):
+            return address
+    return None
+
+
+def discover(hint: str | None = None, *, force: bool = False) -> str | None:
+    """Connect to the pinned port or an advertised endpoint and return it.
+
+    `hint` is the serial the caller wanted; its host part wins, because a
+    reboot changes the port, not the address — for the pinned probe as much as
+    for a phone that advertises several endpoints.
     """
     global _address, _lookup_at
     if not enabled():
@@ -128,6 +181,13 @@ def discover(hint: str | None = None, *, force: bool = False) -> str | None:
         return _address
     _lookup_at = now
     _address = None
+
+    # A pinned adbd needs no browse and no scan: one connect at most, and the
+    # serial it returns is still the right one after the next reboot.
+    pinned = pinned_endpoint(hint)
+    if pinned:
+        _address = pinned
+        return _address
 
     addresses = mdns_addresses()
     if hint and ":" in hint:
