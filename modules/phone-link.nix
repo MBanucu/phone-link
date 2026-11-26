@@ -230,6 +230,17 @@ in
         description = "SSID of the laptop access point.";
       };
 
+      autoconnect = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Let NetworkManager activate the AP at boot.  Off by default, so the
+          profile stays down until `phone-ap-up` runs.  Turning it on reserves
+          the radio for the AP; a 5 GHz activation that fails then leaves no
+          link at all (see #7).
+        '';
+      };
+
       band = lib.mkOption {
         type = lib.types.enum [
           "a"
@@ -496,7 +507,7 @@ in
               connection = {
                 id = cfg.ap.name;
                 type = "wifi";
-                autoconnect = false;
+                autoconnect = cfg.ap.autoconnect;
                 interface-name = cfg.apInterface;
               };
               wifi = {

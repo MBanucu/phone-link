@@ -59,6 +59,7 @@ stopped proxy app cannot blackhole traffic.
 | `phoneLink.enable` | `false` | enable the tunnel, timer and AP firewall holes |
 | `phoneLink.apInterface` | `wlp110s0` | interface of the laptop access point |
 | `phoneLink.ap.enable` | `false` | declare the AP profile from `PHONE_AP_PASS` (requires `phoneLink.enable`) |
+| `phoneLink.ap.autoconnect` | `false` | let NetworkManager activate the AP at boot (reserves the radio; a failed 5 GHz activation leaves no link) |
 | `phoneLink.ap.name` | `phonelink` | NetworkManager connection name |
 | `phoneLink.ap.ssid` | `PhoneLink` | SSID of the laptop access point |
 | `phoneLink.ap.band` / `channel` / `channelWidth` | `a` / `149` / `80` | 802.11 band, channel and AP channel width (5 GHz, non-DFS) |
@@ -95,6 +96,13 @@ domain marks 36/44 `no IR`. `channelWidth = 0` lets NetworkManager choose the
 width (NetworkManager 1.50+ supports the setting; 2.4 GHz is capped at 40 MHz).
 The hand-made profile from `phone-ap-create` uses the same band, channel and
 width.
+
+Set `phoneLink.ap.autoconnect = true` to bring the AP back after a reboot
+without running `phone-ap-up`. It lets NetworkManager activate the profile at
+boot, which reserves the radio for the AP; if the 5 GHz activation fails, there
+is no link at all (#7). It does not fix a phone that drops the link while
+associated — that is the phone-side cause in #11 — and it does not add the
+2.4 GHz fallback (#7).
 
 The port is the one setting that is not a rebuild: `phoneLink.proxyPort` is
 the default, and `phone-proxy-switch` (or the panel's **Proxy port** page)
@@ -276,7 +284,7 @@ the same table, and `phone-link status` prints the doctor's JSON.
 | `package` | every script in the flake exists, is executable, kept its wrapped `PATH`, and `phone-net-status` prints a status |
 | `shellcheck` | every script and `lib/phone-net.sh` is clean at shellcheck warning level |
 | `format` | `flake.nix` and `modules/phone-link.nix` are nixfmt-clean |
-| `module` | the module generates the expected sing-box config and units (5 s probe, 20 s first run, AP DHCP hole, a DHCP-only AP with no router/DNS option, an nftables forward drop that also works with the firewall off, pinned resolver, never started at boot) and defines nothing when disabled |
+| `module` | the module generates the expected sing-box config and units (5 s probe, 20 s first run, AP DHCP hole, a DHCP-only AP with no router/DNS option, an nftables forward drop that also works with the firewall off, an opt-in AP autoconnect that leaves the profile link-only, pinned resolver, never started at boot) and defines nothing when disabled |
 | `script` | hermetic tests with stub `adb`/`curl`/`avahi-browse`: for `phone-proxy-install` the F-Droid version selection, cache keying and reuse, `--check` staying read-only, the exact install argv and `--pull` naming; for `phone-proxy-uninstall` the confirm/`--yes` guard, `--keep-data`, idempotence and the exact uninstall argv; for `phone-proxy-data-clear` the prompt guard, `--check` staying read-only and the `pm clear` argv; for `phone-proxy-setup` the START intent's extras, the verification request, the settings `--check` against a stub service dump; for `phone-proxy-switch` a listening port and a saved proxy started by name, the closed port and the proxy whose user the laptop has no password for refused, the failed start and the refused password rolled back, the request answered before the tunnel restart and the old port dropped only after it, and `--check`/`--list` staying read-only; for `phone-unlock` the keyguard check, PIN entry and wrong-PIN failure; for `phone-proxy-battery-whitelist` the idempotent add, `--check` and the device-idle argv; for `phone-proxy-start`/`phone-proxy-stop` the START/STOP intents, the dumped state, the already-running/stopped no-op, the gated start and the proxy that will not stop; for `phone-wifi-concurrency` the supported, unsupported and inconclusive verdicts and the read-only queries; for `phone-usb-tether-check` the rndis0/usb state, the host route and a source-bound request; for `net-check` the three fetches, their failure modes and the cache-busting URL; for `phone-reboot-unlock` the reboot/wait/unlock sequence, the slow-boot wait, the aborted prompt and the boot timeout; for `phone-usb-tether-default` the current and screen-unlocked functions, the `--check` report and an ineffective setter; for `phone-wifi-enable` the idempotent enable and `--check`; for `phone-wifi-forget` the saved-network table, the prompt/`--yes` guard and idempotence; for `phone-wifi-connect` the password sources, remote quoting of SSID/passphrase and the association wait; for `phone-tether-cycle` the MTP disable, the health check, the lock/unlock restore, an adb abort retry, the already-off case, an unhealthy restore and the prompt guard; for `phone-adb-wifi` the legacy/TLS split, the mDNS port lookup, the `adb_wifi_enabled` write, the already-on case and the missing-port failure; for `phone-doctor` the ready, hotspot, locked, missing-adb, missing-secrets and dead-proxy paths, the app that is off the battery allowlist or has `auto_start` off (named separately in `[app]`), plus a rotated adb port found over mDNS; ; and `tests/phone-adb-mdns.test.sh` the stale network serial that is rewritten to the advertised port, the retry after a transport vanished mid-command, the serial recovered from the record when `adb devices` is empty, the preferred address when two phones are advertised and `PHONE_ADB_MDNS=0`; and for `--build` the refusal that names the app's repository and a bare install fetching the newest release |
 
 The `script` check also covers `phone-doctor --analyze` (problem ids, AP down and
