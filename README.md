@@ -23,13 +23,17 @@ cable.
 ```nix
 # flake.nix
 {
-  inputs.phone-link.url = "github:MBanucu/phone-link/v0.4.0";
+  inputs.phone-link.url = "github:MBanucu/phone-link/v0.12.1";
 
   outputs = { self, nixpkgs, phone-link, ... }: {
     nixosConfigurations.nixos = nixpkgs.lib.nixosSystem {
       modules = [
         phone-link.nixosModules.default
         {
+          environment.systemPackages = [
+            phone-link.packages.${pkgs.system}.phone-link
+          ];
+
           phoneLink = {
             enable = true;
             ap.enable = true;
@@ -45,8 +49,12 @@ cable.
 ```
 
 Pinning the tag, as above, keeps the machine on a reviewed revision; use the
-bare `github:MBanucu/phone-link` to track `main`, and `nix flake update
-phone-link` to move from one tag to the next.
+bare `github:MBanucu/phone-link` to track `main`. A tag is part of the input
+URL, so `nix flake update phone-link` alone keeps the same tag: change the tag
+in `flake.nix` first, then run `nix flake update phone-link` to refresh
+`flake.lock`. The module declares the tunnel and the AP but installs no
+packages, so without the `environment.systemPackages` line above there is no
+`phone-ap-up`, `phone-doctor` or `phone-proxy-*` on the machine.
 
 The module never starts the tunnel at boot. A 5 s timer probes the proxy port and
 keeps `phone-tun.service` running only while it answers, so a missing phone or a
@@ -79,7 +87,8 @@ stopped proxy app cannot blackhole traffic.
 | `phoneLink.enableRelay` | `false` | run the local SOCKS/HTTP relay (`gost`) |
 | `phoneLink.relaySocksPort` / `relayHttpPort` | `1081` / `1082` | relay ports |
 
-The AP is a link, not an uplink. `ap.enable` keeps the `192.168.77.0/24`
+The AP is a link, not an uplink and not an internet-sharing hotspot.
+`ap.enable` keeps the `192.168.77.0/24`
 address and DHCP, so the phone's reservation, the proxy at
 `192.168.77.232`, adb and sshfs keep working, but the profile uses
 NetworkManager's `manual` method. A separate dnsmasq answers DHCP without a
@@ -89,6 +98,13 @@ through the laptop: Android should fail validation on the AP and keep mobile
 data as its default network, instead of looping every byte over the AP link
 twice. The laptop→`192.168.77.232` direction is output, not forwarding, so the
 tunnel still reaches the proxy.
+
+That design does not keep this phone associated for long. The phone drops the
+DHCP-only AP after roughly 34 s in the 2026-11-26 runs (94 s when a router
+option was advertised), and the proxy listener closes with the link; #11 tracks
+the cause and the pending 30-minute screen-off acceptance. USB tethering is the
+practical unattended fallback until it is fixed. The short #4 run only showed
+that the forwarding loop was gone; it finished before the drop.
 
 The AP defaults to 5 GHz channel 149 at 80 MHz. 149 is non-DFS and one of the
 channels this Intel 8265 allows for an AP; its self-managed (LAR) regulatory
@@ -142,6 +158,14 @@ currently shows in `proxyHost`/`proxyHosts`; the runtime host file is what
 saves a rebuild when only the reachable path changes. The relay reads the same
 file and falls back to `phoneLink.proxyHost` when it is absent.
 
+`proxyHosts` only chooses among addresses the phone answers on. The app still
+gates its listener on the configured SSID, so a USB address does not help while
+the phone is off `PhoneLink`: the app has no listener and the tunnel has
+nothing to reach. USB-primary therefore needs either the phone also joined to
+`PhoneLink`, or the app started with `any_network` (the panel's **Ignore the
+SSID**), which the app documents as a test/escape hatch. Without one of those,
+`proxyHosts` alone is not a USB fallback.
+
 ## Use the scripts
 
 ```sh
@@ -163,12 +187,12 @@ Or straight from the checkout: `./bin/phone-net-status`.
 | `phone-fix-mobile-data` | enable the phone's mobile data and wait for a default route (`--check` reports only) |
 | `phone-fix-tunnel` | start `phone-tun`, or restart it when its route is missing, and wait for the route (`--check` reports only) |
 | `phone-proxy-check` | request through the proxy on the hotspot and AP addresses (needs root for the secret) |
-| `phone-proxy-install` | install/update the proxy app — with no argument the newest release of `MBanucu/phone-link-proxy` (`PHONE_PROXY_REPO` overrides), checksum checked, unless an APK is named; `--release [TAG]` takes a named release instead, `--build` names the app's repository and refuses (this checkout no longer builds it), `--fdroid` fetches the vendored F-Droid app instead, `--replace-signer` uninstalls a differently signed copy first (which clears its data), `--pull` copies the installed APK off the phone, `--status` reports the version |
+| `phone-proxy-install` | install/update the proxy app — with no argument the newest signed release of `MBanucu/phone-link-proxy` (`PHONE_PROXY_REPO` overrides), checksum checked, unless an APK is named; `--release [TAG]` takes a named release instead, `--build` names the app's repository and refuses (this checkout no longer builds it), `--fdroid` fetches the legacy vendored app instead, `--replace-signer` uninstalls a differently signed copy first (which clears its data), `--pull` copies the installed APK off the phone, `--status` reports the version; for `org.phonelink.proxy` it also grants `WRITE_SECURE_SETTINGS` and the battery allowlist, so the app can turn wireless debugging back on itself |
 | `phone-proxy-uninstall` | remove the proxy app (`--check` previews, `--keep-data` keeps app data, `--yes` skips the prompt) |
 | `phone-proxy-data-clear` | wipe the proxy app's data, back to port 1080 with no auth (`--check` previews, `--yes` skips the prompt) |
 | `phone-proxy-battery-whitelist` | add the proxy app to the device-idle (Doze) whitelist so the proxy is not killed with the screen off (`--check` only reports) |
-| `phone-proxy-boot` | make this repository's app actually come back after a reboot: allowlist it, grant background location and turn `auto_start` on (`--check` reports which of the three is missing) |
-| `phone-proxy-setup` | start the proxy through the app's own intent with the port, credentials and auto-start as extras, then verify a request through the listener (`--check` reports the settings and checks the request) |
+| `phone-proxy-boot` | make the proxy app come back after a reboot: add it to the device-idle allowlist, grant the location permissions the SSID read and boot start need, and turn `auto_start` on; the service itself is `specialUse`, not a `location` one (`--check` reports which of the three is missing) |
+| `phone-proxy-setup` | the first-run path: start the proxy through the app's own intent with the port, credentials and auto-start as extras, then verify a request through the listener (`--check` reports the settings and checks the request) |
 | `phone-proxy-switch` | make the laptop use a port the phone listens on: `--profile NAME` starts that saved proxy when it is not running and `--port N` requires the phone to be listening there, a request through the new port has to answer 200 before the laptop changes, then the port is written to `/run/phone-link/proxy-port`, `phone-tun` and the relay are restarted if they were running, and the phone's listener on the old port is stopped last (`--check` compares the two ports, `--list` prints the phone's saved proxies and listeners as JSON for the panel) |
 | `phone-proxy-start` | start the proxy through the app's own intent and wait until the service says it is listening (`--check` only reports) |
 | `phone-proxy-stop` | stop the proxy through the app's own intent and wait until the service is gone (`--check` only reports) |
@@ -190,7 +214,6 @@ Or straight from the checkout: `./bin/phone-net-status`.
 | `adb-wifi-connect` | connect adb to the phone over TCP |
 | `adb-wifi-connect --prepare` | once over USB: `adb tcpip 5555` (the tether blips) |
 | `phone-adb-wifi` | enable adb over Wi-Fi on the phone: legacy `adb tcpip 5555` and Android 11+ wireless debugging on its random TLS port, then connect (`--legacy`, `--tls`, `--check`) |
-| `phone-proxy-install` | install the APK with `-r -g`; for this repository's own app it also grants `WRITE_SECURE_SETTINGS`, which lets the app turn wireless debugging back on itself |
 | `phone-tunnel-run` | run the built tunnel config in the foreground |
 | `phone-tunnel-run --via-adb` | same, with the upstream reached through `adb reverse` |
 
@@ -220,12 +243,12 @@ status page and runs the scripts with the flags declared in
 
 ```sh
 nix run .#gui                                 # from a checkout
-nix run github:MBanucu/phone-link/v0.4.0#gui  # straight from the tag
+nix run github:MBanucu/phone-link/v0.12.1#gui  # straight from the tag
 nix build .#phone-link-gui                    # or build it and run the binary
 ```
 
-The module installs the scripts but not the panel; add the package to get the
-desktop entry and icon as well:
+The module itself installs no packages: the install snippet above adds the
+scripts, and this adds the panel with its desktop entry and icon:
 
 ```nix
 environment.systemPackages = [ phone-link.packages.${pkgs.system}.phone-link-gui ];
@@ -380,12 +403,13 @@ Android cannot be hotspot and Wi-Fi client at once, and wireless debugging needs
 a Wi-Fi client link, which AP mode provides. There `phone-adb-wifi` enables it by
 writing `adb_wifi_enabled`, so the Settings toggle is not needed once adb is
 reachable. The legacy `5555` listener does not survive a reboot. For hotspot mode
-set `phoneLink.proxyHost = "10.244.108.165"`.
+set `phoneLink.proxyHost = "10.244.108.165"`. `org.phonelink.proxy` is the AP-mode
+app and pauses off `PhoneLink`; hotspot mode still uses the vendored app.
 
-In AP mode the phone keeps mobile data as its default network: the AP is
-DHCP-only and drops forwarded traffic (see the options above), so the link
-carries the laptop's tunnel to the proxy and the phone's own internet does not
-cross it.
+In AP mode the phone keeps mobile data as its default network while it is
+associated: the AP is DHCP-only and drops forwarded traffic (see the options
+above), so the link carries the laptop's tunnel to the proxy and the phone's own
+internet does not cross it. The association drop in #11 is separate.
 
 Both ends deal with the port being new after every reboot. The first thing
 `lib/python/phone_link/adb.py` asks is the **pinned** port: the keeper app on
@@ -412,7 +436,7 @@ app closes that gap itself — rejoining `PhoneLink` makes it write
 controlled by the panel checkbox "Turn wireless debugging back on when the phone
 joins the SSID" (extra `adb_wifi`, on by default). That write is a secure
 setting, so `phone-proxy-install` grants the app
-`android.permission.WRITE_SECURE_SETTINGS` after installing its own APK; a build
+`android.permission.WRITE_SECURE_SETTINGS` after installing the app's APK; a build
 installed by other means only logs that it cannot help, and
 `phone-adb-wifi` remains the override.
 
@@ -445,6 +469,25 @@ needed: the ensure unit removes the persistent `/etc` copy before writing the
 declarative one, so only one profile with that name remains. The running AP
 drops with the old profile, so run `sudo phone-ap-up` after the switch.
 
+The proxy is a signed release APK from `MBanucu/phone-link-proxy` (0.12.0 at
+the time of writing), not a build of this checkout. Install it while the laptop
+still has its current uplink — the link-only AP cannot fetch the APK by itself —
+then run setup once the phone has joined `PhoneLink`:
+
+```sh
+phone-proxy-install        # while online: newest signed release
+sudo phone-proxy-setup     # first run: port and credentials, verified 200
+phone-proxy-boot           # allowlist, location grants, auto_start
+```
+
+`phone-proxy-setup` is the first-run path: it starts the proxy through the
+app's own intent on the port the laptop is using, turns `auto_start` on, and
+requires a request through the listener to answer 200. `phone-proxy-boot` adds
+the battery exemption and the fine/background location permissions that the
+boot start and the SSID read need. The app's foreground service is
+`specialUse`, not `location`: a `location` service type cannot start before the
+first unlock and is not needed for the SSID read.
+
 ## Uninstall
 
 Unwiring the module removes the units, firewall holes and installed scripts,
@@ -466,13 +509,22 @@ to remove those (`phone-wifi-forget PhoneLink`, `phone-proxy-uninstall`). Use
 alternative for the profile, but it will not clear the caches or the secrets
 file.
 
-The app of our own is the default one: `phone-proxy-install` installs its
-newest release, and the `phone-proxy-*` scripts talk to it over its own
-adb interface — `start-foreground-service` with `org.phonelink.proxy.action.START`
-or `STOP` and the configuration as extras, and `dumpsys activity service` for
-what it is doing — so a start needs no screen, keyguard or taps. The vendored
-F-Droid app still works with `PHONE_PROXY_PKG=com.tokyoxpa3.androidproxy`, and
-its uninstall and data-clear are the same commands.
+The default app is `org.phonelink.proxy`, installed from a signed release of
+`MBanucu/phone-link-proxy` — current release 0.12.0 — and never built in this
+checkout. The `phone-proxy-*` scripts talk to it over its own adb interface —
+`start-foreground-service` with `org.phonelink.proxy.action.START` or `STOP`
+and the configuration as extras, and `dumpsys activity service` for what it is
+doing — so a start needs no screen, keyguard or taps. The service is a
+`specialUse` foreground service, not a `location` one; reading the SSID needs
+the location permission, but a `location` service type cannot start before the
+first unlock. Release 0.12.0 follows the network that matches the configured
+SSID (and re-checks after unlock), keeps the port closed when the phone is on
+another network or no Wi-Fi, and offers `wifi_lock` as an opt-in experiment for
+the no-uplink AP; neither fixes the association drop in #11. `any_network` (the
+panel's **Ignore the SSID**) bypasses the gate for a test or a USB-only setup.
+The vendored F-Droid app remains a legacy fallback at
+`PHONE_PROXY_PKG=com.tokyoxpa3.androidproxy`; its uninstall and data-clear are
+the same commands.
 
 The app's APK is built and published by the app's own repository: a `v*` tag
 there builds `build.sh` in CI, signs with the release key from its secrets and
@@ -482,7 +534,7 @@ that repository's README has the four secrets it needs.
 
 ```sh
 phone-proxy-install --release              # the latest release's APK
-phone-proxy-install --release v0.5.0       # a particular tag
+phone-proxy-install --release v0.12.0      # a particular tag
 phone-proxy-install --release --replace-signer
 ```
 
@@ -507,8 +559,9 @@ phone-proxy-install --pull ~/dev/phone-link/apk
 phone-proxy-install ~/dev/phone-link/apk/*.apk
 ```
 
-`--pull` names a single-APK backup `com.tokyoxpa3.androidproxy-<version>.apk`;
-installs use `adb install -r -g`, so updating keeps the app's settings.
+`--pull` names a single-APK backup `<package>-<version>.apk`, e.g.
+`org.phonelink.proxy-0.12.0.apk`; installs use `adb install -r -g`, so updating
+keeps the app's settings.
 
 Requirements: `NetworkManager` on `wpa_supplicant` (iwd cannot do AP mode) and
 the phone's proxy listening on the reachable address. The AP itself no longer
