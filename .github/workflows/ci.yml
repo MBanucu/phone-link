@@ -23,7 +23,7 @@ jobs:
     # pays for the whole Nix store, so give it room but not forever.
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: cachix/install-nix-action@v31
 
