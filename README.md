@@ -64,7 +64,8 @@ stopped proxy app cannot blackhole traffic.
 | `phoneLink.ap.band` / `channel` / `channelWidth` | `a` / `149` / `80` | 802.11 band, channel and AP channel width (5 GHz, non-DFS) |
 | `phoneLink.ap.address` | `192.168.77.1/24` | IPv4 address of the AP interface |
 | `phoneLink.ap.dhcpRange` | `.10–.254` of the AP /24, 3600 s | DHCP range and lease time; the AP sends no router or DNS option |
-| `phoneLink.proxyHost` | `192.168.77.232` | address of the phone's SOCKS proxy |
+| `phoneLink.proxyHost` | `192.168.77.232` | primary address of the phone's SOCKS proxy |
+| `phoneLink.proxyHosts` | `[]` | additional addresses tried in order after `proxyHost`, e.g. the USB tether |
 | `phoneLink.proxyPort` | `1080` | default SOCKS port; the port in use is `/run/phone-link/proxy-port` |
 | `phoneLink.proxyUser` | `proxy` | SOCKS username |
 | `phoneLink.secretsFile` | `/etc/nixos/phone-socks-secrets` | file with `PHONE_SOCKS_PASS=…` (and `PHONE_AP_PASS=…` with `ap.enable`) |
@@ -105,6 +106,33 @@ working. It lives in `/run`, so a reboot is back to `phoneLink.proxyPort`; the
 phone's auto-start may bring up another saved proxy at another port, which the
 doctor reports until you switch again. `PHONE_RUNTIME_PORT_FILE` moves the file
 for a test, and `PHONE_PROXY_PORT` overrides both for a one-off run.
+
+### USB-primary and host fallback
+
+The address is also runtime state. `phoneLink.proxyHost` is the primary address
+and `phoneLink.proxyHosts` lists fallbacks tried in order after it. Every 5 s,
+`phone-tun-toggle` opens a TCP connection to each effective host (`proxyHost`,
+then `proxyHosts`, with duplicates removed) and records the first that answers in
+`/run/phone-link/proxy-host`; `phone-tun`'s generated config reads that file, so
+the tunnel follows the path that is actually up without a rebuild. When no host
+answers the tunnel is stopped, as before. With `proxyHosts = []` the probe tries
+only `phoneLink.proxyHost`, exactly as it used to.
+
+To prefer USB tethering and fall back to the access point:
+
+```nix
+phoneLink = {
+  enable = true;
+  proxyHost = "10.23.190.38";        # USB tether, tried first
+  proxyHosts = [ "192.168.77.232" ]; # AP address when the cable is out
+};
+```
+
+Swap the two values to keep the AP primary and use USB only as a fallback. The
+tether address is assigned per connection, so put the address the phone
+currently shows in `proxyHost`/`proxyHosts`; the runtime host file is what
+saves a rebuild when only the reachable path changes. The relay reads the same
+file and falls back to `phoneLink.proxyHost` when it is absent.
 
 ## Use the scripts
 

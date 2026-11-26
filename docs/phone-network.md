@@ -39,6 +39,34 @@ The tether address is assigned per connection (it has been `172.26.192.42`,
 `10.207.119.29` and `10.186.76.251`); the hotspot and AP addresses below are
 stable.
 
+## USB-primary and the runtime host
+
+USB tethering is the shortest path when the cable is in: `rndis0` has carried
+`10.23.190.38`, and the proxy binds it as well as the Wi-Fi addresses. Rather
+than rebuild to move `phoneLink.proxyHost` between the tether and the AP, list
+both. `proxyHost` is tried first, then each entry of `proxyHosts` in order, and
+duplicates are removed. For USB primary:
+
+```nix
+phoneLink = {
+  proxyHost = "10.23.190.38";
+  proxyHosts = [ "192.168.77.232" ];
+};
+```
+
+Reverse the two to keep the AP primary and use USB only when the cable is out.
+
+The choice is runtime state. Every 5 s, `phone-tun-toggle` does a `timeout 3`
+TCP connect to each effective host and writes the first that answers to
+`/run/phone-link/proxy-host` (temp file plus `mv`, so a reader never sees a
+partial value). `phone-tun-config` reads that file, checks it is one of the
+effective hosts, and fills the generated sing-box outbound from it; the relay
+reads it too. When no host answers the service is stopped, and the file is only
+a hint for the next start. With no `proxyHosts` there is one candidate and
+behaviour is unchanged. The tether address still changes per connection, so a
+new address is a module edit; the host file only saves the rebuild when the
+reachable path switches between addresses already listed.
+
 ## The AP band
 
 The AP defaults to 5 GHz channel 149 at 80 MHz (`band = "a"`, `channel = 149`,
