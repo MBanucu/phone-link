@@ -174,6 +174,9 @@ export PHONE_PROXY_APK=$TMP/app.apk
 # keeps that inside its sandbox so a machine that has switched is not a
 # different test run.
 export PHONE_RUNTIME_PORT_FILE=$TMP/runtime-port
+# The module's /etc/phone-link/env; absent means "no module", and the tests
+# that need a value write it here instead of relying on the host's file.
+export PHONE_CONFIG_FILE=$TMP/phone-link-env
 export PHONE_NIXOS_DIR=$TMP/nixos PHONE_FLAKE_SRC=$TMP/no-src
 printf 'PHONE_SOCKS_PASS=pass\nPHONE_PIN=1234\nPHONE_AP_PASS=pass\n' >"$PHONE_SECRETS"
 chmod 600 "$PHONE_SECRETS"
@@ -387,6 +390,36 @@ if run; then bad "a table without the drop exits 1"; else ok "a table without th
 grep -q 'FAIL  ap forward drop.*no drop for wlp110s0' "$LOG/out" \
   && ok "names the missing drop" || bad "names the missing drop" "$(cat "$LOG/out")"
 
+# 10c2. The module's no-forward unit runs nft from the store, which is not on
+#       PATH: PHONE_NFT from /etc/phone-link/env runs the same binary.
+fresh_state
+cat >"$TMP/module-nft" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$LOG/module_nft"
+case "$*" in
+  "list table inet phone_link_ap") cat "$LOG/nft" ;;
+  *) exit 1 ;;
+esac
+EOF
+sed -i "1s|.*|#!$BASH_BIN|" "$TMP/module-nft"
+chmod +x "$TMP/module-nft"
+printf "PHONE_NFT='%s'\n" "$TMP/module-nft" >"$PHONE_CONFIG_FILE"
+mv "$STUBS/nft" "$TMP/nft.path"
+if run; then ok "the module's nft path checks the forward drop"; else bad "the module's nft path checks the forward drop" "$(cat "$LOG/out")"; fi
+grep -q 'ok    ap forward drop.*wlp110s0 dropped' "$LOG/out" \
+  && ok "reports the drop from the module's nft" \
+  || bad "reports the drop from the module's nft" "$(cat "$LOG/out")"
+[ "$(cat "$LOG/module_nft" 2>/dev/null)" = "list table inet phone_link_ap" ] \
+  && ok "ran the absolute nft path, not PATH" \
+  || bad "ran the absolute nft path, not PATH" "$(cat "$LOG/module_nft" 2>/dev/null)"
+# A query that fails through that binary is still a failure, not a skip.
+rm -f "$LOG/nft"
+if run; then bad "a failing module nft query exits 1"; else ok "a failing module nft query exits 1"; fi
+grep -q 'FAIL  ap forward drop.*table inet phone_link_ap missing' "$LOG/out" \
+  && ok "keeps a failing query a failure" || bad "keeps a failing query a failure" "$(cat "$LOG/out")"
+mv "$TMP/nft.path" "$STUBS/nft"
+rm -f "$PHONE_CONFIG_FILE"
+
 # 10d. An AP on air with no associated station is a warning with the 3 s
 #      recovery path, not a required failure.
 fresh_state
@@ -415,16 +448,25 @@ grep -q 'phone-wifi-connect PhoneLink' "$LOG/out" \
 # 10e. Missing tools are skips, not crashes: the checks run with no PATH.
 marker=$LOG/ap-profile
 printf 'phonelink\n' >"$marker"
-if PYTHONPATH="$ROOT/lib/python" python3 - "$marker" >"$LOG/ap_skip" 2>&1 <<'PY'
+if PYTHONPATH="$ROOT/lib/python" python3 - "$marker" "$LOG/no-env" >"$LOG/ap_skip" 2>&1 <<'PY'
 import sys
 
 from phone_doctor.checks import ap
 from phone_doctor.context import Context
 
-ctx = Context({"PATH": "/nonexistent", "PHONE_AP_DECLARATIVE": sys.argv[1]})
+ctx = Context(
+    {
+        "PATH": "/nonexistent",
+        "PHONE_AP_DECLARATIVE": sys.argv[1],
+        "PHONE_CONFIG_FILE": sys.argv[2],
+    }
+)
 results = ap.check(ctx)
 assert len(results) == 4, results
 assert all(r.status.value == "skip" for r in results), results
+forward = next(r for r in results if r.cid == "ap_noforward_rules")
+assert forward.detail == "nft not installed", forward
+assert ctx.nft is None, ctx.nft
 print("skipped: " + " ".join(r.cid for r in results))
 PY
 then ok "missing tools only skip"; else bad "missing tools only skip" "$(cat "$LOG/ap_skip")"; fi

@@ -49,6 +49,9 @@ let
     PHONE_AP_CHANNEL=${lib.escapeShellArg (toString cfg.ap.channel)}
     PHONE_AP_CHANNEL_WIDTH=${lib.escapeShellArg (toString cfg.ap.channelWidth)}
     PHONE_AP_DECLARATIVE=${lib.escapeShellArg "/etc/phone-link/ap-profile"}
+    # The AP's no-forward unit runs this binary; the doctor reads the same path
+    # because nft is not on PATH for an ordinary user.
+    PHONE_NFT=${lib.escapeShellArg "${pkgs.nftables}/bin/nft"}
     PHONE_PROXY_HOST=${lib.escapeShellArg cfg.proxyHost}
     PHONE_PROXY_HOSTS=${lib.escapeShellArg (lib.concatStringsSep " " cfg.proxyHosts)}
     # PHONE_AP_IP is the old name for the phone's address on the AP; the proxy

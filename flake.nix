@@ -454,6 +454,10 @@
             assert lib.assertMsg (lib.hasInfix "PHONE_RUNTIME_PORT_FILE=/run/phone-link/proxy-port"
               on.environment.etc."phone-link/env".text
             ) "the runtime port file must reach the module configuration";
+            assert lib.assertMsg (lib.any
+              (line: lib.hasPrefix "PHONE_NFT=" line && lib.hasSuffix "/bin/nft" line)
+              (lib.splitString "\n" on.environment.etc."phone-link/env".text)
+            ) "the nft binary the AP unit runs must reach the doctor";
             assert lib.assertMsg (lib.hasInfix "PHONE_AP_CON=testlink"
               apNamed.environment.etc."phone-link/env".text
             ) "ap.name must reach the module configuration";

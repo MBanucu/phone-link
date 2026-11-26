@@ -100,6 +100,20 @@ class Context:
         return self.get("PHONE_PROXY_USER", "proxy")
 
     @property
+    def nft(self) -> str | None:
+        """The nft binary the AP's no-forward unit runs, or None.
+
+        `PHONE_NFT` comes from the environment or from the module's file and is
+        an absolute store path, which a user's PATH does not carry; a shell's
+        own `nft` is the last resort for a host without the module. A configured
+        path that cannot be run is ignored rather than reported as the answer.
+        """
+        for candidate in (self.env.get("PHONE_NFT"), self._config.get("PHONE_NFT")):
+            if candidate and self.have(candidate):
+                return candidate
+        return shutil.which("nft", path=self.env.get("PATH"))
+
+    @property
     def secrets_file(self) -> Path:
         return Path(self.get("PHONE_SECRETS", "/etc/nixos/phone-socks-secrets"))
 
@@ -155,6 +169,14 @@ class Context:
         return proc.stdout if proc is not None else ""
 
     def have(self, name: str) -> bool:
+        """Whether a command or an absolute path can be run.
+
+        The module writes the absolute paths of the tools it uses to
+        /etc/phone-link/env, and those are not on a user's PATH; an absolute
+        path is therefore checked directly rather than looked up.
+        """
+        if os.path.isabs(name):
+            return os.path.isfile(name) and os.access(name, os.X_OK)
         return shutil.which(name, path=self.env.get("PATH")) is not None
 
     # -- shared state --------------------------------------------------
