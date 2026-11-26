@@ -591,7 +591,9 @@
               # panel writes, with phoneLink.proxyPort as its fallback.
               grep -qF '/run/phone-link/proxy-port' \
                 ${on.systemd.services.phone-tun.serviceConfig.ExecStartPre}
-              grep -qF '/run/phone-link/proxy-port 1081' \
+              grep -qF 'PHONE_TUN_PORT_FILE=/run/phone-link/proxy-port' \
+                ${on.systemd.services.phone-tun-toggle.serviceConfig.ExecStart}
+              grep -qF 'PHONE_TUN_FALLBACK_PORT=1081' \
                 ${on.systemd.services.phone-tun-toggle.serviceConfig.ExecStart}
               grep -qF '/run/phone-link/proxy-port 1080' \
                 ${relayOn.systemd.services.phone-socks-relay.serviceConfig.ExecStart}
@@ -599,7 +601,8 @@
               # phone-tun-config and the relay.
               toggle=${fallbackOn.systemd.services.phone-tun-toggle.serviceConfig.ExecStart}
               grep -qF '/run/phone-link/proxy-host' "$toggle"
-              grep -qF 'for candidate in 10.9.9.9 10.23.190.38 10.9.9.8; do' "$toggle"
+              grep -qF "PHONE_TUN_HOSTS='10.9.9.9 10.23.190.38 10.9.9.8'" "$toggle"
+              grep -qF 'phone-tun.service' "$toggle"
               touch $out
             '';
 
