@@ -37,9 +37,11 @@ def _attached(network_only: bool = False) -> str | None:
 def phone_serial() -> str | None:
     """The one phone every adb command should target, or None.
 
-    `PHONE_SERIAL` wins, then the only attached device; two attached devices
-    are an error naming all of them, because choosing one silently is how a
-    destructive command acts on the wrong phone.
+    `PHONE_SERIAL` wins, then the only attached phone. USB and Wi-Fi
+    transports of one phone are grouped by hardware identity and one is
+    chosen; two genuinely different phones are an error naming all of them,
+    because choosing one silently is how a destructive command acts on the
+    wrong phone.
     """
     try:
         return adb.resolve_serial()
