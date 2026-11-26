@@ -21,9 +21,18 @@ tether route removed, `https://1.1.1.1` and `https://example.com` both time out
 AP mode:
 
 ```
-laptop wlp110s0   192.168.77.1/24   NetworkManager "shared", its own dnsmasq
-phone  wlan0      192.168.77.232     DHCP lease, proxy binds this address
+laptop wlp110s0   192.168.77.1/24   NetworkManager "manual" + DHCP-only dnsmasq
+phone  wlan0      192.168.77.232     DHCP reservation, proxy binds this address
 ```
+
+The AP is a link, not an uplink. `phoneLink.ap` uses NetworkManager's `manual`
+method, so the address and the `192.168.77.0/24` connected route are there but
+NetworkManager installs no DHCP, NAT or forwarding. A separate dnsmasq answers
+DHCP without a router or DNS option, and forwarded packets entering `wlp110s0`
+are dropped in a dedicated nftables table. The phone therefore has no internet
+path through the laptop and keeps mobile data as its default. The
+laptop→`192.168.77.232` direction is output, not forwarding, so the proxy, adb
+and sshfs are unaffected.
 
 The tether address is assigned per connection (it has been `172.26.192.42`,
 `10.207.119.29` and `10.186.76.251`); the hotspot and AP addresses below are
@@ -31,8 +40,9 @@ stable.
 
 ## How the proxy gets out over cellular
 
-Measured on the AP link, with the phone joined to `PhoneLink`. The phone's
-default network was the **laptop's AP**, not mobile data:
+Measured on the AP link before the AP became DHCP-only, with the phone joined to
+`PhoneLink`. The phone's default network was the **laptop's AP**, not mobile
+data:
 
 ```
 Active default network: 102
@@ -66,10 +76,14 @@ Consequences worth knowing:
 - No cellular means no tunnel, even though the proxy still accepts connections on
   `wlan0`. Check `phone-fix-mobile-data` / `phone-net-status` before blaming the
   tunnel for `curl` exiting `000`.
-- On this build the AP link is `NOT_METERED` and even `VALIDATED` (the laptop's
-  shared uplink answers the phone's validation probe), so Android does **not**
-  hand the default route back to mobile data by itself. The 90 s observation in
-  trap 8 does not generalise.
+- With the old shared uplink the AP link was `NOT_METERED` and even `VALIDATED`
+  (the laptop's shared uplink answered the phone's validation probe), so
+  Android did **not** hand the default route back to mobile data by itself. The
+  90 s observation in trap 8 did not generalise. The module no longer advertises
+  an uplink, so the AP should fail validation; that is what keeps mobile data
+  the default. The on-hardware acceptance run in
+  [issue #4](https://github.com/MBanucu/phone-link-proxy/issues/4) is what
+  confirms it on the phone.
 - Anything replacing the app must make the same request and bind to it.
   `Socket(host, port)` on an unvalidated/validated Wi-Fi default is exactly the
   loop described above.
@@ -114,10 +128,12 @@ adb shell 'grep -n 10323 /data/local/tmp/conn.txt'
    behind the port).
 6. **DNS loop.** With the tether, the laptop's resolver is the phone's tether DNS
    (`rndis0`'s address, which changes per connection). That forwards to the
-   phone's default network, which in AP mode is the `PhoneLink` Wi-Fi whose DNS
-   is the laptop (`192.168.77.1`), which forwards back. Result: every name lookup
-   fails and every `curl` exits `000` even though raw IPs work. `modules/phone-link.nix` avoids this by pinning
-   `/etc/resolv.conf` to `1.1.1.1`/`9.9.9.9`.
+   phone's default network; under the old shared AP that was the `PhoneLink`
+   Wi-Fi whose DNS was the laptop (`192.168.77.1`), and the lookup came straight
+   back. Result: every name lookup fails and every `curl` exits `000` even
+   though raw IPs work. `modules/phone-link.nix` avoids this by pinning
+   `/etc/resolv.conf` to `1.1.1.1`/`9.9.9.9`, and the AP no longer advertises
+   the laptop as a DNS server either.
 7. **Policy routing is not obvious.** sing-box (gvisor stack) installs
    `ip rule` entries with fwmark 2022 and a table 2022 route, so
    `ip route get 1.1.1.1` shows `via 172.19.0.2 dev phone-tun table 2022`.
@@ -126,9 +142,11 @@ adb shell 'grep -n 10323 /data/local/tmp/conn.txt'
 8. **Android's no-internet Wi-Fi.** An AP without an uplink is unvalidated. The
    phone kept `PhoneLink` connected for 90 s of watching, with mobile data still
    the default network, but expect an "no internet" notification and possible
-   network-selection games on other builds. With the module's shared uplink the
-   AP can instead come up `VALIDATED` and take the default route itself — that is
-   the state the cellular section above was measured in.
+   network-selection games on other builds. The module used to give the AP a
+   shared uplink, so it could come up `VALIDATED` and take the default route
+   itself — that is the state the cellular section above was measured in. It now
+   runs the AP DHCP-only and drops forwarded AP traffic, so the first behaviour
+   is the intended one.
 
 ## Verified results
 
