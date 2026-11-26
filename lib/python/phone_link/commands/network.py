@@ -41,9 +41,21 @@ PHONE_AP_CHANNEL and PHONE_AP_CHANNEL_WIDTH override those). The PSK stays
 out of the Nix store. --refresh rewrites an existing profile, e.g. after
 rotating the password; --check only reports.
 
+The profile is a link only: manual addressing, no gateway and no DNS, so
+NetworkManager does not NAT the AP. A hand-made profile is refused unless
+the module's DHCP-only dnsmasq and nft forward drop are installed; enable
+phoneLink.ap and let the module own the access point instead.
+
 When phoneLink.ap declares the profile, --refresh restarts the
 NetworkManager-ensure-profiles unit instead of editing NetworkManager.
 """
+
+# The module's link-only AP support. A hand-made profile is only usable when
+# these are installed: the profile itself carries neither NAT nor DHCP, so
+# without them the phone would get no address (or the old shared profile would
+# bring the NAT loop back).
+AP_DHCP_UNIT = "phone-link-ap-dhcp.service"
+AP_NOFORWARD_UNIT = "phone-link-ap-noforward.service"
 
 USAGE_AP_DELETE = """usage: phone-ap-delete [--yes] [--check]
 
@@ -105,6 +117,35 @@ def _active_device() -> str:
         if name == settings.PHONE_AP_CON:
             return device
     return ""
+
+
+def _ap_method() -> str:
+    """The profile's IPv4 method, or "" when it cannot be read."""
+    return capture(
+        [
+            "nmcli",
+            "-g",
+            "ipv4.method",
+            "connection",
+            "show",
+            settings.PHONE_AP_CON,
+        ]
+    )
+
+
+def _ap_link_units() -> bool:
+    """Whether the module's DHCP-only and no-forward AP units are installed."""
+    return status(["systemctl", "cat", AP_DHCP_UNIT, AP_NOFORWARD_UNIT]) == 0
+
+
+def _refuse_hand_made_ap() -> None:
+    die(
+        "the link-only access point needs the NixOS module: set "
+        "phoneLink.ap.enable = true and rebuild. phone-ap-create no longer "
+        "writes NetworkManager's shared (NAT) profile, and without the "
+        "module's DHCP-only dnsmasq and nft forward drop a hand-made profile "
+        "would not be usable. Delete an old profile with phone-ap-delete"
+    )
 
 
 def _tool(name: str):
@@ -327,9 +368,10 @@ def phone_ap_create(args: list[str]) -> int:
     check_only = "--check" in args
 
     if check_only:
+        exists = _profile_exists()
         log(
             f"{settings.PHONE_AP_CON} exists"
-            if _profile_exists()
+            if exists
             else f"{settings.PHONE_AP_CON} is missing"
         )
         if phone.ap_declarative():
@@ -338,11 +380,28 @@ def phone_ap_create(args: list[str]) -> int:
                 f"PSK source: {settings.PHONE_SECRETS} "
                 f"(read by {settings.PHONE_AP_ENSURE_UNIT} as root)"
             )
-        elif os.access(settings.PHONE_SECRETS, os.R_OK):
-            log(f"PSK source: {settings.PHONE_SECRETS} (PHONE_AP_PASS)")
         else:
-            log(f"PSK source: {settings.PHONE_SECRETS} not readable (run with sudo)")
-        return 0 if _profile_exists() else 1
+            method = _ap_method() if exists else ""
+            if method == "shared":
+                log(
+                    f"{settings.PHONE_AP_CON} uses ipv4.method shared (NAT); "
+                    "it must be rebuilt link-only"
+                )
+            elif method:
+                log(f"{settings.PHONE_AP_CON} uses ipv4.method {method}")
+            log(
+                "link-only units: installed"
+                if _ap_link_units()
+                else "link-only units: missing (phoneLink.ap is required)"
+            )
+            if os.access(settings.PHONE_SECRETS, os.R_OK):
+                log(f"PSK source: {settings.PHONE_SECRETS} (PHONE_AP_PASS)")
+            else:
+                log(
+                    f"PSK source: {settings.PHONE_SECRETS} not readable "
+                    "(run with sudo)"
+                )
+        return 0 if exists else 1
 
     if phone.ap_declarative():
         if _profile_exists() and not refresh:
@@ -357,12 +416,26 @@ def phone_ap_create(args: list[str]) -> int:
         log(f"{settings.PHONE_AP_CON} reloaded; run phone-ap-up to activate it")
         return 0
 
-    if _profile_exists() and not refresh:
+    existing = _profile_exists()
+    method = _ap_method() if existing else ""
+
+    # The non-declarative profile is link-only as well. It is only usable with
+    # the module's DHCP server and forward drop, so refuse rather than write a
+    # profile that is either unreachable (no DHCP) or, as before, a NAT uplink.
+    if not _ap_link_units():
+        if existing and method != "shared" and not refresh:
+            log(f"{settings.PHONE_AP_CON} already exists and is link-only")
+            return 0
+        _refuse_hand_made_ap()
+
+    if existing and not refresh and method != "shared":
         log(
             f"{settings.PHONE_AP_CON} already exists "
             "(use --refresh to rewrite its PSK)"
         )
         return 0
+    if existing and method == "shared":
+        log(f"rewriting {settings.PHONE_AP_CON} as a link-only profile (no NAT)")
 
     phone.as_root("phone-ap-create", args)
     password = phone.ap_pass()
@@ -383,7 +456,7 @@ def phone_ap_create(args: list[str]) -> int:
         "wifi-sec.psk",
         password,
         "ipv4.method",
-        "shared",
+        "manual",
         "ipv4.addresses",
         settings.PHONE_AP_ADDRESS,
     ]
