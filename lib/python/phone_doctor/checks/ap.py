@@ -27,9 +27,10 @@ def _unit(ctx: Context, unit: str, cid: str, label: str) -> Result:
 def _forward_drop(ctx: Context) -> Result:
     cid = "ap_noforward_rules"
     label = "ap forward drop"
-    if not ctx.have("nft"):
+    nft = ctx.nft
+    if nft is None:
         return skip(cid, label, "nft not installed")
-    proc = ctx.run(["nft", "list", "table", "inet", "phone_link_ap"])
+    proc = ctx.run([nft, "list", "table", "inet", "phone_link_ap"])
     output = (proc.stdout or "") if proc is not None else ""
     if proc is not None and proc.returncode == 0:
         for line in output.splitlines():

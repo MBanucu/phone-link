@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `phone-doctor` skipped the AP forward drop as "nft not installed" on a host
+  where `phone-link-ap-noforward.service` was active. The unit runs the store's
+  `nft`, which is not on a user's PATH, so the doctor's own look-up found
+  nothing. The module now writes that binary to `/etc/phone-link/env` as
+  `PHONE_NFT`, and the doctor resolves it through the environment, then the
+  module file, then `nft` on PATH and runs the same read-only
+  `nft list table inet phone_link_ap`. A host without the module still skips,
+  and a failing query is still a failure.
+
 ## [0.13.1] - 2026-11-26
 
 ### Fixed

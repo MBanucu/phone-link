@@ -77,12 +77,12 @@ print(Context({'PHONE_PROXY_PORT': 'typo', 'PHONE_RUNTIME_PORT_FILE': '$port_fil
 
 rm -f "$port_file"
 out=$(py "from phone_doctor.context import Context
-print(Context({'PHONE_PROXY_PORT': '70000', 'PHONE_RUNTIME_PORT_FILE': '$port_file'}).proxy_port)")
+print(Context({'PHONE_PROXY_PORT': '70000', 'PHONE_RUNTIME_PORT_FILE': '$port_file', 'PHONE_CONFIG_FILE': '/nonexistent'}).proxy_port)")
 [ "$out" = 1080 ] && ok "rejects an out-of-range port" || bad "rejects an out-of-range port" "$out"
 
 printf 'nope\n' >"$port_file"
 out=$(py "from phone_doctor.context import Context
-print(Context({'PHONE_PROXY_PORT': '0', 'PHONE_RUNTIME_PORT_FILE': '$port_file'}).proxy_port)")
+print(Context({'PHONE_PROXY_PORT': '0', 'PHONE_RUNTIME_PORT_FILE': '$port_file', 'PHONE_CONFIG_FILE': '/nonexistent'}).proxy_port)")
 [ "$out" = 1080 ] && ok "rejects zero and a bad runtime file" \
   || bad "rejects zero and a bad runtime file" "$out"
 
@@ -177,6 +177,40 @@ out=$(PHONE_CONFIG_FILE="$config" PHONE_AP_DECLARATIVE="$profile" py \
 print(phone.ap_declarative())')
 [ "$out" = False ] && ok "the built-in name is not treated as the configured one" \
   || bad "the built-in name is not treated as the configured one" "$out"
+
+# 8. nft is resolved like the module's other values: the environment, then the
+#    module file, then a shell that has it on PATH.
+mkdir -p "$TMP/nft-env" "$TMP/nft-path"
+env_nft=$TMP/nft-env/nft
+file_nft=$TMP/nft-env/module-nft
+cat >"$env_nft" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+cp "$env_nft" "$file_nft"
+cp "$env_nft" "$TMP/nft-path/nft"
+chmod +x "$env_nft" "$file_nft" "$TMP/nft-path/nft"
+missing_config=$TMP/no-such-env
+printf "PHONE_NFT='%s'\n" "$file_nft" >"$TMP/nft-config"
+printf "PHONE_NFT='%s'\n" "$TMP/no-such-nft" >"$TMP/nft-bad-config"
+out=$(py "
+from phone_doctor.context import Context
+print(Context({'PHONE_CONFIG_FILE': '$TMP/nft-config', 'PHONE_NFT': '$env_nft'}).nft)
+print(Context({'PHONE_CONFIG_FILE': '$TMP/nft-config'}).nft)
+print(Context({'PHONE_CONFIG_FILE': '$missing_config', 'PATH': '$TMP/nft-path'}).nft)
+print(Context({'PHONE_CONFIG_FILE': '$TMP/nft-bad-config', 'PATH': '$TMP/nft-path'}).nft)
+print(Context({'PHONE_CONFIG_FILE': '$missing_config', 'PATH': '/nonexistent'}).nft)
+print(Context({'PHONE_CONFIG_FILE': '$missing_config'}).have('$env_nft'))
+print(Context({'PHONE_CONFIG_FILE': '$missing_config', 'PATH': '/nonexistent'}).have('nft'))
+")
+[ "$out" = "$env_nft
+$file_nft
+$TMP/nft-path/nft
+$TMP/nft-path/nft
+None
+True
+False" ] && ok "resolves nft through the environment, the module file and PATH" \
+  || bad "resolves nft through the environment, the module file and PATH" "$out"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
