@@ -112,7 +112,8 @@ adb shell 'grep -n 10323 /data/local/tmp/conn.txt'
 3. **DHCP to the AP client is firewalled.** `nixos-fw` ends in
    `nixos-fw-log-refuse` and had no `udp/67` rule, so the phone associated
    (`Supplicant state: COMPLETED`, RSSI -36) but stayed at `IP: null`, with no
-   `DHCPDISCOVER` in the laptop's journal. `modules/phone-link.nix` adds 53/67.
+   `DHCPDISCOVER` in the laptop's journal. `modules/phone-link.nix` adds UDP 67
+   (DHCP only; the AP serves no DNS).
 4. **A single radio cannot be client and AP on different channels.** `iw list`
    reports `managed + AP` only for `#channels <= 1`, so starting the AP drops the
    client link to the phone's hotspot. AP mode therefore has no uplink of its own.

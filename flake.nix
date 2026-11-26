@@ -346,14 +346,11 @@
               on.systemd.timers.phone-tun-toggle.timerConfig.OnBootSec == "20s"
             ) "the probe must not fire before the network is up";
             assert lib.assertMsg (
-              on.networking.firewall.interfaces.wlptest0.allowedUDPPorts == [
-                53
-                67
-              ]
-            ) "the AP interface must allow DHCP and DNS";
+              on.networking.firewall.interfaces.wlptest0.allowedUDPPorts == [ 67 ]
+            ) "the AP interface must allow DHCP";
             assert lib.assertMsg (
-              on.networking.firewall.interfaces.wlptest0.allowedTCPPorts == [ 53 ]
-            ) "the AP interface must allow DNS over TCP";
+              on.networking.firewall.interfaces.wlptest0.allowedTCPPorts == [ ]
+            ) "the AP must not open DNS over TCP";
             assert lib.assertMsg (
               !(lib.elem "multi-user.target" on.systemd.services.phone-tun.wantedBy)
             ) "the tunnel must never start at boot";
