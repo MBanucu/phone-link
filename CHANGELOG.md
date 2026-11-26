@@ -86,6 +86,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the shim that was invoked rather than a PATH copy, and the documented
   `PHONE_*` overrides (including `PHONE_SECRETS`) survive `sudo`.
 
+- The module and the commands share one configuration. `phoneLink` options
+  were hard-coded again in `settings.py` and the doctor, so a non-default AP
+  name, interface, SSID, address, proxy host or port silently desynchronised
+  the two halves; a custom `ap.name` was also treated as non-declarative.
+  The module writes the non-secret values to `/etc/phone-link/env`, the
+  commands and the doctor read it with the environment and old defaults as
+  fallbacks, `ap_declarative()` compares against the configured name, and
+  `/run/phone-link/proxy-port` is written from `phoneLink.proxyPort` when
+  tmpfiles runs rather than left to an older run.
+
 - `phone-proxy-start` on a fresh install no longer sends a bare `START` and
   reports "the service gave no state". With no saved proxy configuration it
   says so and points at `phone-proxy-setup` instead; the working start path is

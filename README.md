@@ -131,6 +131,17 @@ phone's auto-start may bring up another saved proxy at another port, which the
 doctor reports until you switch again. `PHONE_RUNTIME_PORT_FILE` moves the file
 for a test, and `PHONE_PROXY_PORT` overrides both for a one-off run.
 
+### The configuration the module shares
+
+The module writes the non-secret `phoneLink` values to `/etc/phone-link/env`:
+the AP interface, name, SSID and address, the proxy host(s), port and user,
+the secrets path, and the runtime port file. The commands, the doctor and
+`lib/phone-net.sh` read it, so a non-default deployment needs no repeated
+`PHONE_*` exports, while an environment variable still wins for a one-off run.
+`PHONE_CONFIG_FILE` points the readers at another file in a test. The port file
+is written from `phoneLink.proxyPort` when tmpfiles runs, so the value the
+doctor sees after a boot is the module's own rather than an older run's.
+
 ### One adb serial
 
 The live phone can have two transports at once — USB and a Wi-Fi address — and

@@ -1,23 +1,43 @@
 """Environment-backed settings shared by the commands.
 
-Mirrors lib/phone-net.sh: every value comes from the environment when set and
-falls back to the same default, so a command behaves identically whether it is
-started from a shell, the GUI or a Nix store wrapper.
+Mirrors lib/phone-net.sh: every value comes from the environment when set, then
+from the non-secret file the NixOS module writes (``/etc/phone-link/env``), and
+falls back to the same built-in default.  A command therefore behaves the same
+whether it is started from a shell, the GUI or a Nix store wrapper, and a
+deployment that sets a non-default ``phoneLink`` option no longer needs to
+repeat it in the environment.
 """
 
 from __future__ import annotations
 
 import os
 
+from .config import values as _config_values
+
+_CONFIG = _config_values()
+
 
 def _env(name: str, default: str) -> str:
     # Bash uses ${NAME:-default}: an empty value means "unset", not "".
-    return os.environ.get(name) or default
+    return os.environ.get(name) or _CONFIG.get(name) or default
 
 
-PHONE_SERIAL = _env("PHONE_SERIAL", "XPLO2EEA0001541")
+# ADB's target serial is resolved at run time by phone_link.adb: PHONE_SERIAL
+# first, then the only attached device, else an error that lists the devices.
+# There is deliberately no built-in serial here: a USB serial belongs to one
+# phone and silently targeting it is how a destructive command hit the wrong
+# device.
 PHONE_HOTSPOT_IP = _env("PHONE_HOTSPOT_IP", "10.244.108.165")
+# The primary proxy address. `phoneLink.proxyHost` is written here by the
+# module; the old PHONE_AP_IP name is kept as the fallback because the AP
+# address is what it meant.
 PHONE_AP_IP = _env("PHONE_AP_IP", "192.168.77.232")
+PHONE_PROXY_HOST = _env("PHONE_PROXY_HOST", PHONE_AP_IP)
+PHONE_PROXY_HOSTS = tuple(
+    host
+    for host in _env("PHONE_PROXY_HOSTS", "").split()
+    if host
+)
 PHONE_AP_CON = _env("PHONE_AP_CON", "phonelink")
 PHONE_AP_SSID = _env("PHONE_AP_SSID", "PhoneLink")
 PHONE_AP_IF = _env("PHONE_AP_IF", "wlp110s0")
@@ -86,6 +106,15 @@ PHONE_ADB_POLL = float(_env("PHONE_ADB_POLL", "2"))
 # to 0: the answer is already in the dump it just wrote.
 PHONE_PROXY_WAIT = float(_env("PHONE_PROXY_WAIT", "15"))
 PHONE_PROXY_SETTLE = float(_env("PHONE_PROXY_SETTLE", "5"))
+
+
+def proxy_addresses() -> list[str]:
+    """Every address worth probing, primary first, without duplicates."""
+    addresses: list[str] = []
+    for address in (PHONE_PROXY_HOST, *PHONE_PROXY_HOSTS, PHONE_HOTSPOT_IP):
+        if address and address not in addresses:
+            addresses.append(address)
+    return addresses
 
 
 def active_port() -> int:

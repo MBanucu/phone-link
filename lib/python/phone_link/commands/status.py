@@ -153,7 +153,7 @@ def phone_net_status(args: list[str]) -> int:
         ),
     )
 
-    for address in (settings.PHONE_HOTSPOT_IP, settings.PHONE_AP_IP):
+    for address in settings.proxy_addresses():
         say(f"proxy {address}", "open" if phone.tcp_open(address, 2) else "closed")
 
     serial = phone.phone_serial()
@@ -288,7 +288,7 @@ def net_check(args: list[str]) -> int:
 def phone_proxy_check(args: list[str]) -> int:
     """Probe the proxy on the hotspot and AP addresses; 0 if either answers."""
     reachable = False
-    for address in (settings.PHONE_HOTSPOT_IP, settings.PHONE_AP_IP):
+    for address in settings.proxy_addresses():
         if phone.proxy_check(address):
             reachable = True
     return 0 if reachable else 1

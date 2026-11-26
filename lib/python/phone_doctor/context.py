@@ -15,11 +15,13 @@ from phone_link.adb import (
     resolve_serial,
     retry,
 )
+from phone_link.config import values as config_values
 
 
 class Context:
     def __init__(self, env: dict[str, str] | None = None) -> None:
         self.env = dict(os.environ if env is None else env)
+        self._config = config_values(self.env)
         self._serial: str | None = None
         self._serial_loaded = False
         self._serial_error = ""
@@ -28,7 +30,7 @@ class Context:
 
     # -- configuration -------------------------------------------------
     def get(self, name: str, default: str) -> str:
-        return self.env.get(name) or default
+        return self.env.get(name) or self._config.get(name) or default
 
     @property
     def ap_if(self) -> str:
@@ -59,7 +61,7 @@ class Context:
 
     @property
     def proxy_port(self) -> str:
-        """The port the laptop uses: PHONE_PROXY_PORT, the panel's choice, 1080.
+        """The port the laptop uses: PHONE_PROXY_PORT, the panel's choice, the module.
 
         The same order as `phone_link.settings.active_port`, kept here rather
         than imported because a probe may be given its own environment and the
@@ -70,14 +72,24 @@ class Context:
         explicit = self.env.get("PHONE_PROXY_PORT")
         if explicit and explicit.isdigit() and 1 <= int(explicit) <= 65535:
             return explicit
+        # The module's default comes from /etc/phone-link/env; a bad value is
+        # ignored exactly like a bad environment or runtime file.
+        configured = self._config.get("PHONE_PROXY_PORT", "1080")
+        if not configured.isdigit() or not 1 <= int(configured) <= 65535:
+            configured = "1080"
         path = Path(self.get("PHONE_RUNTIME_PORT_FILE", "/run/phone-link/proxy-port"))
         try:
             value = path.read_text().strip()
         except OSError:
-            return "1080"
+            return configured
         if value.isdigit() and 1 <= int(value) <= 65535:
             return value
-        return "1080"
+        return configured
+
+    @property
+    def proxy_host(self) -> str:
+        """The primary proxy address the module configured."""
+        return self.get("PHONE_PROXY_HOST", self.ap_ip)
 
     @property
     def proxy_user(self) -> str:
@@ -218,7 +230,7 @@ class Context:
 
     @property
     def target_ip(self) -> str:
-        return self.ap_ip if self.profile_exists() else self.hotspot_ip
+        return self.proxy_host if self.profile_exists() else self.hotspot_ip
 
     def secrets(self) -> dict[str, str] | None:
         if self._secrets is None:
