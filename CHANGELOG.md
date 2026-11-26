@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A phone that lost the laptop AP for a minute stayed off it: stock Android
+  globals gave up on the network, and nothing on the host said what to do.
+  `phone-wifi-reconnect` applies the two globals that made the phone rejoin
+  after a 60 s outage (`network_avoid_bad_wifi=0`,
+  `wifi_always_requested=1`) and reads them back; `--check` reports both and
+  exits 0 only when they match, and no other command changes them. The doctor
+  reports the pair as an optional line with that command, and when the AP is
+  on air with the PhoneLink SSID but no station it now says
+  `phone-wifi-connect PhoneLink` — the existing 3 s recovery path — instead of
+  leaving only "no phone associated" to read.
+
 - The AP can come back after a reboot. The declarative profile hardcoded
   `connection.autoconnect = false`, and nothing ran `phone-ap-up` at boot, so
   the AP stayed down and `phone-tun` had no path until someone brought it up.

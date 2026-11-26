@@ -182,6 +182,13 @@ ACTIONS: tuple[Action, ...] = (
         supports_check=True,
     ),
     Action(
+        "phone-wifi-reconnect",
+        "ap",
+        "Harden Wi-Fi reconnects",
+        "Apply the two Android globals that let the phone rejoin after a long outage.",
+        supports_check=True,
+    ),
+    Action(
         "phone-wifi-enable",
         "ap",
         "Enable phone Wi-Fi",

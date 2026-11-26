@@ -36,6 +36,7 @@ COMMANDS = {
     "phone-ap-create": network.phone_ap_create,
     "phone-ap-delete": network.phone_ap_delete,
     "phone-wifi-connect": network.phone_wifi_connect,
+    "phone-wifi-reconnect": network.phone_wifi_reconnect,
     "phone-fix-internet": network.phone_fix_internet,
     "phone-fix-apk": network.phone_fix_apk,
     "phone-link-uninstall": maintenance.phone_link_uninstall,

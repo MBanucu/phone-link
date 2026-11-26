@@ -57,6 +57,8 @@ case "${args[0]:-}" in
       "dumpsys package "*) cat "$LOG/dumpsys" ;;
       "dumpsys deviceidle whitelist") cat "$LOG/whitelist" ;;
       "dumpsys activity service "*) cat "$LOG/service_dump" ;;
+      "settings get global network_avoid_bad_wifi") cat "$LOG/avoid" ;;
+      "settings get global wifi_always_requested") cat "$LOG/always" ;;
       # The app's own facts, for a service that is not running: the doctor
       # reads them from the file under the app's external directory.
       "cat /sdcard/Android/data/"*)
@@ -128,6 +130,7 @@ cat >"$STUBS/iw" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
   "dev wlp110s0 station dump") cat "$LOG/iw_station" 2>/dev/null ;;
+  "dev wlp110s0 info") cat "$LOG/iw_info" 2>/dev/null ;;
 esac
 EOF
 sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/iw"
@@ -194,6 +197,9 @@ fresh_state() {
   printf 'table inet phone_link_ap {\n\tchain forward {\n\t\tiifname "wlp110s0" drop\n\t}\n}\n' \
     >"$LOG/nft"
   printf 'Station aa:bb:cc:dd:ee:ff (on wlp110s0)\n' >"$LOG/iw_station"
+  printf 'ssid PhoneLink\n' >"$LOG/iw_info"
+  printf '0\n' >"$LOG/avoid"
+  printf '1\n' >"$LOG/always"
   printf '1\n' >"$LOG/forward"
   printf 'active\n' >"$LOG/tunnel"
   printf '2022: from all fwmark 0x7e6 lookup 2022\n' >"$LOG/rules"
@@ -237,6 +243,8 @@ grep -q 'ok    proxy port.*laptop 1080, phone 1080' "$LOG/out" \
   && ok "matches the laptop's port with the phone's" \
   || bad "matches the laptop's port with the phone's" "$(cat "$LOG/out")"
 grep -q 'network transport' "$LOG/out" && ok "reports adb over Wi-Fi" || bad "reports adb over Wi-Fi"
+grep -q 'ok    wifi reconnect.*network_avoid_bad_wifi=0, wifi_always_requested=1 (recommended)' "$LOG/out" \
+  && ok "reports the Wi-Fi reconnect globals" || bad "reports the Wi-Fi reconnect globals" "$(cat "$LOG/out")"
 grep -q 'ok    ap dhcp' "$LOG/out" && ok "checks the AP DHCP unit" || bad "checks the AP DHCP unit"
 grep -q 'ok    ap noforward' "$LOG/out" && ok "checks the AP no-forward unit" \
   || bad "checks the AP no-forward unit" "$(cat "$LOG/out")"
@@ -246,6 +254,16 @@ grep -q 'ok    ap station.*1 on wlp110s0' "$LOG/out" && ok "checks the phone ass
   || bad "checks the phone association" "$(cat "$LOG/out")"
 grep -q 'ok    secrets mode.*600' "$LOG/out" && ok "checks the secrets mode" \
   || bad "checks the secrets mode" "$(cat "$LOG/out")"
+
+# 1b. Stock Wi-Fi reconnect globals are informational, not a failure.
+fresh_state
+printf '1\n' >"$LOG/avoid"
+if run; then ok "stock Wi-Fi globals still exit 0"; else bad "stock Wi-Fi globals still exit 0" "$(cat "$LOG/out")"; fi
+grep -q 'warn  wifi reconnect.*network_avoid_bad_wifi=1, wifi_always_requested=1' "$LOG/out" \
+  && ok "reports the stock value as a warning" \
+  || bad "reports the stock value as a warning" "$(cat "$LOG/out")"
+grep -q 'run phone-wifi-reconnect' "$LOG/out" && ok "names the explicit fix" \
+  || bad "names the explicit fix" "$(cat "$LOG/out")"
 
 # 2. No phone: required failure, phone checks skipped, rest still checked.
 fresh_state
@@ -369,15 +387,30 @@ if run; then bad "a table without the drop exits 1"; else ok "a table without th
 grep -q 'FAIL  ap forward drop.*no drop for wlp110s0' "$LOG/out" \
   && ok "names the missing drop" || bad "names the missing drop" "$(cat "$LOG/out")"
 
-# 10d. An AP with no associated station is a required failure.
+# 10d. An AP on air with no associated station is a warning with the 3 s
+#      recovery path, not a required failure.
 fresh_state
 : >"$LOG/iw_station"
-if run; then bad "no station exits 1"; else ok "no station exits 1"; fi
-grep -q 'FAIL  ap station.*no phone associated on wlp110s0' "$LOG/out" \
-  && ok "names the missing station" || bad "names the missing station" "$(cat "$LOG/out")"
+if run; then ok "no station is a warning"; else bad "no station is a warning" "$(cat "$LOG/out")"; fi
+grep -q 'warn  ap station.*no phone associated on wlp110s0; run phone-wifi-connect PhoneLink' "$LOG/out" \
+  && ok "names the missing station and the recovery command" \
+  || bad "names the missing station and the recovery command" "$(cat "$LOG/out")"
 run --analyze || true
-grep -q '^fail ap_station ' "$LOG/out" && ok "--analyze names ap_station" \
-  || bad "--analyze names ap_station" "$(cat "$LOG/out")"
+grep -q '^warn ap_station .*phone-wifi-connect PhoneLink' "$LOG/out" \
+  && ok "--analyze reports ap_station as a warning with the command" \
+  || bad "--analyze reports ap_station as a warning with the command" "$(cat "$LOG/out")"
+
+# 10d2. The hint is only for an AP that is actually on air with the SSID.
+fresh_state
+: >"$LOG/iw_station"
+: >"$LOG/iw_info"
+if run; then bad "AP down with no station exits 1"; else ok "AP down with no station exits 1"; fi
+grep -q 'FAIL  ap station.*no phone associated on wlp110s0' "$LOG/out" \
+  && ok "keeps the plain failure when the SSID is not up" \
+  || bad "keeps the plain failure when the SSID is not up" "$(cat "$LOG/out")"
+grep -q 'phone-wifi-connect PhoneLink' "$LOG/out" \
+  && bad "does not print the hint when the AP is down" \
+  || ok "does not print the hint when the AP is down"
 
 # 10e. Missing tools are skips, not crashes: the checks run with no PATH.
 marker=$LOG/ap-profile
