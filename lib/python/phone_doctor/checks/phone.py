@@ -21,6 +21,8 @@ def check(ctx: Context) -> list[Result]:
     serial = ctx.serial
     if serial:
         results.append(ok("adb_device", "adb device", serial))
+    elif ctx.serial_error:
+        results.append(fail("adb_device", "adb device", ctx.serial_error))
     else:
         results.append(fail("adb_device", "adb device", "none (see adb devices)"))
 

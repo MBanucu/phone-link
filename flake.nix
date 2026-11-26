@@ -265,6 +265,24 @@
               };
             }
           ];
+          # A non-default name and credentials path must reach both the env
+          # file the commands read and the declarative-profile marker.
+          apNamed = evalModule [
+            {
+              networking.networkmanager.enable = true;
+              phoneLink = {
+                enable = true;
+                ap = {
+                  enable = true;
+                  name = "testlink";
+                  ssid = "Test Link";
+                  address = "192.168.98.1/24";
+                };
+                proxyUser = "linkuser";
+                secretsFile = "/etc/nixos/other-secrets";
+              };
+            }
+          ];
           # Autoconnect reserves the radio and must still be a link-only profile.
           apAutoconnect = evalModule [
             {
@@ -421,6 +439,42 @@
             assert lib.assertMsg (lib.any (
               rule: lib.hasPrefix "d /run/phone-link " rule
             ) on.systemd.tmpfiles.rules) "the runtime port directory must survive a stopped tunnel";
+            assert lib.assertMsg (lib.any (
+              rule: rule == "f+ /run/phone-link/proxy-port 0644 root root - 1081"
+            ) on.systemd.tmpfiles.rules) "the runtime port file must be seeded from proxyPort";
+            assert lib.assertMsg (lib.hasInfix "PHONE_AP_IF=wlptest0"
+              on.environment.etc."phone-link/env".text
+            ) "apInterface must reach the module configuration";
+            assert lib.assertMsg (lib.hasInfix "PHONE_PROXY_HOST=10.9.9.9"
+              on.environment.etc."phone-link/env".text
+            ) "proxyHost must reach the module configuration";
+            assert lib.assertMsg (lib.hasInfix "PHONE_PROXY_PORT=1081"
+              on.environment.etc."phone-link/env".text
+            ) "proxyPort must reach the module configuration";
+            assert lib.assertMsg (lib.hasInfix "PHONE_RUNTIME_PORT_FILE=/run/phone-link/proxy-port"
+              on.environment.etc."phone-link/env".text
+            ) "the runtime port file must reach the module configuration";
+            assert lib.assertMsg (lib.hasInfix "PHONE_AP_CON=testlink"
+              apNamed.environment.etc."phone-link/env".text
+            ) "ap.name must reach the module configuration";
+            assert lib.assertMsg (lib.hasInfix "PHONE_AP_SSID='Test Link'"
+              apNamed.environment.etc."phone-link/env".text
+            ) "ap.ssid must reach the module configuration";
+            assert lib.assertMsg (lib.hasInfix "PHONE_AP_ADDRESS=192.168.98.1/24"
+              apNamed.environment.etc."phone-link/env".text
+            ) "ap.address must reach the module configuration";
+            assert lib.assertMsg (lib.hasInfix "PHONE_PROXY_USER=linkuser"
+              apNamed.environment.etc."phone-link/env".text
+            ) "proxyUser must reach the module configuration";
+            assert lib.assertMsg (lib.hasInfix "PHONE_SECRETS=/etc/nixos/other-secrets"
+              apNamed.environment.etc."phone-link/env".text
+            ) "secretsFile must reach the module configuration";
+            assert lib.assertMsg (
+              apNamed.environment.etc."phone-link/ap-profile".text == "testlink"
+            ) "the declarative profile marker must name the configured AP";
+            assert lib.assertMsg (
+              apNamed.networking.networkmanager.ensureProfiles.profiles ? testlink
+            ) "a non-default ap.name must be the declared profile";
             assert lib.assertMsg (lib.hasInfix "1.1.1.1"
               on.environment.etc."resolv.conf".text
             ) "manageResolver must pin resolv.conf";

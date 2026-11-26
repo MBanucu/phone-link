@@ -13,6 +13,7 @@ import hashlib
 import os
 import re
 import secrets as random_secrets
+import shlex
 import shutil
 import sys
 import tempfile
@@ -289,7 +290,12 @@ def phone_tunnel_run(args: list[str]) -> int:
         os.chmod(temporary, 0o600)
 
         if via_adb:
-            if status(["adb", "reverse", f"tcp:{port}", f"tcp:{port}"]) != 0:
+            serial = phone.phone_serial()
+            if not serial:
+                die("no phone attached (see adb devices)")
+            if status(
+                ["adb", "-s", serial, "reverse", f"tcp:{port}", f"tcp:{port}"]
+            ) != 0:
                 die("adb reverse failed (is adb connected?)")
             with open(temporary, encoding="utf-8") as source:
                 rewritten = source.read()
@@ -709,7 +715,10 @@ def phone_fix_internet(args: list[str]) -> int:
         return 0
 
     log("trying USB tethering")
-    status(["adb", "shell", "svc", "usb", "setFunctions", "rndis,adb"])
+    serial = phone.phone_serial()
+    if not serial:
+        die("no phone attached (see adb devices)")
+    status(["adb", "-s", serial, "shell", "svc", "usb", "setFunctions", "rndis,adb"])
     if _run_tool("phone-usb-tether-default") != 0:
         log("warning: could not set USB tethering")
     time.sleep(5 * settings.PHONE_FIX_SETTLE)
@@ -718,8 +727,16 @@ def phone_fix_internet(args: list[str]) -> int:
         return 0
 
     log("trying the phone hotspot (laptop as a Wi-Fi client)")
-    status(["adb", "shell", "svc", "wifi", "disable"])
-    status(["adb", "shell", "cmd", "wifi", "start-softap", settings.PHONE_HOTSPOT_SSID])
+    status(["adb", "-s", serial, "shell", "svc", "wifi", "disable"])
+    status(
+        [
+            "adb",
+            "-s",
+            serial,
+            "shell",
+            f"cmd wifi start-softap {shlex.quote(settings.PHONE_HOTSPOT_SSID)}",
+        ]
+    )
     if settings.PHONE_HOTSPOT_CON in capture(
         ["nmcli", "-t", "-f", "NAME", "con", "show"]
     ).splitlines():

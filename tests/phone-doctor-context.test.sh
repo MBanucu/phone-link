@@ -86,5 +86,97 @@ print(Context({'PHONE_PROXY_PORT': '0', 'PHONE_RUNTIME_PORT_FILE': '$port_file'}
 [ "$out" = 1080 ] && ok "rejects zero and a bad runtime file" \
   || bad "rejects zero and a bad runtime file" "$out"
 
+# 5. The module's /etc/phone-link/env reaches settings and the doctor, with the
+#    environment still winning. Values with spaces survive the shell quoting
+#    the Nix module uses.
+config=$TMP/env
+cat >"$config" <<'EOF'
+PHONE_AP_IF='wlptest9'
+PHONE_AP_CON='TestLink'
+PHONE_AP_SSID='A link with spaces'
+PHONE_AP_ADDRESS='10.42.0.1/24'
+PHONE_AP_BAND='bg'
+PHONE_AP_CHANNEL='6'
+PHONE_AP_CHANNEL_WIDTH='40'
+PHONE_PROXY_HOST='10.9.9.9'
+PHONE_PROXY_HOSTS='10.9.9.8 10.23.190.38'
+PHONE_PROXY_PORT='1081'
+PHONE_PROXY_USER='linkuser'
+PHONE_SECRETS='/etc/nixos/test-secrets'
+PHONE_RUNTIME_PORT_FILE='/run/test-link/proxy-port'
+EOF
+out=$(PHONE_CONFIG_FILE="$config" py "
+from phone_link import settings
+print(settings.PHONE_AP_IF)
+print(settings.PHONE_AP_CON)
+print(settings.PHONE_AP_SSID)
+print(settings.PHONE_AP_ADDRESS)
+print(settings.PHONE_AP_BAND)
+print(settings.PHONE_AP_CHANNEL)
+print(settings.PHONE_AP_CHANNEL_WIDTH)
+print(settings.PHONE_PROXY_HOST)
+print(' '.join(settings.PHONE_PROXY_HOSTS))
+print(settings.PHONE_PROXY_PORT)
+print(settings.PHONE_PROXY_USER)
+print(settings.PHONE_SECRETS)
+print(settings.PHONE_RUNTIME_PORT_FILE)
+")
+[ "$out" = "wlptest9
+TestLink
+A link with spaces
+10.42.0.1/24
+bg
+6
+40
+10.9.9.9
+10.9.9.8 10.23.190.38
+1081
+linkuser
+/etc/nixos/test-secrets
+/run/test-link/proxy-port" ] \
+  && ok "the module configuration reaches settings" \
+  || bad "the module configuration reaches settings" "$out"
+
+out=$(py "
+from phone_doctor.context import Context
+ctx = Context({'PHONE_CONFIG_FILE': '$config'})
+print(ctx.ap_if)
+print(ctx.ap_con)
+print(ctx.proxy_host)
+print(ctx.proxy_port)
+print(ctx.proxy_user)
+print(ctx.secrets_file)
+")
+[ "$out" = "wlptest9
+TestLink
+10.9.9.9
+1081
+linkuser
+/etc/nixos/test-secrets" ] \
+  && ok "the module configuration reaches the doctor" \
+  || bad "the module configuration reaches the doctor" "$out"
+
+# 6. The environment still wins over the file.
+out=$(PHONE_CONFIG_FILE="$config" PHONE_AP_IF=envif py 'from phone_link import settings
+print(settings.PHONE_AP_IF)')
+[ "$out" = envif ] && ok "the environment wins over the module file" \
+  || bad "the environment wins over the module file" "$out"
+
+# 7. ap_declarative compares the profile file with the configured AP name, not
+#    the built-in "phonelink".
+profile=$TMP/ap-profile
+printf 'TestLink\n' >"$profile"
+out=$(PHONE_CONFIG_FILE="$config" PHONE_AP_DECLARATIVE="$profile" py \
+  'from phone_link import phone
+print(phone.ap_declarative())')
+[ "$out" = True ] && ok "a non-default AP name is declarative" \
+  || bad "a non-default AP name is declarative" "$out"
+printf 'phonelink\n' >"$profile"
+out=$(PHONE_CONFIG_FILE="$config" PHONE_AP_DECLARATIVE="$profile" py \
+  'from phone_link import phone
+print(phone.ap_declarative())')
+[ "$out" = False ] && ok "the built-in name is not treated as the configured one" \
+  || bad "the built-in name is not treated as the configured one" "$out"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

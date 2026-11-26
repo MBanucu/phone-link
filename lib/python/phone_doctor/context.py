@@ -9,20 +9,28 @@ from pathlib import Path
 
 # The doctor shares the adb transport fallback with the commands: a phone that
 # rebooted keeps its address and changes only its wireless-debugging port.
-from phone_link.adb import discover, prepare, retry
+from phone_link.adb import (
+    SerialError,
+    prepare,
+    resolve_serial,
+    retry,
+)
+from phone_link.config import values as config_values
 
 
 class Context:
     def __init__(self, env: dict[str, str] | None = None) -> None:
         self.env = dict(os.environ if env is None else env)
+        self._config = config_values(self.env)
         self._serial: str | None = None
         self._serial_loaded = False
+        self._serial_error = ""
         self._profile: bool | None = None
         self._secrets: dict[str, str] | None = None
 
     # -- configuration -------------------------------------------------
     def get(self, name: str, default: str) -> str:
-        return self.env.get(name) or default
+        return self.env.get(name) or self._config.get(name) or default
 
     @property
     def ap_if(self) -> str:
@@ -53,7 +61,7 @@ class Context:
 
     @property
     def proxy_port(self) -> str:
-        """The port the laptop uses: PHONE_PROXY_PORT, the panel's choice, 1080.
+        """The port the laptop uses: PHONE_PROXY_PORT, the panel's choice, the module.
 
         The same order as `phone_link.settings.active_port`, kept here rather
         than imported because a probe may be given its own environment and the
@@ -64,14 +72,24 @@ class Context:
         explicit = self.env.get("PHONE_PROXY_PORT")
         if explicit and explicit.isdigit() and 1 <= int(explicit) <= 65535:
             return explicit
+        # The module's default comes from /etc/phone-link/env; a bad value is
+        # ignored exactly like a bad environment or runtime file.
+        configured = self._config.get("PHONE_PROXY_PORT", "1080")
+        if not configured.isdigit() or not 1 <= int(configured) <= 65535:
+            configured = "1080"
         path = Path(self.get("PHONE_RUNTIME_PORT_FILE", "/run/phone-link/proxy-port"))
         try:
             value = path.read_text().strip()
         except OSError:
-            return "1080"
+            return configured
         if value.isdigit() and 1 <= int(value) <= 65535:
             return value
-        return "1080"
+        return configured
+
+    @property
+    def proxy_host(self) -> str:
+        """The primary proxy address the module configured."""
+        return self.get("PHONE_PROXY_HOST", self.ap_ip)
 
     @property
     def proxy_user(self) -> str:
@@ -114,7 +132,11 @@ class Context:
     def run(
         self, argv: list[str], timeout: float | None = None
     ) -> subprocess.CompletedProcess[str] | None:
-        argv = prepare(argv)
+        try:
+            argv = prepare(argv)
+        except SerialError as exc:
+            self._serial_error = str(exc)
+            return None
         proc = self._spawn(argv, timeout)
         if proc is None or proc.returncode == 0:
             return proc
@@ -136,17 +158,16 @@ class Context:
     def serial(self) -> str | None:
         if not self._serial_loaded:
             self._serial_loaded = True
-            self._serial = self._first_device()
-            if self._serial is None and discover() is not None:
-                self._serial = self._first_device()
+            try:
+                self._serial = resolve_serial(self.env)
+            except SerialError as exc:
+                self._serial_error = str(exc)
         return self._serial
 
-    def _first_device(self) -> str | None:
-        for line in self.text(["adb", "devices"]).splitlines():
-            fields = line.split()
-            if len(fields) >= 2 and fields[1] == "device":
-                return fields[0]
-        return None
+    @property
+    def serial_error(self) -> str:
+        """Why no serial could be chosen, when it was ambiguous rather than absent."""
+        return self._serial_error
 
     def adb(self, *args: str, timeout: float | None = None) -> str:
         if self.serial is None:
@@ -209,7 +230,7 @@ class Context:
 
     @property
     def target_ip(self) -> str:
-        return self.ap_ip if self.profile_exists() else self.hotspot_ip
+        return self.proxy_host if self.profile_exists() else self.hotspot_ip
 
     def secrets(self) -> dict[str, str] | None:
         if self._secrets is None:

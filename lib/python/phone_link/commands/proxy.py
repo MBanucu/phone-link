@@ -161,13 +161,23 @@ def phone_proxy_start(args: list[str]) -> int:
     if not _installed(serial):
         die(f"{settings.PHONE_PROXY_PKG} is not installed; run phone-proxy-install first")
 
-    state = _state(serial)
+    dump = _dump(serial)
+    state = _field(dump, "state")
     if _running(state):
         log(f"proxy is already listening ({state})")
         return 0
     if check_only:
         log(f"proxy is not listening ({state or 'stopped'})")
         return 1
+    if not _dump_saved(dump):
+        # A fresh install has nothing to start: the bare START asks the app to
+        # resume a saved proxy, and with none it answers with no state at all.
+        # Point at the command that creates one instead of reporting a failure
+        # that reads like a broken app.
+        die(
+            "the app has no saved proxy configuration to start; run "
+            "phone-proxy-setup first (or phone-proxy-install, then setup)"
+        )
 
     log("starting the proxy over adb")
     _send(serial, START)

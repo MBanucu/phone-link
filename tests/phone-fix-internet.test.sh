@@ -9,6 +9,8 @@ SCRIPT=$ROOT/bin/phone-fix-internet
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
+# One target for every adb call; the live phone has more than one transport.
+export PHONE_SERIAL=TESTPHONE
 # The waits being tested are waits for a phone; here the phone is a stub,
 # so the polls are as short as the environment allows them to be.
 export PHONE_FIX_SETTLE=0
@@ -103,6 +105,12 @@ rm -f "$LOG/actions"
 if HOTSPOT_WORKS=1 run; then ok "hotspot path exits 0"; else bad "hotspot path exits 0" "$(cat "$LOG/out")"; fi
 grep -q 'cmd wifi start-softap' "$LOG/actions" && ok "starts the hotspot" \
   || bad "starts the hotspot" "$(cat "$LOG/actions" 2>/dev/null)"
+grep -qF "shell cmd wifi start-softap 'XPLORE 2'" "$LOG/actions" \
+  && ok "quotes the hotspot SSID as one remote argument" \
+  || bad "quotes the hotspot SSID as one remote argument" "$(cat "$LOG/actions" 2>/dev/null)"
+grep -q -- '-s TESTPHONE shell cmd wifi start-softap' "$LOG/actions" \
+  && ok "pins the hotspot command to the chosen serial" \
+  || bad "pins the hotspot command to the chosen serial" "$(cat "$LOG/actions" 2>/dev/null)"
 grep -q 'connection up XPLORE 2' "$LOG/actions" && ok "joins the saved hotspot" \
   || bad "joins the saved hotspot" "$(cat "$LOG/actions" 2>/dev/null)"
 grep -q 'internet is up over the phone hotspot' "$LOG/out" && ok "reports the hotspot uplink" \

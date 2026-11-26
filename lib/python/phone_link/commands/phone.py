@@ -1101,7 +1101,8 @@ def adb_wifi_connect(args: list[str]) -> int:
     """Connect adb to the phone over TCP."""
     if args and args[0] == "--prepare":
         log("warning: adb tcpip resets the USB gadget (the tether will blip)")
-        if status(["adb", "tcpip", settings.PHONE_ADB_PORT]) != 0:
+        serial = _serial()
+        if status(["adb", "-s", serial, "tcpip", settings.PHONE_ADB_PORT]) != 0:
             die("adb tcpip failed (cable attached?)")
         time.sleep(settings.PHONE_ADB_POLL)
 

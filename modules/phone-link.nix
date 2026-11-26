@@ -35,6 +35,32 @@ let
   effectiveHosts = lib.unique ([ cfg.proxyHost ] ++ cfg.proxyHosts);
   hostFile = "${runtimeDir}/proxy-host";
 
+  # The values the commands, the doctor and the live harness share. A plain
+  # KEY=VALUE file, no secret in it: the password stays in cfg.secretsFile and
+  # is read at run time. The scripts read the environment first, then this
+  # file, then their built-in defaults, so a one-off PHONE_* override still
+  # works and a non-default phoneLink deployment needs no repeated exports.
+  moduleEnv = ''
+    PHONE_AP_IF=${lib.escapeShellArg cfg.apInterface}
+    PHONE_AP_CON=${lib.escapeShellArg cfg.ap.name}
+    PHONE_AP_SSID=${lib.escapeShellArg cfg.ap.ssid}
+    PHONE_AP_ADDRESS=${lib.escapeShellArg cfg.ap.address}
+    PHONE_AP_BAND=${lib.escapeShellArg cfg.ap.band}
+    PHONE_AP_CHANNEL=${lib.escapeShellArg (toString cfg.ap.channel)}
+    PHONE_AP_CHANNEL_WIDTH=${lib.escapeShellArg (toString cfg.ap.channelWidth)}
+    PHONE_AP_DECLARATIVE=${lib.escapeShellArg "/etc/phone-link/ap-profile"}
+    PHONE_PROXY_HOST=${lib.escapeShellArg cfg.proxyHost}
+    PHONE_PROXY_HOSTS=${lib.escapeShellArg (lib.concatStringsSep " " cfg.proxyHosts)}
+    # PHONE_AP_IP is the old name for the phone's address on the AP; the proxy
+    # host is what the commands probe, and the pinned adb probe uses it too.
+    PHONE_AP_IP=${lib.escapeShellArg cfg.proxyHost}
+    PHONE_PROXY_PORT=${toString cfg.proxyPort}
+    PHONE_PROXY_USER=${lib.escapeShellArg cfg.proxyUser}
+    PHONE_SECRETS=${lib.escapeShellArg cfg.secretsFile}
+    PHONE_RUNTIME_DIR=${lib.escapeShellArg runtimeDir}
+    PHONE_RUNTIME_PORT_FILE=${lib.escapeShellArg portFile}
+  '';
+
   settings = ''
     {
       "log": { "level": "${cfg.logLevel}", "timestamp": true },
@@ -493,8 +519,19 @@ in
           boot.kernelModules = [ "tun" ];
 
           # `/run/phone-link` holds the port the panel chose. tmpfiles rather
-          # than RuntimeDirectory: stopping the tunnel must not forget it.
-          systemd.tmpfiles.rules = [ "d ${runtimeDir} 0755 root root -" ];
+          # than RuntimeDirectory: stopping the tunnel must not forget it. The
+          # file is written from phoneLink.proxyPort when tmpfiles runs, so the
+          # value the doctor and the scripts read is the module's own after a
+          # boot instead of whatever an older run left behind; a switch inside
+          # the running boot still wins until the next boot.
+          systemd.tmpfiles.rules = [
+            "d ${runtimeDir} 0755 root root -"
+            "f+ ${portFile} 0644 root root - ${toString cfg.proxyPort}"
+          ];
+
+          # One non-secret configuration for the commands, the doctor and the
+          # live harness; the environment still wins over it.
+          environment.etc."phone-link/env".text = moduleEnv;
         }
 
         (lib.mkIf cfg.ap.enable {
