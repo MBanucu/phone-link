@@ -34,6 +34,8 @@ let
   # host that is also listed as a fallback.
   effectiveHosts = lib.unique ([ cfg.proxyHost ] ++ cfg.proxyHosts);
   hostFile = "${runtimeDir}/proxy-host";
+  pendingHostFile = "${runtimeDir}/proxy-host.pending";
+  tunConfigFile = "/run/phone-tun/config.json";
 
   # The values the commands, the doctor and the live harness share. A plain
   # KEY=VALUE file, no secret in it: the password stays in cfg.secretsFile and
@@ -120,82 +122,41 @@ let
   # time: the host actually reachable (the toggle writes it after probing), the
   # port (the panel) and the password (root-only secrets file).  Python rather
   # than sed reads the template as JSON, so the password is never on a command
-  # line and any character in it survives; the result is root-only.
-  tunConfig = pkgs.writeScript "phone-tun-config" ''
-    #!${pkgs.python3}/bin/python3
-    import json
-    import os
-    import tempfile
-
-    template = "${singboxConfig}"
-    target = "/run/phone-tun/config.json"
-    port_file = "${portFile}"
-    host_file = "${hostFile}"
-    hosts = ${builtins.toJSON effectiveHosts}
-    fallback_host = ${builtins.toJSON cfg.proxyHost}
-    fallback_port = ${toString cfg.proxyPort}
-
-    try:
-        with open(port_file, encoding="utf-8") as f:
-            port = int(f.read().strip())
-    except (OSError, ValueError):
-        port = fallback_port
-    if not 0 < port < 65536:
-        port = fallback_port
-
-    try:
-        with open(host_file, encoding="utf-8") as f:
-            host = f.read().strip()
-    except OSError:
-        host = fallback_host
-    if host not in hosts:
-        host = fallback_host
-
-    password = os.environ["PHONE_SOCKS_PASS"]
-
-    with open(template, encoding="utf-8") as f:
-        config = json.load(f)
-    for outbound in config["outbounds"]:
-        if outbound.get("tag") == "phone":
-            outbound["server"] = host
-            outbound["server_port"] = port
-            outbound["password"] = password
-
-    directory = os.path.dirname(target)
-    os.makedirs(directory, mode=0o700, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=".config.", dir=directory)
-    try:
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
-            f.write("\n")
-        os.replace(tmp, target)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+  # line and any character in it survives; the result is root-only.  The script
+  # takes its inputs as arguments so the same generator can be tested against a
+  # temporary tree.
+  tunConfig = pkgs.writeShellScript "phone-tun-config" ''
+    exec ${pkgs.python3}/bin/python3 ${../lib/phone-tun-config.py} \
+      ${singboxConfig} \
+      ${tunConfigFile} \
+      ${lib.escapeShellArg portFile} \
+      ${lib.escapeShellArg hostFile} \
+      ${lib.escapeShellArg cfg.proxyHost} \
+      ${toString cfg.proxyPort} \
+      ${lib.escapeShellArgs effectiveHosts}
   '';
 
+  # Started and restarted by the timer. The logic lives in a plain script so the
+  # test suite can run it with stubbed systemctl and probe commands; the module
+  # only binds the paths, the declared host order and the binaries.
   toggle = pkgs.writeShellScript "phone-tun-toggle" ''
-    set -u
-    port=$(${runtimePort} ${portFile} ${toString cfg.proxyPort})
-    host=
-    for candidate in ${lib.escapeShellArgs effectiveHosts}; do
-      if ${pkgs.coreutils}/bin/timeout 3 \
-          ${pkgs.bash}/bin/bash -c "exec 3<>/dev/tcp/$candidate/$port" 2>/dev/null; then
-        host=$candidate
-        break
-      fi
-    done
-    if [ -n "$host" ]; then
-      tmp=${runtimeDir}/.proxy-host.$$
-      printf '%s\n' "$host" > "$tmp"
-      ${pkgs.coreutils}/bin/mv -f "$tmp" ${hostFile}
-      exec ${config.systemd.package}/bin/systemctl start phone-tun.service
-    fi
-    exec ${config.systemd.package}/bin/systemctl stop phone-tun.service
+    export PHONE_TUN_HOSTS=${lib.escapeShellArg (lib.concatStringsSep " " effectiveHosts)}
+    export PHONE_TUN_PORT_FILE=${lib.escapeShellArg portFile}
+    export PHONE_TUN_FALLBACK_PORT=${toString cfg.proxyPort}
+    export PHONE_TUN_HOST_FILE=${lib.escapeShellArg hostFile}
+    export PHONE_TUN_PENDING_FILE=${lib.escapeShellArg pendingHostFile}
+    export PHONE_TUN_CONFIG_FILE=${lib.escapeShellArg tunConfigFile}
+    export PHONE_TUN_RUNTIME_DIR=${lib.escapeShellArg runtimeDir}
+    export PHONE_TUN_SYSTEMCTL=${config.systemd.package}/bin/systemctl
+    export PHONE_TUN_UNIT=phone-tun.service
+    export PATH=${
+      lib.makeBinPath [
+        pkgs.bash
+        pkgs.coreutils
+        pkgs.python3
+      ]
+    }
+    exec ${pkgs.bash}/bin/bash ${../lib/phone-tun-toggle.sh}
   '';
 
   relay = pkgs.writeShellScript "phone-socks-relay" ''

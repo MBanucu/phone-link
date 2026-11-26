@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `phone-tun` kept dialing the host it started with. `phone-tun-toggle` wrote
+  the newly reachable host to `/run/phone-link/proxy-host` and then ran
+  `systemctl start phone-tun.service`, which is a no-op on a running unit, so
+  when the primary (the AP address) went away while the fallback (USB tether)
+  was still up, every flow stayed blackholed. A changed host now restarts the
+  unit, which reruns the config generator in `ExecStartPre` and points sing-box
+  at the new address. The change is confirmed on the next 5 s tick, so one
+  failed probe does not cost a reconnect and a flapping probe cannot restart the
+  tunnel in a loop; an unchanged host is left alone, the declared preference
+  order still decides the winner, and no reachable host still stops the tunnel.
+  The probe loop and the config generator moved to `lib/`, where
+  `tests/phone-tun-toggle.test.sh` runs them against stubbed systemctl and probe
+  commands.
+
 ## [0.13.2] - 2026-11-26
 
 ### Fixed

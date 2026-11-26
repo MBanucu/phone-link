@@ -94,6 +94,15 @@ behaviour is unchanged. The tether address still changes per connection, so a
 new address is a module edit; the host file only saves the rebuild when the
 reachable path switches between addresses already listed.
 
+The running tunnel does not re-read that file. Its config is rendered once in
+`ExecStartPre`, so when the selected host differs from the `phone` outbound's
+`server` the toggle restarts `phone-tun.service` instead of starting it, which
+reruns the generator and makes sing-box dial the new address. A change is
+confirmed on the next 5 s tick before that restart: one dropped probe cannot
+cost a reconnect, and a probe that flaps between two hosts cannot restart the
+tunnel every tick. A stable selection is a no-op, and the host file is written
+as soon as the probe chooses so the relay and the next start see it.
+
 ## The AP band
 
 The AP defaults to 5 GHz channel 149 at 80 MHz (`band = "a"`, `channel = 149`,
