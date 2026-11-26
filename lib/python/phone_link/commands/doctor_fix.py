@@ -57,6 +57,11 @@ MANUAL_HINTS = {
         "attach the phone over USB (or run phone-adb-wifi from a trusted host)"
     ),
     "ap_profile": "create the phonelink profile with the nmcli command in README \"One-time setup\"",
+    "ap_dhcp": "enable phoneLink.ap and rebuild (nixos-rebuild switch)",
+    "ap_noforward": "enable phoneLink.ap and rebuild (nixos-rebuild switch)",
+    "ap_noforward_rules": "reload the AP forward drop: systemctl restart phone-link-ap-noforward",
+    "ap_station": "join the phone to the AP: phone-wifi-connect",
+    "secrets_mode": "chmod 600 the secrets file (it holds PHONE_SOCKS_PASS)",
     "resolver": "pin /etc/resolv.conf via phoneLink.manageResolver and rebuild",
     "secrets": "write the secrets file with PHONE_SOCKS_PASS and PHONE_PIN (root, mode 600)",
     "ap_pass": "add PHONE_AP_PASS to the secrets file",

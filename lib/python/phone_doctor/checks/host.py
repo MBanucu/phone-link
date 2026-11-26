@@ -39,10 +39,10 @@ def check(ctx: Context) -> list[Result]:
         results.append(ok("ip_forward", "ip_forward", "1"))
     else:
         results.append(
-            fail(
+            warn(
                 "ip_forward",
                 "ip_forward",
-                f"{forward or 'unknown'} (set net.ipv4.ip_forward = 1)",
+                f"{forward or 'unknown'} (the link-only AP does not forward)",
             )
         )
 

@@ -7,6 +7,7 @@ changes state, needs root or touches a secret the user cannot read.
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 import time
@@ -56,6 +57,36 @@ def _field(number: int, text: str, index: int) -> str:
     return fields[index] if len(fields) > index else ""
 
 
+def _tether_interface() -> str:
+    """The host interface the phone's USB tether route uses.
+
+    The name is not stable across cables or re-enumerations (the live host uses
+    enp55s0u2 while the old hard-coded value was enp55s0u1), so it is derived
+    from the route to the phone's rndis0 address. PHONE_TETHER_IF overrides the
+    result, and the old name is kept only as the last resort.
+    """
+    override = os.environ.get("PHONE_TETHER_IF")
+    if override:
+        return override
+
+    serial = phone.phone_serial()
+    if serial:
+        output = capture(
+            ["adb", "-s", serial, "shell", "ip", "-4", "addr", "show", "rndis0"]
+        ).replace("\r", "")
+        address = _rndis_ip(output)
+        if address:
+            match = re.search(r"\bdev (\S+)", capture(["ip", "route", "get", address]))
+            if match:
+                return match.group(1)
+    return "enp55s0u1"
+
+
+def _rndis_ip(output: str) -> str:
+    match = re.search(r"\binet (\d+\.\d+\.\d+\.\d+)/", output)
+    return match.group(1) if match else ""
+
+
 def phone_net_status(args: list[str]) -> int:
     """One-screen overview of the link: Wi-Fi, routes, proxy, adb, phone."""
 
@@ -74,7 +105,11 @@ def phone_net_status(args: list[str]) -> int:
     )
     say(
         "tether address",
-        _field(3, capture(["ip", "-4", "-br", "addr", "show", "enp55s0u1"]), 2),
+        _field(
+            3,
+            capture(["ip", "-4", "-br", "addr", "show", _tether_interface()]),
+            2,
+        ),
     )
     say("default route", capture(["ip", "route", "show", "default"]).replace("\n", " "))
     say("resolver", _resolver())

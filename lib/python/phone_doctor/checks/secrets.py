@@ -26,6 +26,22 @@ def check(ctx: Context) -> list[Result]:
     else:
         results.append(ok("secrets", "secrets", str(ctx.secrets_file)))
 
+    try:
+        mode = ctx.secrets_file.stat().st_mode & 0o777
+    except OSError:
+        mode = None
+    if mode is not None:
+        if mode == 0o600:
+            results.append(ok("secrets_mode", "secrets mode", "600"))
+        else:
+            results.append(
+                warn(
+                    "secrets_mode",
+                    "secrets mode",
+                    f"{mode:04o} (should be 600)",
+                )
+            )
+
     if "PHONE_AP_PASS" in values:
         results.append(ok("ap_pass", "secrets", "PHONE_AP_PASS present"))
     else:

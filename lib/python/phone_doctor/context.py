@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -34,6 +33,13 @@ class Context:
         return self.get("PHONE_AP_CON", "phonelink")
 
     @property
+    def ap_declarative(self) -> bool:
+        """Whether the module declares the AP (`phoneLink.ap.enable`)."""
+        return Path(
+            self.get("PHONE_AP_DECLARATIVE", "/etc/phone-link/ap-profile")
+        ).is_file()
+
+    @property
     def ap_ip(self) -> str:
         return self.get("PHONE_AP_IP", "192.168.77.232")
 
@@ -51,17 +57,21 @@ class Context:
 
         The same order as `phone_link.settings.active_port`, kept here rather
         than imported because a probe may be given its own environment and the
-        settings module reads the process's once, at import.
+        settings module reads the process's once, at import. Neither an
+        explicit value nor the runtime file is trusted unvalidated: a typo in
+        the environment must not become a port a probe tries to reach.
         """
         explicit = self.env.get("PHONE_PROXY_PORT")
-        if explicit:
+        if explicit and explicit.isdigit() and 1 <= int(explicit) <= 65535:
             return explicit
         path = Path(self.get("PHONE_RUNTIME_PORT_FILE", "/run/phone-link/proxy-port"))
         try:
             value = path.read_text().strip()
         except OSError:
             return "1080"
-        return value if value.isdigit() else "1080"
+        if value.isdigit() and 1 <= int(value) <= 65535:
+            return value
+        return "1080"
 
     @property
     def proxy_user(self) -> str:
@@ -209,10 +219,17 @@ class Context:
             except OSError:
                 return None
             values: dict[str, str] = {}
-            for line in text.splitlines():
-                match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", line)
-                if match:
-                    values[match.group(1)] = match.group(2)
+            for raw in text.splitlines():
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip().removeprefix("export ").strip()
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                    value = value[1:-1]
+                if key:
+                    values[key] = value
             self._secrets = values
         return self._secrets
 

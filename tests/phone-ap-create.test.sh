@@ -33,6 +33,7 @@ case "$*" in
     ;;
   "connection modify "*) printf '%s\n' "$*" >>"$LOG/actions" ;;
   "-g 802-11-wireless.mode connection show phonelink") printf 'ap\n' ;;
+  "-g ipv4.method connection show phonelink") cat "$LOG/method" 2>/dev/null ;;
 esac
 EOF
 
@@ -48,8 +49,15 @@ EOF
 
 cat >"$STUBS/systemctl" <<'EOF'
 #!/usr/bin/env bash
-printf '%s\n' "$*" >>"$LOG/actions"
-if [ -f "$LOG/recreate" ]; then printf 'phonelink\n' >"$LOG/names"; fi
+case "$*" in
+  # The module's DHCP-only dnsmasq and nft forward drop.
+  "cat phone-link-ap-dhcp.service phone-link-ap-noforward.service")
+    [ -f "$LOG/units" ] ;;
+  *)
+    printf '%s\n' "$*" >>"$LOG/actions"
+    if [ -f "$LOG/recreate" ]; then printf 'phonelink\n' >"$LOG/names"; fi
+    ;;
+esac
 EOF
 
 sed -i "1s|.*|#!$BASH_BIN|" "$STUBS"/*
@@ -64,6 +72,8 @@ run() {
 
 # 1. Missing profile: created with the secret PSK and AP settings.
 : >"$LOG/names"
+: >"$LOG/units"
+printf 'manual\n' >"$LOG/method"
 rm -f "$LOG/actions"
 if run; then ok "create exits 0"; else bad "create exits 0" "$(cat "$LOG/out")"; fi
 grep -q '^connection add type wifi ifname wlp110s0 con-name phonelink' "$LOG/actions" \
@@ -79,8 +89,14 @@ grep -q '802-11-wireless.channel-width 80' "$LOG/actions" && ok "uses 80 MHz" \
   || bad "uses 80 MHz" "$(cat "$LOG/actions" 2>/dev/null)"
 grep -q 'wifi-sec.psk ap-secret' "$LOG/actions" && ok "reads the PSK from secrets" \
   || bad "reads the PSK from secrets" "$(cat "$LOG/actions" 2>/dev/null)"
+grep -q 'ipv4.method manual' "$LOG/actions" && ok "uses the manual (no NAT) method" \
+  || bad "uses the manual (no NAT) method" "$(cat "$LOG/actions" 2>/dev/null)"
+grep -q 'ipv4.method shared' "$LOG/actions" \
+  && bad "does not use the shared method" || ok "does not use the shared method"
 grep -q 'ipv4.addresses 192.168.77.1/24' "$LOG/actions" && ok "sets the AP address" \
   || bad "sets the AP address"
+grep -q 'ipv4.gateway' "$LOG/actions" && bad "sets no gateway" || ok "sets no gateway"
+grep -q 'ipv4.dns' "$LOG/actions" && bad "sets no DNS" || ok "sets no DNS"
 [ -s "$LOG/names" ] && ok "profile exists afterwards" || bad "profile exists afterwards"
 
 # 2. Existing profile: no change without --refresh.
@@ -114,11 +130,73 @@ if run --check; then bad "missing --check exits 1"; else ok "missing --check exi
 grep -q 'phonelink is missing' "$LOG/out" && ok "reports the missing profile" \
   || bad "reports the missing profile"
 
+# 4b. --check names a shared profile and the missing link-only units.
+printf 'phonelink\n' >"$LOG/names"
+printf 'shared\n' >"$LOG/method"
+rm -f "$LOG/units" "$LOG/actions"
+if run --check; then ok "shared --check still exits 0"; else bad "shared --check still exits 0"; fi
+grep -q 'ipv4.method shared (NAT)' "$LOG/out" && ok "reports the shared method" \
+  || bad "reports the shared method" "$(cat "$LOG/out")"
+grep -q 'link-only units: missing' "$LOG/out" && ok "reports the missing units" \
+  || bad "reports the missing units" "$(cat "$LOG/out")"
+[ -s "$LOG/actions" ] && bad "--check changes nothing" || ok "--check changes nothing"
+printf 'manual\n' >"$LOG/method"
+: >"$LOG/units"
+
 # 5. A missing secret is refused before any nmcli change.
 : >"$LOG/names"
 rm -f "$LOG/actions"
 if PHONE_SECRETS=$TMP/missing run; then bad "missing secret exits 1"; else ok "missing secret exits 1"; fi
 [ -s "$LOG/actions" ] && bad "missing secret changes nothing" || ok "missing secret changes nothing"
+
+# 5b. An old shared profile is rewritten as link-only, even without --refresh.
+printf 'phonelink\n' >"$LOG/names"
+printf 'shared\n' >"$LOG/method"
+: >"$LOG/units"
+rm -f "$LOG/actions"
+if run; then ok "a shared profile is rewritten"; else bad "a shared profile is rewritten" "$(cat "$LOG/out")"; fi
+grep -q '^connection modify phonelink' "$LOG/actions" && ok "modifies the shared profile" \
+  || bad "modifies the shared profile" "$(cat "$LOG/actions" 2>/dev/null)"
+grep -q 'ipv4.method manual' "$LOG/actions" && ok "rewrites it with the manual method" \
+  || bad "rewrites it with the manual method"
+grep -q 'ipv4.method shared' "$LOG/actions" && bad "never writes shared again" || ok "never writes shared again"
+grep -q 'rewriting phonelink as a link-only profile' "$LOG/out" && ok "says it is rewriting" \
+  || bad "says it is rewriting" "$(cat "$LOG/out")"
+
+# 5c. Without the module's DHCP/drop units, creation is refused: the profile
+#     would otherwise be unreachable or bring the shared NAT loop back.
+: >"$LOG/names"
+rm -f "$LOG/units" "$LOG/actions"
+if run; then bad "no link-only units exits 1"; else ok "no link-only units exits 1"; fi
+grep -q 'phoneLink.ap.enable' "$LOG/out" && ok "points at the module setting" \
+  || bad "points at the module setting" "$(cat "$LOG/out")"
+grep -q 'link-only access point needs the NixOS module' "$LOG/out" \
+  && ok "explains why it is refused" || bad "explains why it is refused" "$(cat "$LOG/out")"
+[ -s "$LOG/actions" ] && bad "the refusal changes nothing" || ok "the refusal changes nothing"
+[ -s "$LOG/names" ] && bad "the refusal creates no profile" || ok "the refusal creates no profile"
+
+# 5d. An existing shared profile is not left alone when the units are missing:
+#     the run refuses and says the profile must be deleted.
+printf 'phonelink\n' >"$LOG/names"
+printf 'shared\n' >"$LOG/method"
+rm -f "$LOG/actions"
+if run; then bad "an unfixable shared profile exits 1"; else ok "an unfixable shared profile exits 1"; fi
+grep -q 'phone-ap-delete' "$LOG/out" || grep -q 'phoneLink.ap.enable' "$LOG/out" \
+  && ok "names the way out" || bad "names the way out" "$(cat "$LOG/out")"
+[ -s "$LOG/actions" ] && bad "the refusal leaves NM alone" || ok "the refusal leaves NM alone"
+printf 'manual\n' >"$LOG/method"
+: >"$LOG/units"
+
+# 5e. --refresh without the module units refuses too, rather than silently
+#     leaving the old PSK (or the old profile) in place.
+printf 'phonelink\n' >"$LOG/names"
+rm -f "$LOG/units" "$LOG/actions"
+if run --refresh; then bad "refresh without units exits 1"; else ok "refresh without units exits 1"; fi
+grep -q 'phoneLink.ap.enable' "$LOG/out" && ok "refresh points at the module" \
+  || bad "refresh points at the module" "$(cat "$LOG/out")"
+[ -s "$LOG/actions" ] && bad "refresh without units changes nothing" \
+  || ok "refresh without units changes nothing"
+: >"$LOG/units"
 
 # 6. Declarative: --refresh restarts the ensure unit, never edits NM.
 printf 'phonelink\n' >"$PHONE_AP_DECLARATIVE"
