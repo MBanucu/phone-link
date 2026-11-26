@@ -285,7 +285,11 @@ in
     openApFirewall = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Allow DHCP and DNS from clients of the laptop access point.";
+      description = ''
+        Allow DHCP from clients of the laptop access point.  The AP does not
+        serve DNS: the phone keeps LTE as its default and resolves directly
+        over it.
+      '';
     };
 
     enableRelay = lib.mkOption {
@@ -470,11 +474,7 @@ in
 
         (lib.mkIf cfg.openApFirewall {
           networking.firewall.interfaces.${cfg.apInterface} = {
-            allowedUDPPorts = [
-              53
-              67
-            ];
-            allowedTCPPorts = [ 53 ];
+            allowedUDPPorts = [ 67 ];
           };
         })
 
