@@ -10,7 +10,7 @@ does not own the profile, because hotspot mode has none of these pieces.
 from __future__ import annotations
 
 from ..context import Context
-from ..model import Result, fail, ok, skip
+from ..model import Result, fail, ok, skip, warn
 
 SECTION = "[ap]"
 
@@ -52,6 +52,20 @@ def _station(ctx: Context) -> Result:
     ]
     if stations:
         return ok(cid, label, f"{len(stations)} on {ctx.ap_if}")
+    # The AP can be on air with its SSID and no station: the phone dropped the
+    # link and the quickest recovery is the existing connect command, not a
+    # reboot. Only claim that when the interface really advertises the SSID.
+    info = ctx.text(["iw", "dev", ctx.ap_if, "info"])
+    ssid_up = any(
+        line.strip() == f"ssid {ctx.ap_ssid}" for line in info.splitlines()
+    )
+    if ssid_up:
+        return warn(
+            cid,
+            label,
+            f"no phone associated on {ctx.ap_if}; "
+            f"run phone-wifi-connect {ctx.ap_ssid}",
+        )
     return fail(cid, label, f"no phone associated on {ctx.ap_if}")
 
 

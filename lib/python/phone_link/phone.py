@@ -15,6 +15,14 @@ import urllib.parse
 from . import adb, settings
 from .shell import capture, die, log, status
 
+# The two Android globals this phone needs to rejoin after a long AP outage.
+# They are applied only by an explicit run of `phone-wifi-reconnect`; stock
+# settings are the default and the doctor reports them without failing.
+WIFI_RECONNECT_GLOBALS = (
+    ("network_avoid_bad_wifi", "0"),
+    ("wifi_always_requested", "1"),
+)
+
 
 def _attached(network_only: bool = False) -> str | None:
     for serial, state in adb.devices().items():

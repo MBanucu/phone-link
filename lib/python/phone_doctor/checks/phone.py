@@ -6,8 +6,29 @@ import re
 
 from ..context import Context
 from ..model import Result, fail, ok, skip, warn
+from phone_link.phone import WIFI_RECONNECT_GLOBALS
 
 SECTION = "[phone]"
+
+
+def _wifi_reconnect(ctx: Context) -> Result:
+    """Report the globals that let the phone rejoin unattended.
+
+    Stock Android settings are the default and are not a failure: the doctor
+    only says that an explicit `phone-wifi-reconnect` is what changes them.
+    """
+    values = [
+        (name, ctx.adb("shell", "settings", "get", "global", name).strip(), wanted)
+        for name, wanted in WIFI_RECONNECT_GLOBALS
+    ]
+    rendered = ", ".join(f"{name}={value or 'unset'}" for name, value, _ in values)
+    if all(value == wanted for _, value, wanted in values):
+        return ok("wifi_reconnect", "wifi reconnect", f"{rendered} (recommended)")
+    return warn(
+        "wifi_reconnect",
+        "wifi reconnect",
+        f"{rendered} (run phone-wifi-reconnect to set both)",
+    )
 
 
 def _keyguard(ctx: Context) -> str:
@@ -28,10 +49,13 @@ def check(ctx: Context) -> list[Result]:
 
     if not serial:
         return results + [
+            skip("wifi_reconnect", "wifi reconnect", "no adb"),
             skip("phone_unlocked", "phone unlocked", "no adb"),
             skip("phone_address", "phone address", "no adb"),
             skip("phone_default", "phone default", "no adb"),
         ]
+
+    results.append(_wifi_reconnect(ctx))
 
     showing = _keyguard(ctx)
     if showing == "false":

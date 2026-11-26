@@ -71,6 +71,14 @@ Joins the network with WPA2 and waits until Android reports the association.
 --check only reports whether the phone is connected to the SSID.
 """
 
+USAGE_WIFI_RECONNECT = """usage: phone-wifi-reconnect [--check]
+
+Applies the two Android globals this phone needs to rejoin after a long AP
+outage: network_avoid_bad_wifi=0 and wifi_always_requested=1. Without --check
+both are written and read back; --check only reports them and exits 0 when
+both already match. Nothing is changed by the doctor or any other command.
+"""
+
 USAGE_FIX_INTERNET = """usage: phone-fix-internet [--check] [--help]
 
 Restores internet for the APK download/version check by trying mobile data,
@@ -664,6 +672,71 @@ def phone_wifi_connect(args: list[str]) -> int:
             return 0
     die(f"could not connect to {ssid} (wrong password or network not in range?)")
     return 1
+
+
+def phone_wifi_reconnect(args: list[str]) -> int:
+    """Apply or report the Android globals that make long outages recover."""
+    check_only = False
+    for value in args:
+        if value == "--check":
+            check_only = True
+        elif value in ("-h", "--help"):
+            print(USAGE_WIFI_RECONNECT, end="", file=sys.stderr)
+            return 0
+        else:
+            print(USAGE_WIFI_RECONNECT, end="", file=sys.stderr)
+            die(f"unknown argument: {value}")
+
+    serial = phone.phone_serial()
+    if not serial:
+        die("no phone attached (see adb devices)")
+
+    def current(name: str) -> str:
+        return capture(
+            ["adb", "-s", serial, "shell", "settings", "get", "global", name]
+        ).strip()
+
+    if not check_only:
+        for name, wanted in phone.WIFI_RECONNECT_GLOBALS:
+            log(f"setting {name}={wanted}")
+            status(
+                [
+                    "adb",
+                    "-s",
+                    serial,
+                    "shell",
+                    "settings",
+                    "put",
+                    "global",
+                    name,
+                    wanted,
+                ]
+            )
+
+    values = {
+        name: current(name) for name, _ in phone.WIFI_RECONNECT_GLOBALS
+    }
+    mismatched = []
+    for name, wanted in phone.WIFI_RECONNECT_GLOBALS:
+        value = values[name] or "unset"
+        if values[name] == wanted:
+            log(f"{name}: {value} (recommended)")
+        else:
+            log(f"{name}: {value} (want {wanted})")
+            mismatched.append(name)
+
+    if mismatched:
+        if check_only:
+            log("not applied (run phone-wifi-reconnect to set both)")
+        else:
+            die(
+                "could not set "
+                + ", ".join(mismatched)
+                + " (does the phone accept settings put global?)"
+            )
+        return 1
+    log("Wi-Fi reconnect globals match" if check_only else "Wi-Fi reconnect globals set")
+    return 0
 
 
 def _online() -> bool:

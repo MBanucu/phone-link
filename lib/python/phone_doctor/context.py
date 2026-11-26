@@ -41,6 +41,10 @@ class Context:
         return self.get("PHONE_AP_CON", "phonelink")
 
     @property
+    def ap_ssid(self) -> str:
+        return self.get("PHONE_AP_SSID", "PhoneLink")
+
+    @property
     def ap_declarative(self) -> bool:
         """Whether the module declares the AP (`phoneLink.ap.enable`)."""
         return Path(
