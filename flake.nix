@@ -265,6 +265,19 @@
               };
             }
           ];
+          # Autoconnect reserves the radio and must still be a link-only profile.
+          apAutoconnect = evalModule [
+            {
+              networking.networkmanager.enable = true;
+              phoneLink = {
+                enable = true;
+                ap = {
+                  enable = true;
+                  autoconnect = true;
+                };
+              };
+            }
+          ];
           # The AP's forward drop must not depend on the NixOS firewall.
           apNoFirewall = evalModule [
             {
@@ -428,6 +441,22 @@
             assert lib.assertMsg (
               apOn.networking.networkmanager.ensureProfiles.profiles.phonelink.wifi.ssid == "TestLink"
             ) "ap.ssid must reach the profile";
+            assert lib.assertMsg (
+              apOn.networking.networkmanager.ensureProfiles.profiles.phonelink.connection.autoconnect == false
+            ) "the AP must stay down until phone-ap-up by default";
+            assert lib.assertMsg (
+              apAutoconnect.networking.networkmanager.ensureProfiles.profiles.phonelink.connection.autoconnect
+              == true
+            ) "ap.autoconnect must reach the profile";
+            assert lib.assertMsg (
+              apAutoconnect.networking.networkmanager.ensureProfiles.profiles.phonelink.ipv4.method == "manual"
+            ) "ap.autoconnect must not change the link-only IPv4 method";
+            assert lib.assertMsg (
+              !(apAutoconnect.networking.networkmanager.ensureProfiles.profiles.phonelink.ipv4 ? gateway)
+            ) "ap.autoconnect must not install a default gateway";
+            assert lib.assertMsg (
+              !(apAutoconnect.networking.networkmanager.ensureProfiles.profiles.phonelink.ipv4 ? dns)
+            ) "ap.autoconnect must not advertise DNS";
             assert lib.assertMsg (
               apOn.networking.networkmanager.ensureProfiles.profiles.phonelink.ipv4.address1 == "192.168.99.1/24"
             ) "ap.address must reach the profile";
