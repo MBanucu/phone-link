@@ -42,6 +42,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the phone's listeners — and `proxy_request` follows a switch without an
   environment variable.
 
+### Changed
+
+- The laptop access point ran on 2.4 GHz channel 1 at 20 MHz, in the most
+  crowded part of the band, which is where the phone's TX retries and the
+  laptop↔phone RTT came from. `phoneLink.ap` now defaults to 5 GHz channel 149
+  at 80 MHz (`band = "a"`, `channel = 149`, `channelWidth = 80`). 149 is
+  non-DFS and one of the 5 GHz channels this Intel 8265 allows an AP to beacon
+  on; `iw phy phy0 info` marks 36/44 `no IR` under its self-managed (LAR)
+  regulatory domain. `phone-ap-create` writes the same band, channel and width
+  for the non-declarative profile, and `channelWidth = 0` lets NetworkManager
+  choose the width instead.
+
 ### Fixed
 
 - The PhoneLink AP is a link, not the phone's internet uplink. The declarative

@@ -61,7 +61,7 @@ stopped proxy app cannot blackhole traffic.
 | `phoneLink.ap.enable` | `false` | declare the AP profile from `PHONE_AP_PASS` (requires `phoneLink.enable`) |
 | `phoneLink.ap.name` | `phonelink` | NetworkManager connection name |
 | `phoneLink.ap.ssid` | `PhoneLink` | SSID of the laptop access point |
-| `phoneLink.ap.band` / `channel` | `bg` / `1` | 802.11 band and channel |
+| `phoneLink.ap.band` / `channel` / `channelWidth` | `a` / `149` / `80` | 802.11 band, channel and AP channel width (5 GHz, non-DFS) |
 | `phoneLink.ap.address` | `192.168.77.1/24` | IPv4 address of the AP interface |
 | `phoneLink.ap.dhcpRange` | `.10–.254` of the AP /24, 3600 s | DHCP range and lease time; the AP sends no router or DNS option |
 | `phoneLink.proxyHost` | `192.168.77.232` | address of the phone's SOCKS proxy |
@@ -84,9 +84,16 @@ NetworkManager's `manual` method. A separate dnsmasq answers DHCP without a
 router or DNS option, and forwarded packets entering the AP interface are
 dropped in a dedicated nftables table. The phone therefore has no internet path
 through the laptop: Android should fail validation on the AP and keep mobile
-data as its default network, instead of looping every byte over the 2.4 GHz link
+data as its default network, instead of looping every byte over the AP link
 twice. The laptop→`192.168.77.232` direction is output, not forwarding, so the
 tunnel still reaches the proxy.
+
+The AP defaults to 5 GHz channel 149 at 80 MHz. 149 is non-DFS and one of the
+channels this Intel 8265 allows for an AP; its self-managed (LAR) regulatory
+domain marks 36/44 `no IR`. `channelWidth = 0` lets NetworkManager choose the
+width (NetworkManager 1.50+ supports the setting; 2.4 GHz is capped at 40 MHz).
+The hand-made profile from `phone-ap-create` uses the same band, channel and
+width.
 
 The port is the one setting that is not a rebuild: `phoneLink.proxyPort` is
 the default, and `phone-proxy-switch` (or the panel's **Proxy port** page)
@@ -139,7 +146,7 @@ Or straight from the checkout: `./bin/phone-net-status`.
 | `phone-wifi-forget` | forget a saved network, default PhoneLink (`--check`, `--yes`) |
 | `phone-wifi-concurrency` | report whether Wi-Fi client and hotspot can run together (STA+AP), read-only; exit 2 if the phone does not say |
 | `phone-unlock` | unlock the lock screen with `PHONE_PIN` from the secrets file (`--check` only reports locked/unlocked) |
-| `phone-ap-create` | create the `phonelink` AP profile from the root-only `PHONE_AP_PASS` secret (`--refresh` rewrites it after a PSK change, `--check` reports) |
+| `phone-ap-create` | create the `phonelink` AP profile on 5 GHz channel 149 at 80 MHz from the root-only `PHONE_AP_PASS` secret (`--refresh` rewrites it after a PSK change, `--check` reports) |
 | `phone-ap-delete` | delete the `phonelink` AP profile from NetworkManager, bringing it down first if active (`--check` reports, `--yes` skips the prompt; a declared profile returns at the next boot) |
 | `phone-ap-up` | preflight the radio, then `nmcli connection up phonelink` |
 | `phone-ap-down` | drop the AP and rejoin the phone's hotspot |

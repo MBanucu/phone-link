@@ -158,15 +158,38 @@ in
       };
 
       band = lib.mkOption {
-        type = lib.types.str;
-        default = "bg";
-        description = "802.11 band (bg or a).";
+        type = lib.types.enum [
+          "a"
+          "bg"
+        ];
+        default = "a";
+        description = "802.11 band: a for 5 GHz, bg for 2.4 GHz.";
       };
 
       channel = lib.mkOption {
         type = lib.types.ints.between 1 196;
-        default = 1;
-        description = "802.11 channel.";
+        default = 149;
+        description = ''
+          802.11 channel. 149 is a non-DFS 5 GHz channel that this Intel 8265
+          allows for an AP; 36 and 44 are the other usual non-DFS choices, but
+          the card's self-managed regulatory domain currently marks them
+          "no IR", so they cannot beacon.
+        '';
+      };
+
+      channelWidth = lib.mkOption {
+        type = lib.types.enum [
+          0
+          20
+          40
+          80
+        ];
+        default = 80;
+        description = ''
+          AP channel width in MHz: 0 (auto), 20, 40 or 80. NetworkManager 1.50+
+          exposes this as 802-11-wireless.channel-width; 80 MHz needs an
+          explicit channel, and 2.4 GHz can be at most 40 MHz.
+        '';
       };
 
       address = lib.mkOption {
@@ -320,6 +343,10 @@ in
           assertion = !cfg.ap.enable || config.networking.networkmanager.enable;
           message = "phoneLink.ap.enable requires networking.networkmanager.enable = true";
         }
+        {
+          assertion = !cfg.ap.enable || cfg.ap.band != "bg" || cfg.ap.channelWidth <= 40;
+          message = "phoneLink.ap.channelWidth must be 0, 20 or 40 when phoneLink.ap.band is bg";
+        }
       ];
     }
     (lib.mkIf cfg.enable (
@@ -381,6 +408,11 @@ in
                 ssid = cfg.ap.ssid;
                 band = cfg.ap.band;
                 channel = cfg.ap.channel;
+              }
+              // lib.optionalAttrs (cfg.ap.channelWidth != 0) {
+                # 0 is NetworkManager's "auto"; leave the key out rather than
+                # writing a value older NetworkManagers do not know.
+                "channel-width" = cfg.ap.channelWidth;
               };
               wifi-security = {
                 key-mgmt = "wpa-psk";

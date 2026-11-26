@@ -22,6 +22,9 @@ PHONE_AP_CON = _env("PHONE_AP_CON", "phonelink")
 PHONE_AP_SSID = _env("PHONE_AP_SSID", "PhoneLink")
 PHONE_AP_IF = _env("PHONE_AP_IF", "wlp110s0")
 PHONE_AP_ADDRESS = _env("PHONE_AP_ADDRESS", "192.168.77.1/24")
+PHONE_AP_BAND = _env("PHONE_AP_BAND", "a")
+PHONE_AP_CHANNEL = _env("PHONE_AP_CHANNEL", "149")
+PHONE_AP_CHANNEL_WIDTH = _env("PHONE_AP_CHANNEL_WIDTH", "80")
 PHONE_AP_DECLARATIVE = _env("PHONE_AP_DECLARATIVE", "/etc/phone-link/ap-profile")
 PHONE_AP_ENSURE_UNIT = _env(
     "PHONE_AP_ENSURE_UNIT", "NetworkManager-ensure-profiles.service"
