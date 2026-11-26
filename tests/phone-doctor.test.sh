@@ -486,7 +486,11 @@ grep -q 'ok    flake update.*up to date (aaaaaaaaaaaa)' "$LOG/out" \
 if run; then ok "an unreachable remote still exits 0"; else bad "an unreachable remote still exits 0"; fi
 grep -q 'skip  flake update.*unreachable' "$LOG/out" \
   && ok "skips an unreachable remote" || bad "skips an unreachable remote" "$(cat "$LOG/out")"
-unset PHONE_NIXOS_DIR PHONE_FLAKE_SRC
+# Keep the fixture environment for the rest of the suite: with no lock file the
+# flake check is a skip, so a live /etc/nixos (with whatever the host has
+# repinned) can never turn a later ready-state case into a warning.
+rm -f "$TMP/nixos/flake.lock"
+export PHONE_NIXOS_DIR=$TMP/nixos PHONE_FLAKE_SRC=$TMP/no-src
 
 # 15. --analyze prints only the problems, as stable ids.
 fresh_state
