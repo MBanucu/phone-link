@@ -5,6 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `phone-proxy-setup --max-connections N` sets the proxy app's SOCKS connection
+  ceiling (16..1024) as the `max_connections` extra. Omitting the option sends
+  no extra, so the app keeps its saved value — 256 on a fresh install — and app
+  builds that do not know the setting keep working. `--check` reports the
+  ceiling the app prints, `<unknown>` when it prints none, and only fails a
+  mismatch when a ceiling was asked for.
+
 ## [0.13.3] - 2026-11-26
 
 ### Fixed
