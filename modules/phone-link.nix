@@ -29,6 +29,12 @@ let
     printf '%s' "$port"
   '';
 
+  # The first address is the configured primary; the rest are fallbacks tried
+  # in the order they are declared. lib.unique keeps that order and removes a
+  # host that is also listed as a fallback.
+  effectiveHosts = lib.unique ([ cfg.proxyHost ] ++ cfg.proxyHosts);
+  hostFile = "${runtimeDir}/proxy-host";
+
   settings = ''
     {
       "log": { "level": "${cfg.logLevel}", "timestamp": true },
@@ -61,8 +67,8 @@ let
         {
           "type": "socks",
           "tag": "phone",
-          "server": "${cfg.proxyHost}",
-          "server_port": @PHONE_SOCKS_PORT@,
+          "server": "@PHONE_SOCKS_HOST@",
+          "server_port": "@PHONE_SOCKS_PORT@",
           "version": "5",
           "username": "${cfg.proxyUser}",
           "password": "@PHONE_SOCKS_PASS@"
@@ -81,21 +87,83 @@ let
   '';
   singboxConfig = pkgs.writeText "phone-tun.json" settings;
 
-  # The store config has placeholders for the two things that change at run
-  # time: the password (root-only secrets file) and the port (the panel).
-  tunConfig = pkgs.writeShellScript "phone-tun-config" ''
-    port=$(${runtimePort} ${portFile} ${toString cfg.proxyPort})
-    ${pkgs.gnused}/bin/sed \
-      -e "s|@PHONE_SOCKS_PASS@|$PHONE_SOCKS_PASS|" \
-      -e "s|@PHONE_SOCKS_PORT@|$port|" \
-      ${singboxConfig} > /run/phone-tun/config.json
+  # The store config has placeholders for the three things that change at run
+  # time: the host actually reachable (the toggle writes it after probing), the
+  # port (the panel) and the password (root-only secrets file).  Python rather
+  # than sed reads the template as JSON, so the password is never on a command
+  # line and any character in it survives; the result is root-only.
+  tunConfig = pkgs.writeScript "phone-tun-config" ''
+    #!${pkgs.python3}/bin/python3
+    import json
+    import os
+    import tempfile
+
+    template = "${singboxConfig}"
+    target = "/run/phone-tun/config.json"
+    port_file = "${portFile}"
+    host_file = "${hostFile}"
+    hosts = ${builtins.toJSON effectiveHosts}
+    fallback_host = ${builtins.toJSON cfg.proxyHost}
+    fallback_port = ${toString cfg.proxyPort}
+
+    try:
+        with open(port_file, encoding="utf-8") as f:
+            port = int(f.read().strip())
+    except (OSError, ValueError):
+        port = fallback_port
+    if not 0 < port < 65536:
+        port = fallback_port
+
+    try:
+        with open(host_file, encoding="utf-8") as f:
+            host = f.read().strip()
+    except OSError:
+        host = fallback_host
+    if host not in hosts:
+        host = fallback_host
+
+    password = os.environ["PHONE_SOCKS_PASS"]
+
+    with open(template, encoding="utf-8") as f:
+        config = json.load(f)
+    for outbound in config["outbounds"]:
+        if outbound.get("tag") == "phone":
+            outbound["server"] = host
+            outbound["server_port"] = port
+            outbound["password"] = password
+
+    directory = os.path.dirname(target)
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".config.", dir=directory)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2)
+            f.write("\n")
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
   '';
 
   toggle = pkgs.writeShellScript "phone-tun-toggle" ''
     set -u
     port=$(${runtimePort} ${portFile} ${toString cfg.proxyPort})
-    if ${pkgs.coreutils}/bin/timeout 3 \
-        ${pkgs.bash}/bin/bash -c "exec 3<>/dev/tcp/${cfg.proxyHost}/$port" 2>/dev/null; then
+    host=
+    for candidate in ${lib.escapeShellArgs effectiveHosts}; do
+      if ${pkgs.coreutils}/bin/timeout 3 \
+          ${pkgs.bash}/bin/bash -c "exec 3<>/dev/tcp/$candidate/$port" 2>/dev/null; then
+        host=$candidate
+        break
+      fi
+    done
+    if [ -n "$host" ]; then
+      tmp=${runtimeDir}/.proxy-host.$$
+      printf '%s\n' "$host" > "$tmp"
+      ${pkgs.coreutils}/bin/mv -f "$tmp" ${hostFile}
       exec ${config.systemd.package}/bin/systemctl start phone-tun.service
     fi
     exec ${config.systemd.package}/bin/systemctl stop phone-tun.service
@@ -103,10 +171,15 @@ let
 
   relay = pkgs.writeShellScript "phone-socks-relay" ''
     port=$(${runtimePort} ${portFile} ${toString cfg.proxyPort})
+    host=$(${pkgs.coreutils}/bin/cat ${hostFile} 2>/dev/null || true)
+    case "$host" in
+      ${lib.concatMapStringsSep "|" (h: lib.escapeShellArg h) effectiveHosts}) ;;
+      *) host=${lib.escapeShellArg cfg.proxyHost} ;;
+    esac
     exec ${pkgs.gost}/bin/gost \
       -L socks5://127.0.0.1:${toString cfg.relaySocksPort} \
       -L http://127.0.0.1:${toString cfg.relayHttpPort} \
-      -F "socks5://${cfg.proxyUser}:$PHONE_SOCKS_PASS@${cfg.proxyHost}:$port"
+      -F "socks5://${cfg.proxyUser}:$PHONE_SOCKS_PASS@$host:$port"
   '';
 
   # The AP is a link, not an uplink.  NetworkManager's "shared" method ran
@@ -224,6 +297,27 @@ in
       type = lib.types.str;
       default = "192.168.77.232";
       description = "Address the phone's SOCKS proxy listens on.";
+    };
+
+    proxyHosts = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      description = ''
+        Additional addresses tried in order after `proxyHost`; e.g. the USB
+        tether address `10.23.190.38`.  The first one that answers becomes the
+        runtime host until the next probe finds another.
+      '';
+    };
+
+    effectiveProxyHosts = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      internal = true;
+      readOnly = true;
+      default = effectiveHosts;
+      description = ''
+        `proxyHost` followed by `proxyHosts`, in order and without duplicates.
+        The scripts and checks read this instead of repeating the merge.
+      '';
     };
 
     proxyPort = lib.mkOption {
@@ -358,6 +452,8 @@ in
             # Started and stopped by phone-tun-toggle.service, never at boot.
             serviceConfig = {
               RuntimeDirectory = "phone-tun";
+              RuntimeDirectoryMode = "0700";
+              UMask = "0077";
               EnvironmentFile = cfg.secretsFile;
               ExecStartPre = tunConfig;
               ExecStart = "${pkgs.sing-box}/bin/sing-box run -c /run/phone-tun/config.json";

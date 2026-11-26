@@ -227,6 +227,31 @@
             }
           ];
           off = evalModule [ ];
+          fallbackOn = evalModule [
+            {
+              phoneLink = {
+                enable = true;
+                proxyHost = "10.9.9.9";
+                proxyHosts = [
+                  "10.23.190.38"
+                  "10.9.9.8"
+                ];
+              };
+            }
+          ];
+          dedupOn = evalModule [
+            {
+              phoneLink = {
+                enable = true;
+                proxyHost = "10.9.9.9";
+                proxyHosts = [
+                  "10.23.190.38"
+                  "10.9.9.8"
+                  "10.9.9.9"
+                ];
+              };
+            }
+          ];
           apOn = evalModule [
             {
               networking.networkmanager.enable = true;
@@ -346,6 +371,29 @@
               on.systemd.timers.phone-tun-toggle.timerConfig.OnBootSec == "20s"
             ) "the probe must not fire before the network is up";
             assert lib.assertMsg (
+              on.systemd.services.phone-tun.serviceConfig.UMask == "0077"
+            ) "the tunnel's generated config must stay root-only";
+            assert lib.assertMsg (
+              on.systemd.services.phone-tun.serviceConfig.RuntimeDirectoryMode == "0700"
+            ) "the tunnel's runtime directory must stay root-only";
+            assert lib.assertMsg (
+              on.phoneLink.effectiveProxyHosts == [ "10.9.9.9" ]
+            ) "proxyHost must be the only effective host by default";
+            assert lib.assertMsg (
+              fallbackOn.phoneLink.effectiveProxyHosts == [
+                "10.9.9.9"
+                "10.23.190.38"
+                "10.9.9.8"
+              ]
+            ) "proxyHosts must keep their declared order after proxyHost";
+            assert lib.assertMsg (
+              dedupOn.phoneLink.effectiveProxyHosts == [
+                "10.9.9.9"
+                "10.23.190.38"
+                "10.9.9.8"
+              ]
+            ) "effectiveProxyHosts must not repeat proxyHost";
+            assert lib.assertMsg (
               on.networking.firewall.interfaces.wlptest0.allowedUDPPorts == [ 67 ]
             ) "the AP interface must allow DHCP";
             assert lib.assertMsg (
@@ -446,20 +494,25 @@
               !(on.networking.networkmanager.ensureProfiles.profiles ? phonelink)
             ) "the AP profile must be opt-in";
             pkgs.runCommand "phone-link-module-check" { } ''
-              grep -q '"server": "10.9.9.9"' ${tunnelConfig}
-              grep -q '"server_port": @PHONE_SOCKS_PORT@' ${tunnelConfig}
+              grep -q '"server": "@PHONE_SOCKS_HOST@"' ${tunnelConfig}
+              grep -q '"server_port": "@PHONE_SOCKS_PORT@"' ${tunnelConfig}
               grep -q '"interface_name": "phone-tun"' ${tunnelConfig}
               grep -q '"password": "@PHONE_SOCKS_PASS@"' ${tunnelConfig}
               grep -qF 'sing-box run -c /run/phone-tun/config.json' \
                 ${pkgs.writeText "phone-tun-exec-start" on.systemd.services.phone-tun.serviceConfig.ExecStart}
               # The port is not baked into the units: each one reads the file the
               # panel writes, with phoneLink.proxyPort as its fallback.
-              grep -qF '/run/phone-link/proxy-port 1081' \
+              grep -qF '/run/phone-link/proxy-port' \
                 ${on.systemd.services.phone-tun.serviceConfig.ExecStartPre}
               grep -qF '/run/phone-link/proxy-port 1081' \
                 ${on.systemd.services.phone-tun-toggle.serviceConfig.ExecStart}
               grep -qF '/run/phone-link/proxy-port 1080' \
                 ${relayOn.systemd.services.phone-socks-relay.serviceConfig.ExecStart}
+              # The toggle probes in declared order and records the winner for
+              # phone-tun-config and the relay.
+              toggle=${fallbackOn.systemd.services.phone-tun-toggle.serviceConfig.ExecStart}
+              grep -qF '/run/phone-link/proxy-host' "$toggle"
+              grep -qF 'for candidate in 10.9.9.9 10.23.190.38 10.9.9.8; do' "$toggle"
               touch $out
             '';
 
