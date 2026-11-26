@@ -71,6 +71,12 @@ grep -q '^connection add type wifi ifname wlp110s0 con-name phonelink' "$LOG/act
 grep -q 'ssid PhoneLink' "$LOG/actions" && ok "uses the AP SSID" || bad "uses the AP SSID"
 grep -q '802-11-wireless.mode ap' "$LOG/actions" && ok "sets AP mode" \
   || bad "sets AP mode"
+grep -q '802-11-wireless.band a' "$LOG/actions" && ok "uses the 5 GHz band" \
+  || bad "uses the 5 GHz band" "$(cat "$LOG/actions" 2>/dev/null)"
+grep -q '802-11-wireless.channel 149' "$LOG/actions" && ok "uses channel 149" \
+  || bad "uses channel 149" "$(cat "$LOG/actions" 2>/dev/null)"
+grep -q '802-11-wireless.channel-width 80' "$LOG/actions" && ok "uses 80 MHz" \
+  || bad "uses 80 MHz" "$(cat "$LOG/actions" 2>/dev/null)"
 grep -q 'wifi-sec.psk ap-secret' "$LOG/actions" && ok "reads the PSK from secrets" \
   || bad "reads the PSK from secrets" "$(cat "$LOG/actions" 2>/dev/null)"
 grep -q 'ipv4.addresses 192.168.77.1/24' "$LOG/actions" && ok "sets the AP address" \
@@ -91,6 +97,12 @@ rm -f "$LOG/actions"
 if run --refresh; then ok "--refresh exits 0"; else bad "--refresh exits 0" "$(cat "$LOG/out")"; fi
 grep -q '^connection modify phonelink' "$LOG/actions" && ok "modifies the profile" \
   || bad "modifies the profile" "$(cat "$LOG/actions" 2>/dev/null)"
+grep -q '802-11-wireless.band a' "$LOG/actions" && ok "--refresh keeps the 5 GHz band" \
+  || bad "--refresh keeps the 5 GHz band"
+grep -q '802-11-wireless.channel 149' "$LOG/actions" && ok "--refresh keeps channel 149" \
+  || bad "--refresh keeps channel 149"
+grep -q '802-11-wireless.channel-width 80' "$LOG/actions" && ok "--refresh keeps 80 MHz" \
+  || bad "--refresh keeps 80 MHz"
 grep -q 'wifi-sec.psk ap-secret' "$LOG/actions" && ok "--refresh updates the PSK" \
   || bad "--refresh updates the PSK"
 

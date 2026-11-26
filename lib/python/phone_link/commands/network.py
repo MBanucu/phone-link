@@ -36,8 +36,10 @@ USAGE_AP_CREATE = """usage: phone-ap-create [--refresh] [--check]
 
 Creates the NetworkManager AP profile phonelink with the SSID, WPA2 PSK
 and address from PHONE_AP_SSID, PHONE_AP_PASS (in the secrets file) and
-PHONE_AP_ADDRESS. The PSK stays out of the Nix store. --refresh rewrites an
-existing profile, e.g. after rotating the password; --check only reports.
+PHONE_AP_ADDRESS, on 5 GHz channel 149 at 80 MHz (PHONE_AP_BAND,
+PHONE_AP_CHANNEL and PHONE_AP_CHANNEL_WIDTH override those). The PSK stays
+out of the Nix store. --refresh rewrites an existing profile, e.g. after
+rotating the password; --check only reports.
 
 When phoneLink.ap declares the profile, --refresh restarts the
 NetworkManager-ensure-profiles unit instead of editing NetworkManager.
@@ -371,9 +373,11 @@ def phone_ap_create(args: list[str]) -> int:
         "802-11-wireless.mode",
         "ap",
         "802-11-wireless.band",
-        "bg",
+        settings.PHONE_AP_BAND,
         "802-11-wireless.channel",
-        "1",
+        settings.PHONE_AP_CHANNEL,
+        "802-11-wireless.channel-width",
+        settings.PHONE_AP_CHANNEL_WIDTH,
         "wifi-sec.key-mgmt",
         "wpa-psk",
         "wifi-sec.psk",

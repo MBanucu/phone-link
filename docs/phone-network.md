@@ -21,7 +21,8 @@ tether route removed, `https://1.1.1.1` and `https://example.com` both time out
 AP mode:
 
 ```
-laptop wlp110s0   192.168.77.1/24   NetworkManager "manual" + DHCP-only dnsmasq
+laptop wlp110s0   192.168.77.1/24   NetworkManager "manual" + DHCP-only dnsmasq,
+                                    5 GHz ch 149/80 MHz
 phone  wlan0      192.168.77.232     DHCP reservation, proxy binds this address
 ```
 
@@ -37,6 +38,24 @@ and sshfs are unaffected.
 The tether address is assigned per connection (it has been `172.26.192.42`,
 `10.207.119.29` and `10.186.76.251`); the hotspot and AP addresses below are
 stable.
+
+## The AP band
+
+The AP defaults to 5 GHz channel 149 at 80 MHz (`band = "a"`, `channel = 149`,
+`channelWidth = 80`). It used to be 2.4 GHz channel 1 at 20 MHz, the most
+crowded part of the band here.
+
+Channel 149 is non-DFS and one of the few 5 GHz channels this Intel 8265 lets
+an AP beacon on. `iw phy phy0 info` marks 36/44 `(no IR)` under the card's
+self-managed (LAR) regulatory domain, and every DFS channel (52-144) as
+`(no IR, radar detection)`; 149-165 carry no such flag. `iw reg get` allows
+80 MHz on 5735-5835, so channel 149 at 80 MHz fits 5735-5815. The width is
+`802-11-wireless.channel-width`, which NetworkManager exposes from 1.50 on.
+
+The single-radio constraint in trap 4 still holds: the card cannot be a client
+and an AP on different channels. In AP mode that is exactly the intended case —
+the phone is the client and the laptop's uplink is `phone-tun` — so the AP owns
+the radio and needs no client link of its own.
 
 ## How the proxy gets out over cellular
 

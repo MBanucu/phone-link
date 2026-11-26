@@ -427,6 +427,15 @@
             assert lib.assertMsg (
               !(on.systemd.services ? phone-link-ap-noforward)
             ) "the AP forward drop must be opt-in";
+            assert lib.assertMsg (
+              apOn.networking.networkmanager.ensureProfiles.profiles.phonelink.wifi.band == "a"
+            ) "the AP must default to 5 GHz";
+            assert lib.assertMsg (
+              apOn.networking.networkmanager.ensureProfiles.profiles.phonelink.wifi.channel == 149
+            ) "the AP must default to the non-DFS 5 GHz channel 149";
+            assert lib.assertMsg (
+              apOn.networking.networkmanager.ensureProfiles.profiles.phonelink.wifi."channel-width" == 80
+            ) "the AP must default to 80 MHz";
             assert lib.assertMsg
               (lib.hasInfix "phonelink.nmconnection" apOn.systemd.services.NetworkManager-ensure-profiles.script)
               "ensure-profiles must write the AP keyfile";
