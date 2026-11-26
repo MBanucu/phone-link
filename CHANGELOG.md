@@ -44,6 +44,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The PhoneLink AP is a link, not the phone's internet uplink. The declarative
+  profile used NetworkManager's `shared` method, which ran dnsmasq with a router
+  and DNS option and installed NAT and forwarding, so Android validated the AP
+  and sent every non-proxy flow through the laptop and back over the same 2.4
+  GHz link. The profile is `manual` now: the `192.168.77.0/24` address and
+  connected route stay, a `phone-link-ap-dhcp` unit answers DHCP only (no router
+  or DNS option; `phoneLink.ap.dhcpRange` sets the range and lease time), and a
+  `phone-link-ap-noforward` unit drops forwarded packets entering the AP
+  interface in its own nftables table, so the drop also holds with the NixOS
+  firewall disabled and does not depend on its backend. The same
+  `/etc/NetworkManager/dnsmasq-shared.d` drop-ins are read, so the phone's
+  `dhcp-host` reservation keeps working. The phone now has no internet path
+  through the laptop and keeps mobile data as its default network; the
+  laptop→`192.168.77.232` proxy path is output, not forwarding, and is
+  unchanged.
+
 - The doctor's one cached answer about releases is named after the repository
   it is about. It was a single file, so pointing `PHONE_PROXY_REPO` at a fork —
   or at the repository the app lived in before it had one of its own — could

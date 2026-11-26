@@ -240,6 +240,17 @@
               };
             }
           ];
+          # The AP's forward drop must not depend on the NixOS firewall.
+          apNoFirewall = evalModule [
+            {
+              networking.networkmanager.enable = true;
+              networking.firewall.enable = false;
+              phoneLink = {
+                enable = true;
+                ap.enable = true;
+              };
+            }
+          ];
           relayOn = evalModule [
             {
               phoneLink = {
@@ -375,6 +386,50 @@
             assert lib.assertMsg (
               apOn.networking.networkmanager.ensureProfiles.profiles.phonelink.ipv4.address1 == "192.168.99.1/24"
             ) "ap.address must reach the profile";
+            assert lib.assertMsg (
+              apOn.networking.networkmanager.ensureProfiles.profiles.phonelink.ipv4.method == "manual"
+            ) "the AP profile must not use NetworkManager's shared (NAT/forwarding) method";
+            assert lib.assertMsg (
+              !(apOn.networking.networkmanager.ensureProfiles.profiles.phonelink.ipv4 ? gateway)
+            ) "the AP profile must not install a default gateway";
+            assert lib.assertMsg (
+              !(apOn.networking.networkmanager.ensureProfiles.profiles.phonelink.ipv4 ? dns)
+            ) "the AP profile must not advertise DNS";
+            assert lib.assertMsg (
+              apOn.systemd.services ? phone-link-ap-dhcp
+            ) "ap.enable must run its own DHCP server";
+            assert lib.assertMsg
+              (lib.hasInfix "--port=0" apOn.systemd.services.phone-link-ap-dhcp.serviceConfig.ExecStart)
+              "the AP's dnsmasq must serve DHCP only, not DNS";
+            assert lib.assertMsg
+              (lib.hasInfix "--dhcp-range=192.168.99.10,192.168.99.254,3600" apOn.systemd.services.phone-link-ap-dhcp.serviceConfig.ExecStart)
+              "the DHCP range must follow ap.address";
+            assert lib.assertMsg
+              (lib.hasInfix "--dhcp-option=option:router" apOn.systemd.services.phone-link-ap-dhcp.serviceConfig.ExecStart)
+              "the DHCP server must not send a router option";
+            assert lib.assertMsg
+              (lib.hasInfix "--dhcp-option=option:dns-server" apOn.systemd.services.phone-link-ap-dhcp.serviceConfig.ExecStart)
+              "the DHCP server must not send a DNS option";
+            assert lib.assertMsg
+              (lib.hasInfix "--interface=wlp110s0" apOn.systemd.services.phone-link-ap-dhcp.serviceConfig.ExecStart)
+              "the DHCP server must listen on the AP interface";
+            assert lib.assertMsg
+              (lib.hasInfix "--conf-dir=/etc/NetworkManager/dnsmasq-shared.d" apOn.systemd.services.phone-link-ap-dhcp.serviceConfig.ExecStart)
+              "the DHCP server must read the existing dhcp-host reservations";
+            assert lib.assertMsg (lib.hasInfix "iifname \"wlp110s0\" drop" apOn.phoneLink.ap.noForwardRules)
+              "the AP must drop forwarded traffic";
+            assert lib.assertMsg (
+              apOn.systemd.services ? phone-link-ap-noforward
+            ) "ap.enable must install the AP forward drop";
+            assert lib.assertMsg (
+              apNoFirewall.systemd.services ? phone-link-ap-noforward
+            ) "the AP forward drop must not depend on networking.firewall.enable";
+            assert lib.assertMsg (
+              !(on.systemd.services ? phone-link-ap-dhcp)
+            ) "the AP DHCP server must be opt-in";
+            assert lib.assertMsg (
+              !(on.systemd.services ? phone-link-ap-noforward)
+            ) "the AP forward drop must be opt-in";
             assert lib.assertMsg
               (lib.hasInfix "phonelink.nmconnection" apOn.systemd.services.NetworkManager-ensure-profiles.script)
               "ensure-profiles must write the AP keyfile";

@@ -108,6 +108,29 @@ let
       -L http://127.0.0.1:${toString cfg.relayHttpPort} \
       -F "socks5://${cfg.proxyUser}:$PHONE_SOCKS_PASS@${cfg.proxyHost}:$port"
   '';
+
+  # The AP is a link, not an uplink.  NetworkManager's "shared" method ran
+  # dnsmasq with a router and DNS option and installed NAT, which let the phone
+  # validate the AP and send its internet traffic through the laptop and back
+  # over the same 2.4 GHz link.  The profile is "manual" now: it keeps the
+  # address and the connected route, and this dnsmasq answers DHCP only, with
+  # no router and no DNS option.  Forwarded traffic from the AP is dropped in
+  # its own nftables table, so the rule also holds when the NixOS firewall is
+  # disabled and does not depend on its backend.
+  apSubnet = lib.concatStringsSep "." (
+    lib.take 3 (lib.splitString "." (lib.head (lib.splitString "/" cfg.ap.address)))
+  );
+  apNoForwardRules = ''
+    table inet phone_link_ap {
+      chain forward {
+        type filter hook forward priority -10; policy accept;
+        iifname "${cfg.apInterface}" drop
+      }
+    }
+  '';
+  apNoForwardStop = pkgs.writeShellScript "phone-link-ap-noforward-stop" ''
+    ${pkgs.nftables}/bin/nft delete table inet phone_link_ap 2>/dev/null || true
+  '';
 in
 {
   options.phoneLink = {
@@ -150,6 +173,27 @@ in
         type = lib.types.str;
         default = "192.168.77.1/24";
         description = "IPv4 address of the AP interface.";
+      };
+
+      dhcpRange = lib.mkOption {
+        type = lib.types.str;
+        default = "${apSubnet}.10,${apSubnet}.254,3600";
+        description = ''
+          dnsmasq DHCP range and lease time, as `start,end,lease`.  The default
+          is .10–.254 in the /24 of `address`, for one hour.  This is DHCP only:
+          the AP sends no router or DNS option.
+        '';
+      };
+
+      noForwardRules = lib.mkOption {
+        type = lib.types.lines;
+        internal = true;
+        readOnly = true;
+        default = apNoForwardRules;
+        description = ''
+          nftables rules that drop forwarded traffic entering from the AP
+          interface, so the AP cannot become the phone's internet uplink.
+        '';
       };
     };
 
@@ -339,9 +383,56 @@ in
                 psk = "$PHONE_AP_PASS";
               };
               ipv4 = {
-                method = "shared";
+                method = "manual";
                 address1 = cfg.ap.address;
               };
+            };
+          };
+
+          # DHCP only: this replaces NetworkManager's shared dnsmasq, which
+          # also sent a router and DNS option and installed NAT.  It reads the
+          # same root-only drop-in directory NetworkManager used, so a
+          # `dhcp-host` reservation there keeps the phone's address.
+          systemd.services.phone-link-ap-dhcp = {
+            description = "DHCP for the PhoneLink access point (no uplink)";
+            wantedBy = [ "multi-user.target" ];
+            after = [ "network.target" ];
+            serviceConfig = {
+              ExecStartPre = "${pkgs.coreutils}/bin/install -d -m 0755 /etc/NetworkManager/dnsmasq-shared.d";
+              ExecStart = lib.concatStringsSep " " [
+                "${pkgs.dnsmasq}/bin/dnsmasq"
+                "--keep-in-foreground"
+                "--conf-file=/dev/null"
+                "--bind-dynamic"
+                "--interface=${cfg.apInterface}"
+                "--except-interface=lo"
+                "--port=0"
+                "--dhcp-range=${cfg.ap.dhcpRange}"
+                "--dhcp-leasefile=/var/lib/phone-link/dnsmasq-${cfg.apInterface}.leases"
+                "--dhcp-option=option:router"
+                "--dhcp-option=option:dns-server"
+                "--conf-dir=/etc/NetworkManager/dnsmasq-shared.d"
+              ];
+              StateDirectory = "phone-link";
+              Restart = "always";
+              RestartSec = 5;
+            };
+          };
+
+          # The AP's own nftables table, not `firewall.extraForwardRules`:
+          # that option only exists while the NixOS firewall is enabled, and
+          # this drop has to hold either way.  priority -10 runs before the
+          # filter chains, including the accept rule NetworkManager installs
+          # for a shared connection.
+          systemd.services.phone-link-ap-noforward = {
+            description = "Drop forwarded traffic from the PhoneLink access point";
+            wantedBy = [ "multi-user.target" ];
+            after = [ "network.target" ];
+            serviceConfig = {
+              Type = "oneshot";
+              RemainAfterExit = true;
+              ExecStart = "${pkgs.nftables}/bin/nft -f ${pkgs.writeText "phone-link-ap-noforward.nft" apNoForwardRules}";
+              ExecStop = apNoForwardStop;
             };
           };
 
