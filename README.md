@@ -146,12 +146,18 @@ doctor sees after a boot is the module's own rather than an older run's.
 
 The live phone can have two transports at once — USB and a Wi-Fi address — and
 a bare `adb` then refuses to choose or picks the wrong one. Every command
-resolves one serial: `PHONE_SERIAL` when it is set, otherwise the only attached
-device. With two attached and no `PHONE_SERIAL` the command stops and lists
-them instead of guessing. All device calls are pinned to that serial, including
-`adb reverse` and the repair paths in `phone-fix-internet`; values with spaces
-are quoted for the remote shell. `PHONE_SERIAL` is what makes a destructive
-command safe when both transports are up.
+resolves one serial: `PHONE_SERIAL` when it is set, otherwise the attached
+phone. When more than one transport is attached, they are grouped by hardware
+identity (`ro.serialno`, or the product/model/device descriptor from
+`adb devices -l` when the property is empty). One phone reachable twice is
+therefore not ambiguous: its USB transport wins because it survives a reboot;
+between network transports the address in `PHONE_PROXY_HOST`/`PHONE_AP_IP`
+wins, then the first sorted serial. Only two genuinely different phones stop
+the command and list the devices, and `PHONE_SERIAL` still overrides both.
+All device calls are pinned to that serial, including `adb reverse` and the
+repair paths in `phone-fix-internet`; values with spaces are quoted for the
+remote shell. `PHONE_SERIAL` is what makes a destructive command safe when two
+different phones are up.
 
 ### USB-primary and host fallback
 

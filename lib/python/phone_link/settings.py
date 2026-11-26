@@ -23,7 +23,8 @@ def _env(name: str, default: str) -> str:
 
 
 # ADB's target serial is resolved at run time by phone_link.adb: PHONE_SERIAL
-# first, then the only attached device, else an error that lists the devices.
+# first, then the only attached phone (transports grouped by hardware
+# identity), else an error that lists the devices.
 # There is deliberately no built-in serial here: a USB serial belongs to one
 # phone and silently targeting it is how a destructive command hit the wrong
 # device.

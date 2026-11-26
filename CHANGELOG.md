@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Wireless debugging made every command stop with "more than one adb device is
+  attached": `adb` lists the phone's USB transport and its Wi-Fi transport
+  separately, and the resolver treated them as two phones. Transports are now
+  grouped by hardware identity (`ro.serialno`, falling back to the
+  `adb devices -l` product/model/device descriptor); one phone reachable twice
+  resolves to its USB serial, or to the configured host's network serial when
+  USB is absent, and only two genuinely different phones still stop and list
+  the devices. `PHONE_SERIAL` still wins.
+
 ## [0.13.0] - 2026-11-26
 
 This entry collects the changes since 0.11.0; the v0.12.0 and v0.12.1

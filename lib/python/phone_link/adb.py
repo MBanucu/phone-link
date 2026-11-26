@@ -22,6 +22,12 @@ that port at every reboot, so `pinned_endpoint()` is asked first and costs one
 `adb devices` when it works: no browse, no scan, and a serial that survives the
 reboot unchanged. mDNS is the fallback for a phone that randomises its port.
 
+USB and Wi-Fi are two transports of the same phone, not two phones. When adb
+lists more than one attached transport, `resolve_serial()` groups them by
+hardware identity (`ro.serialno`, or the `adb devices -l` descriptors when the
+property is empty) and picks one member of the group. The ambiguity error is
+kept for two genuinely different phones.
+
 `PHONE_ADB_MDNS=0` turns the lookup off, for a machine whose mDNS cannot be
 trusted or a test that must not see a real phone.
 """
@@ -31,6 +37,7 @@ from __future__ import annotations
 import os
 import subprocess
 import time
+from dataclasses import dataclass
 from typing import Mapping, Sequence
 
 from . import settings
@@ -41,9 +48,10 @@ SERVICE = "_adb-tls-connect._tcp"
 class SerialError(RuntimeError):
     """The one target device cannot be chosen without the operator's help.
 
-    A bare `adb` with USB and Wi-Fi transports attached is ambiguous; a
-    command that changes the phone must stop and say so rather than let adb
-    pick one. `PHONE_SERIAL` is the documented answer.
+    Two genuinely different phones attached at once are ambiguous; a command
+    that changes the phone must stop and say so rather than let adb pick one.
+    `PHONE_SERIAL` is the documented answer. Two transports of the same phone
+    are not this error: they are grouped and one is chosen deliberately.
     """
 
 
@@ -115,16 +123,136 @@ def attached(serial: str) -> bool:
     return devices().get(serial) == "device"
 
 
+@dataclass(frozen=True)
+class Device:
+    """One adb transport, as `adb devices -l` describes it."""
+
+    serial: str
+    state: str
+    product: str = ""
+    model: str = ""
+    device: str = ""
+
+
+def listing() -> list[Device]:
+    """Every adb transport with the descriptors `adb devices -l` adds.
+
+    `adb devices` is enough for a state, but not for deciding whether two
+    transports are the same hardware: the product/model/device triple is the
+    fallback identity when the phone will not answer `getprop ro.serialno`.
+    """
+    done = _run(["adb", "devices", "-l"])
+    if done is None or done.returncode != 0:
+        return []
+    found: list[Device] = []
+    for line in done.stdout.splitlines()[1:]:
+        fields = line.split()
+        if len(fields) < 2:
+            continue
+        attributes: dict[str, str] = {}
+        for field in fields[2:]:
+            key, separator, value = field.partition(":")
+            if separator:
+                attributes[key] = value
+        found.append(
+            Device(
+                serial=fields[0],
+                state=fields[1],
+                product=attributes.get("product", ""),
+                model=attributes.get("model", ""),
+                device=attributes.get("device", ""),
+            )
+        )
+    return found
+
+
+def hardware_serial(serial: str) -> str:
+    """`ro.serialno` for one transport, or "" when it will not say.
+
+    A network transport can be attached while the phone refuses a shell
+    command (a just-connected port, a locked screen), and a USB transport can
+    be listed by an adb server that has not finished opening it. The identity
+    fallback exists for both, so a failure here is not an error.
+    """
+    done = _run(
+        ["adb", "-s", serial, "shell", "getprop", "ro.serialno"], timeout=3.0
+    )
+    if done is None or done.returncode != 0:
+        return ""
+    return done.stdout.strip()
+
+
+def identity(device: Device) -> str:
+    """What makes two transports the same phone.
+
+    The hardware serial is the strong key: two phones of the same model have
+    the same product/model/device triple but never the same `ro.serialno`.
+    The descriptor is what remains when the property is empty; the serial
+    itself is the last resort, so two unknown transports are not merged.
+    """
+    serial = hardware_serial(device.serial)
+    if serial:
+        return f"serial:{serial}"
+    descriptor = "/".join(
+        value for value in (device.model, device.device, device.product) if value
+    )
+    if descriptor:
+        return f"descriptor:{descriptor}"
+    return f"transport:{device.serial}"
+
+
+def _preferred_hosts(values: Mapping[str, str]) -> list[str]:
+    """The addresses whose network transport should win, in order."""
+    hosts: list[str] = []
+    for name in ("PHONE_PROXY_HOST", "PHONE_AP_IP"):
+        value = (values.get(name) or "").strip()
+        if value:
+            host = value.rsplit(":", 1)[0] if ":" in value else value
+            if host and host not in hosts:
+                hosts.append(host)
+    for value in (settings.PHONE_PROXY_HOST, settings.PHONE_AP_IP):
+        host = value.rsplit(":", 1)[0] if ":" in value else value
+        if host and host not in hosts:
+            hosts.append(host)
+    return hosts
+
+
+def _host(serial: str) -> str:
+    return serial.rsplit(":", 1)[0] if ":" in serial else serial
+
+
+def _choose_transport(serials: Sequence[str], values: Mapping[str, str]) -> str:
+    """One transport from the group that is the same phone.
+
+    USB first: a USB serial survives a reboot while a network port is picked
+    afresh by wireless debugging. Between network transports the configured
+    host wins, because that is the address the rest of phone-link talks to.
+    """
+    usb = sorted(serial for serial in serials if ":" not in serial)
+    if usb:
+        return usb[0]
+    for host in _preferred_hosts(values):
+        matching = sorted(serial for serial in serials if _host(serial) == host)
+        if matching:
+            return matching[0]
+    return sorted(serials)[0]
+
+
 def resolve_serial(
     env: Mapping[str, str] | None = None, *, network_only: bool = False
 ) -> str | None:
     """The one adb serial every command should target.
 
     The order is the documented one: `PHONE_SERIAL`, then the only attached
-    device, else `None` (or `SerialError` when more than one is attached).
-    `network_only` restricts the automatic choice to a network transport,
-    which is what the status display means by "adb wireless"; an explicit
-    `PHONE_SERIAL` is returned either way because the operator named it.
+    phone, else `None` (or `SerialError` when more than one *phone* is
+    attached). USB and Wi-Fi transports of the same phone are grouped by
+    hardware identity and one of them is chosen deterministically, so the
+    normal wireless-debugging state is not ambiguous.
+
+    `network_only` restricts both the automatic choice and the grouping to
+    network transports, which is what the status display means by "adb
+    wireless"; an explicit `PHONE_SERIAL` is returned either way because the
+    operator named it.
 
     A phone that rebooted is still on the network and still advertises its new
     wireless-debugging port, so an empty `adb devices` is retried through the
@@ -136,23 +264,40 @@ def resolve_serial(
         return explicit
 
     def choose() -> str | None:
-        states = devices()
-        attached_states = {
-            serial: state
-            for serial, state in states.items()
-            if state == "device" and (not network_only or ":" in serial)
-        }
-        if len(attached_states) == 1:
-            return next(iter(attached_states))
-        if len(attached_states) > 1:
-            listed = ", ".join(
-                f"{serial} ({state})" for serial, state in states.items()
-            )
-            raise SerialError(
-                "more than one adb device is attached: "
-                f"{listed}; set PHONE_SERIAL to the one to use"
-            )
-        return None
+        found = listing()
+        states = {device.serial: device.state for device in found}
+        if not states:
+            # An older adb or a failed `-l` still gives the states; grouping
+            # falls back to the transport serial, which is the old behaviour.
+            states = devices()
+            found = [
+                Device(serial=serial, state=state)
+                for serial, state in states.items()
+            ]
+        attached_devices = [
+            device
+            for device in found
+            if device.state == "device"
+            and (not network_only or ":" in device.serial)
+        ]
+        if not attached_devices:
+            return None
+        if len(attached_devices) == 1:
+            return attached_devices[0].serial
+
+        groups: dict[str, list[str]] = {}
+        for device in attached_devices:
+            groups.setdefault(identity(device), []).append(device.serial)
+        if len(groups) == 1:
+            return _choose_transport(next(iter(groups.values())), values)
+
+        listed = ", ".join(
+            f"{serial} ({state})" for serial, state in states.items()
+        )
+        raise SerialError(
+            "more than one adb device is attached: "
+            f"{listed}; set PHONE_SERIAL to the one to use"
+        )
 
     serial = choose()
     if serial is None and discover() is not None:
