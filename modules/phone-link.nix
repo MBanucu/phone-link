@@ -102,7 +102,8 @@ let
           "server_port": "@PHONE_SOCKS_PORT@",
           "version": "5",
           "username": "${cfg.proxyUser}",
-          "password": "@PHONE_SOCKS_PASS@"
+          "password": "@PHONE_SOCKS_PASS@",
+          "connect_timeout": "10s"
         },
         { "type": "direct", "tag": "direct" }
       ],

@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.14.0] - 2026-11-26
 
 ### Added
 
@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   builds that do not know the setting keep working. `--check` reports the
   ceiling the app prints, `<unknown>` when it prints none, and only fails a
   mismatch when a ceiling was asked for.
+
+### Fixed
+
+- sing-box waits 10 s for a SOCKS CONNECT instead of its 5 s default. The proxy
+  retries a lost cellular handshake once, so the old 5 s cut the retry off and
+  turned a recoverable connection into a 5 s page stall (#42).
 
 ## [0.13.3] - 2026-11-26
 
@@ -1284,7 +1290,8 @@ with it.
 - `phone-doctor` installs under `lib/python`, where its wrapper looks for it.
 - The proxy APK cache is found when `HOME` is unset during activation.
 
-[Unreleased]: https://github.com/MBanucu/phone-link/compare/v0.13.3...HEAD
+[Unreleased]: https://github.com/MBanucu/phone-link/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/MBanucu/phone-link/compare/v0.13.3...v0.14.0
 [0.13.3]: https://github.com/MBanucu/phone-link/compare/v0.13.2...v0.13.3
 [0.13.2]: https://github.com/MBanucu/phone-link/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/MBanucu/phone-link/compare/v0.13.0...v0.13.1
