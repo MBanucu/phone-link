@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The AP can come back after a reboot. The declarative profile hardcoded
+  `connection.autoconnect = false`, and nothing ran `phone-ap-up` at boot, so
+  the AP stayed down and `phone-tun` had no path until someone brought it up.
+  `phoneLink.ap.autoconnect` (default `false`; the generated profile is
+  unchanged unless it is set) writes the profile's autoconnect, so
+  NetworkManager can activate the AP at boot. Enabling it reserves the radio
+  for the AP, and a 5 GHz activation that fails leaves no link at all (see
+  #7).
+
 - The tunnel can follow more than one phone address. `phoneLink.proxyHost` is
   still the primary, and the new `phoneLink.proxyHosts` lists fallbacks in the
   order they should be tried, e.g. the USB tether `10.23.190.38` before the AP
