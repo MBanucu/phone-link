@@ -5,7 +5,11 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.13.0] - 2026-11-26
+
+This entry collects the changes since 0.11.0; the v0.12.0 and v0.12.1
+tags were cut from this section before it was moved under a release
+heading.
 
 ### Added
 
@@ -1225,7 +1229,8 @@ with it.
 - `phone-doctor` installs under `lib/python`, where its wrapper looks for it.
 - The proxy APK cache is found when `HOME` is unset during activation.
 
-[Unreleased]: https://github.com/MBanucu/phone-link/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/MBanucu/phone-link/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/MBanucu/phone-link/compare/v0.11.0...v0.13.0
 [0.11.0]: https://github.com/MBanucu/phone-link/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/MBanucu/phone-link/compare/v0.9.2...v0.10.0
 [0.9.2]: https://github.com/MBanucu/phone-link/compare/v0.9.1...v0.9.2
