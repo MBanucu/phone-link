@@ -211,11 +211,16 @@ if run; then ok "locked phone still exits 0"; else bad "locked phone still exits
 grep -q 'warn  phone unlocked' "$LOG/out" && ok "warns about the keyguard" || bad "warns about the keyguard"
 grep -q 'optional condition(s) open' "$LOG/out" && ok "counts the warning" || bad "counts the warning"
 
-# 4. Forwarding off is a required failure.
+# 4. Forwarding off is only a warning: the link-only AP does not forward.
 fresh_state
 printf '0\n' >"$LOG/forward"
-if run; then bad "forwarding off exits 1"; else ok "forwarding off exits 1"; fi
-grep -q 'FAIL  ip_forward' "$LOG/out" && ok "fails ip_forward" || bad "fails ip_forward"
+if run; then ok "forwarding off still exits 0"; else bad "forwarding off still exits 0" "$(cat "$LOG/out")"; fi
+grep -q 'warn  ip_forward' "$LOG/out" && ok "warns about ip_forward" || bad "warns about ip_forward"
+grep -q 'the link-only AP does not forward' "$LOG/out" \
+  && ok "says forwarding is not needed" || bad "says forwarding is not needed" "$(cat "$LOG/out")"
+run --analyze || true
+grep -q '^warn ip_forward ' "$LOG/out" && ok "--analyze reports it as a warning" \
+  || bad "--analyze reports it as a warning" "$(cat "$LOG/out")"
 
 # 5. Hotspot mode: no AP interface, missing AP profile only warns.
 fresh_state

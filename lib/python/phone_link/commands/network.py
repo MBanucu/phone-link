@@ -319,8 +319,6 @@ def phone_ap_up(args: list[str]) -> int:
         die("driver reports no AP mode")
     if capture(["nmcli", "-g", "wifi.backend"]) == "iwd":
         die("NetworkManager uses iwd; AP mode needs wpa_supplicant")
-    if capture(["sysctl", "-n", "net.ipv4.ip_forward"]) != "1":
-        die("net.ipv4.ip_forward is 0")
 
     if not _profile_exists():
         if phone.ap_declarative():
