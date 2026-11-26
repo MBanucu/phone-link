@@ -31,11 +31,21 @@ from __future__ import annotations
 import os
 import subprocess
 import time
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from . import settings
 
 SERVICE = "_adb-tls-connect._tcp"
+
+
+class SerialError(RuntimeError):
+    """The one target device cannot be chosen without the operator's help.
+
+    A bare `adb` with USB and Wi-Fi transports attached is ambiguous; a
+    command that changes the phone must stop and say so rather than let adb
+    pick one. `PHONE_SERIAL` is the documented answer.
+    """
+
 
 # The port phone-link's own app pins adbd to. Only a hint: on a phone without
 # it nothing answers here and the mDNS record still decides.
@@ -103,6 +113,51 @@ def devices() -> dict[str, str]:
 
 def attached(serial: str) -> bool:
     return devices().get(serial) == "device"
+
+
+def resolve_serial(
+    env: Mapping[str, str] | None = None, *, network_only: bool = False
+) -> str | None:
+    """The one adb serial every command should target.
+
+    The order is the documented one: `PHONE_SERIAL`, then the only attached
+    device, else `None` (or `SerialError` when more than one is attached).
+    `network_only` restricts the automatic choice to a network transport,
+    which is what the status display means by "adb wireless"; an explicit
+    `PHONE_SERIAL` is returned either way because the operator named it.
+
+    A phone that rebooted is still on the network and still advertises its new
+    wireless-debugging port, so an empty `adb devices` is retried through the
+    mDNS record before the caller reports that nothing is attached.
+    """
+    values = os.environ if env is None else env
+    explicit = (values.get("PHONE_SERIAL") or "").strip()
+    if explicit:
+        return explicit
+
+    def choose() -> str | None:
+        states = devices()
+        attached_states = {
+            serial: state
+            for serial, state in states.items()
+            if state == "device" and (not network_only or ":" in serial)
+        }
+        if len(attached_states) == 1:
+            return next(iter(attached_states))
+        if len(attached_states) > 1:
+            listed = ", ".join(
+                f"{serial} ({state})" for serial, state in states.items()
+            )
+            raise SerialError(
+                "more than one adb device is attached: "
+                f"{listed}; set PHONE_SERIAL to the one to use"
+            )
+        return None
+
+    serial = choose()
+    if serial is None and discover() is not None:
+        serial = choose()
+    return serial
 
 
 def mdns_addresses(*, timeout: float = 5.0) -> list[str]:
@@ -227,18 +282,28 @@ def subcommand(argv: Sequence[str]) -> str:
 
 
 def prepare(argv: Sequence[str]) -> list[str]:
-    """The same command aimed at a serial that is still attached.
+    """The same command aimed at the one serial the operator chose.
 
+    A command that already has `-s` keeps it (and is retargeted when a network
+    port went stale). A command without one gets the resolved serial inserted,
+    so no adb call can fall back to "the only device adb happened to pick".
     Only a network serial can be stale — a USB one survives a reboot — so the
     cost for the USB case is one string check and no adb call at all.
     """
     argv = list(argv)
-    if not enabled() or not argv or argv[0] != "adb":
+    if not argv or argv[0] != "adb":
         return argv
     if subcommand(argv) in SERVER_COMMANDS:
         return argv
+    if not subcommand(argv):
+        return argv
     found = target(argv)
     if found is None:
+        serial = resolve_serial()
+        if serial is None:
+            return argv
+        return [argv[0], "-s", serial, *argv[1:]]
+    if not enabled():
         return argv
     index, serial = found
     if ":" not in serial or attached(serial):

@@ -7,9 +7,24 @@
 # Every value can be overridden from the environment, which keeps the scripts
 # usable if the phone, the SSID or the AP subnet ever change.
 
-PHONE_SERIAL=${PHONE_SERIAL:-XPLO2EEA0001541}
+# The module writes its non-secret option values here; read them before the
+# fallbacks below so a deployed non-default phoneLink configuration also
+# reaches the live harness. The environment still wins, because the assignments
+# use ${VAR:-...} after the file has run.
+PHONE_CONFIG_FILE=${PHONE_CONFIG_FILE:-/etc/phone-link/env}
+if [ -r "$PHONE_CONFIG_FILE" ]; then
+  # shellcheck disable=SC1090
+  . "$PHONE_CONFIG_FILE"
+fi
+
+# No built-in serial: targeting one phone silently is how a destructive command
+# hits the wrong device. phone_serial resolves PHONE_SERIAL, then the only
+# attached device, and refuses when there are two.
+PHONE_SERIAL=${PHONE_SERIAL:-}
 PHONE_HOTSPOT_IP=${PHONE_HOTSPOT_IP:-10.244.108.165}
 PHONE_AP_IP=${PHONE_AP_IP:-192.168.77.232}
+PHONE_PROXY_HOST=${PHONE_PROXY_HOST:-$PHONE_AP_IP}
+PHONE_PROXY_HOSTS=${PHONE_PROXY_HOSTS:-}
 PHONE_AP_CON=${PHONE_AP_CON:-phonelink}
 PHONE_AP_SSID=${PHONE_AP_SSID:-PhoneLink}
 PHONE_AP_IF=${PHONE_AP_IF:-wlp110s0}
@@ -119,18 +134,32 @@ phone_apk_cached() {
 
 # adb_transport -> the serial of a network (non-USB) adb transport
 adb_transport() {
+  if [ -n "${PHONE_SERIAL:-}" ]; then
+    printf '%s\n' "$PHONE_SERIAL"
+    return 0
+  fi
   adb devices 2>/dev/null \
     | awk '$2 == "device" && $1 ~ /:/ {print $1; found = 1} END {exit found ? 0 : 1}'
 }
 
-# phone_serial -> serial of any attached device (USB or network)
+# phone_serial -> the one target serial; PHONE_SERIAL wins, two devices fail
 phone_serial() {
-  local serial
+  local serials count
+  if [ -n "${PHONE_SERIAL:-}" ]; then
+    printf '%s\n' "$PHONE_SERIAL"
+    return 0
+  fi
   # Capture first: piping into head would mask awk's failure status and leave
   # callers with an empty serial instead of "no phone attached".
-  serial=$(adb devices 2>/dev/null | awk '$2 == "device" {print $1; exit}')
-  [ -n "$serial" ] || return 1
-  printf '%s\n' "$serial"
+  serials=$(adb devices 2>/dev/null | awk '$2 == "device" {print $1}')
+  count=$(printf '%s\n' "$serials" | awk 'NF {n++} END {print n + 0}')
+  case $count in
+    0) return 1 ;;
+    1) printf '%s\n' "$serials" ;;
+    *)
+      die "more than one adb device is attached ($(printf '%s' "$serials" | tr '\n' ' ')); set PHONE_SERIAL to the one to use"
+      ;;
+  esac
 }
 
 # phone_ips -> every non-loopback IPv4 address the phone currently owns

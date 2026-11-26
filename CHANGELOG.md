@@ -74,6 +74,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Every command now targets one adb serial. `PHONE_SERIAL` was documented but
+  unused, and `phone_serial()` returned the first `adb devices` entry, so with
+  USB and Wi-Fi transports both attached a destructive command could act on
+  the wrong one, while `phone-fix-internet` and `phone-tunnel-run --via-adb`
+  called bare `adb shell`/`adb reverse` and failed because adb refused to
+  choose. `adb.resolve_serial()` honours `PHONE_SERIAL`, then the only attached
+  device, and stops with a message listing the devices when there is more than
+  one; `adb.prepare()` inserts that serial into any device command that lacks
+  `-s`. The hotspot SSID is quoted as one remote argument, `as_root()` re-runs
+  the shim that was invoked rather than a PATH copy, and the documented
+  `PHONE_*` overrides (including `PHONE_SECRETS`) survive `sudo`.
+
+- `phone-proxy-start` on a fresh install no longer sends a bare `START` and
+  reports "the service gave no state". With no saved proxy configuration it
+  says so and points at `phone-proxy-setup` instead; the working start path is
+  unchanged.
+
 - The generated sing-box config no longer puts the proxy password on a command
   line or leaves it world-readable. `phone-tun-config` used `sed` to substitute
   `PHONE_SOCKS_PASS` into a template, which exposed the password in

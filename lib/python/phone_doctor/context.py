@@ -9,7 +9,12 @@ from pathlib import Path
 
 # The doctor shares the adb transport fallback with the commands: a phone that
 # rebooted keeps its address and changes only its wireless-debugging port.
-from phone_link.adb import discover, prepare, retry
+from phone_link.adb import (
+    SerialError,
+    prepare,
+    resolve_serial,
+    retry,
+)
 
 
 class Context:
@@ -17,6 +22,7 @@ class Context:
         self.env = dict(os.environ if env is None else env)
         self._serial: str | None = None
         self._serial_loaded = False
+        self._serial_error = ""
         self._profile: bool | None = None
         self._secrets: dict[str, str] | None = None
 
@@ -114,7 +120,11 @@ class Context:
     def run(
         self, argv: list[str], timeout: float | None = None
     ) -> subprocess.CompletedProcess[str] | None:
-        argv = prepare(argv)
+        try:
+            argv = prepare(argv)
+        except SerialError as exc:
+            self._serial_error = str(exc)
+            return None
         proc = self._spawn(argv, timeout)
         if proc is None or proc.returncode == 0:
             return proc
@@ -136,17 +146,16 @@ class Context:
     def serial(self) -> str | None:
         if not self._serial_loaded:
             self._serial_loaded = True
-            self._serial = self._first_device()
-            if self._serial is None and discover() is not None:
-                self._serial = self._first_device()
+            try:
+                self._serial = resolve_serial(self.env)
+            except SerialError as exc:
+                self._serial_error = str(exc)
         return self._serial
 
-    def _first_device(self) -> str | None:
-        for line in self.text(["adb", "devices"]).splitlines():
-            fields = line.split()
-            if len(fields) >= 2 and fields[1] == "device":
-                return fields[0]
-        return None
+    @property
+    def serial_error(self) -> str:
+        """Why no serial could be chosen, when it was ambiguous rather than absent."""
+        return self._serial_error
 
     def adb(self, *args: str, timeout: float | None = None) -> str:
         if self.serial is None:

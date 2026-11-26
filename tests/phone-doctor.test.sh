@@ -176,6 +176,9 @@ printf 'PHONE_SOCKS_PASS=pass\nPHONE_PIN=1234\nPHONE_AP_PASS=pass\n' >"$PHONE_SE
 chmod 600 "$PHONE_SECRETS"
 
 fresh_state() {
+  # Two transports are normal on this host: name the one the destructive
+  # commands should use, exactly as the operator must.
+  export PHONE_SERIAL=XPLO2EEA0001541
   printf 'List of devices attached\nXPLO2EEA0001541\tdevice\n192.168.77.232:5555\tdevice\n' >"$LOG/devices"
   printf 'false\n' >"$LOG/keyguard"
   printf '2: wlan0    inet 192.168.77.232/24 brd 192.168.77.255 scope global wlan0\n3: rndis0    inet 10.9.9.9/24 brd 10.9.9.255 scope global rndis0\n' >"$LOG/ips"
@@ -246,6 +249,7 @@ grep -q 'ok    secrets mode.*600' "$LOG/out" && ok "checks the secrets mode" \
 
 # 2. No phone: required failure, phone checks skipped, rest still checked.
 fresh_state
+unset PHONE_SERIAL
 printf 'List of devices attached\n' >"$LOG/devices"
 if run; then bad "missing phone exits 1"; else ok "missing phone exits 1"; fi
 grep -q 'FAIL  adb device' "$LOG/out" && ok "fails the adb condition" || bad "fails the adb condition"
@@ -498,6 +502,7 @@ if run --analyze; then ok "--analyze on a ready setup exits 0"; else bad "--anal
 [ -s "$LOG/out" ] && bad "--analyze on a ready setup is empty" "$(cat "$LOG/out")" \
   || ok "--analyze on a ready setup is empty"
 fresh_state
+unset PHONE_SERIAL
 printf 'List of devices attached\n' >"$LOG/devices"
 if run --analyze; then bad "--analyze with problems exits 1"; else ok "--analyze with problems exits 1"; fi
 grep -q '^fail adb_device ' "$LOG/out" && ok "--analyze names the problem id" \

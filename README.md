@@ -131,6 +131,17 @@ phone's auto-start may bring up another saved proxy at another port, which the
 doctor reports until you switch again. `PHONE_RUNTIME_PORT_FILE` moves the file
 for a test, and `PHONE_PROXY_PORT` overrides both for a one-off run.
 
+### One adb serial
+
+The live phone can have two transports at once — USB and a Wi-Fi address — and
+a bare `adb` then refuses to choose or picks the wrong one. Every command
+resolves one serial: `PHONE_SERIAL` when it is set, otherwise the only attached
+device. With two attached and no `PHONE_SERIAL` the command stops and lists
+them instead of guessing. All device calls are pinned to that serial, including
+`adb reverse` and the repair paths in `phone-fix-internet`; values with spaces
+are quoted for the remote shell. `PHONE_SERIAL` is what makes a destructive
+command safe when both transports are up.
+
 ### USB-primary and host fallback
 
 The address is also runtime state. `phoneLink.proxyHost` is the primary address
@@ -194,7 +205,7 @@ Or straight from the checkout: `./bin/phone-net-status`.
 | `phone-proxy-boot` | make the proxy app come back after a reboot: add it to the device-idle allowlist, grant the location permissions the SSID read and boot start need, and turn `auto_start` on; the service itself is `specialUse`, not a `location` one (`--check` reports which of the three is missing) |
 | `phone-proxy-setup` | the first-run path: start the proxy through the app's own intent with the port, credentials and auto-start as extras, then verify a request through the listener (`--check` reports the settings and checks the request) |
 | `phone-proxy-switch` | make the laptop use a port the phone listens on: `--profile NAME` starts that saved proxy when it is not running and `--port N` requires the phone to be listening there, a request through the new port has to answer 200 before the laptop changes, then the port is written to `/run/phone-link/proxy-port`, `phone-tun` and the relay are restarted if they were running, and the phone's listener on the old port is stopped last (`--check` compares the two ports, `--list` prints the phone's saved proxies and listeners as JSON for the panel) |
-| `phone-proxy-start` | start the proxy through the app's own intent and wait until the service says it is listening (`--check` only reports) |
+| `phone-proxy-start` | start the proxy through the app's own intent and wait until the service says it is listening (`--check` only reports; a fresh install with no saved proxy says to run `phone-proxy-setup` instead of sending a bare START) |
 | `phone-proxy-stop` | stop the proxy through the app's own intent and wait until the service is gone (`--check` only reports) |
 | `net-check` | fetch a fresh URL with curl, Chrome and Nix, reporting which of the three reach the internet |
 | `phone-reboot-unlock` | reboot the phone, wait for boot, then unlock once (`--yes` skips the prompt) |

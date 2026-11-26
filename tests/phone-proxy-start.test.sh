@@ -79,11 +79,26 @@ grep -q 'already listening ("laptop" listening on 0.0.0.0:1081' "$LOG/out" \
 
 # 3. A start is the app's own intent, naming the service by its component.
 fresh
+printf '  saved       "laptop" — port 1081 · SSID PhoneLink · user proxy · auto-start on · wireless debugging off\n' \
+  >"$LOG/dump"
 if run; then ok "start exits 0"; else bad "start exits 0" "$(cat "$LOG/out")"; fi
 grep -q 'am start-foreground-service -n org.phonelink.proxy/org.phonelink.proxy.ProxyService -a org.phonelink.proxy.action.START$' \
   "$LOG/actions" && ok "sends START to the app's service" || bad "sends START to the app's service" "$(cat "$LOG/actions")"
 grep -q 'proxy started ("laptop" listening' "$LOG/out" && ok "says it started" \
   || bad "says it started" "$(cat "$LOG/out")"
+
+# 3b. A fresh install has no saved proxy: say so and name the setup command
+#     instead of sending a START that can only answer with no state.
+fresh
+if run; then bad "a fresh start exits 1"; else ok "a fresh start exits 1"; fi
+grep -q 'no saved proxy configuration' "$LOG/out" \
+  && ok "a fresh install names the missing configuration" \
+  || bad "a fresh install names the missing configuration" "$(cat "$LOG/out")"
+grep -q 'phone-proxy-setup' "$LOG/out" \
+  && ok "a fresh install points at phone-proxy-setup" \
+  || bad "a fresh install points at phone-proxy-setup" "$(cat "$LOG/out")"
+[ -s "$LOG/actions" ] && bad "a fresh install sends no bare START" \
+  || ok "a fresh install sends no bare START"
 
 # 4. Starting something already listening sends nothing.
 fresh
@@ -93,6 +108,8 @@ if run; then ok "starting a running proxy exits 0"; else bad "starting a running
 
 # 5. A gate that says "another network" is the reason, not a mystery.
 fresh
+printf '  saved       "laptop" — port 1081 · SSID PhoneLink · user proxy · auto-start on · wireless debugging off\n' \
+  >"$LOG/dump"
 : >"$LOG/gated"
 if run; then bad "a gated start exits 1"; else ok "a gated start exits 1"; fi
 grep -q 'SSID gate does not match' "$LOG/out" && ok "names the SSID gate" \

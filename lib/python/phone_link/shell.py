@@ -20,6 +20,14 @@ from . import adb
 DEFAULT_TIMEOUT = 120.0
 
 
+def _prepare(argv: Sequence[str]) -> list[str]:
+    """Resolve the adb target, turning an ambiguous phone into a clear error."""
+    try:
+        return adb.prepare(argv)
+    except adb.SerialError as exc:
+        die(str(exc))
+
+
 def _attempts(argv: Sequence[str]) -> Iterator[list[str]]:
     """The argv to run, then — after an adb failure — the recovered one.
 
@@ -28,7 +36,7 @@ def _attempts(argv: Sequence[str]) -> Iterator[list[str]]:
     here, where all of them already pass through. Other commands are yielded
     once, unchanged.
     """
-    argv = adb.prepare(argv)
+    argv = _prepare(argv)
     yield argv
     recovered = adb.retry(argv)
     if recovered is not None:
@@ -109,7 +117,7 @@ def run(argv: Sequence[str], *, timeout: float | None = None) -> int:
     # may not want. The transport is still resolved before it runs.
     try:
         return subprocess.run(
-            adb.prepare(argv), timeout=timeout, check=False
+            _prepare(argv), timeout=timeout, check=False
         ).returncode
     except (OSError, subprocess.TimeoutExpired):
         return 127
@@ -124,7 +132,7 @@ def run_both(argv: Sequence[str], *, timeout: float = DEFAULT_TIMEOUT) -> tuple[
     """
     try:
         done = subprocess.run(
-            adb.prepare(argv),
+            _prepare(argv),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,

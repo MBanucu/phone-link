@@ -12,4 +12,6 @@ for candidate in "$here/../lib/python" "$here/../share/phone-link/lib/python"; d
   fi
 done
 export PYTHONDONTWRITEBYTECODE=1
+shim="$here/${0##*/}"
+export PHONE_LINK_SHIM="$shim"
 exec python3 -m phone_link.commands phone-unlock "$@"

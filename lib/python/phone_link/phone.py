@@ -17,27 +17,26 @@ from .shell import capture, die, log, status
 
 
 def _attached(network_only: bool = False) -> str | None:
-    for line in capture(["adb", "devices"]).splitlines():
-        fields = line.split()
-        if len(fields) < 2 or fields[1] != "device":
+    for serial, state in adb.devices().items():
+        if state != "device":
             continue
-        if network_only and ":" not in fields[0]:
+        if network_only and ":" not in serial:
             continue
-        return fields[0]
+        return serial
     return None
 
 
 def phone_serial() -> str | None:
-    """Serial of any attached device, USB or network, or None.
+    """The one phone every adb command should target, or None.
 
-    A phone that rebooted is still on the network and still advertises its new
-    wireless-debugging port, so an empty `adb devices` is retried through the
-    mDNS record before the caller reports that nothing is attached.
+    `PHONE_SERIAL` wins, then the only attached device; two attached devices
+    are an error naming all of them, because choosing one silently is how a
+    destructive command acts on the wrong phone.
     """
-    serial = _attached()
-    if serial is None and adb.discover() is not None:
-        serial = _attached()
-    return serial
+    try:
+        return adb.resolve_serial()
+    except adb.SerialError as exc:
+        die(str(exc))
 
 
 def adb_transport() -> str | None:
@@ -76,15 +75,22 @@ def is_root() -> bool:
 
 
 def as_root(name: str, argv: list[str]) -> None:
-    """Re-run this command through sudo, as the bash scripts' as_root did."""
+    """Re-run the invoked command through sudo, keeping the PHONE_* overrides.
+
+    The shim that was invoked wins over PATH: `./bin/phone-ap-up` would
+    otherwise escalate into `/usr/bin/phone-ap-up` and silently run an older
+    installed copy. The bin wrappers export ``PHONE_LINK_SHIM`` for exactly
+    this; the registry lookup is only a fallback for a direct module run.
+    """
     if is_root():
         return
     from . import actions
 
-    # Re-run the script itself, not the module: the shim re-resolves the
-    # package next to its own path, which survives sudo's environment reset.
-    shim = actions.binary(actions.BY_ID[name])
-    os.execvp("sudo", ["sudo", "--", shim, *argv])
+    shim = os.environ.get("PHONE_LINK_SHIM") or actions.binary(actions.BY_ID[name])
+    os.execvp(
+        "sudo",
+        ["sudo", "--", "env", *actions.phone_env(), shim, *argv],
+    )
 
 
 def tcp_open(ip: str, seconds: int = 3, port: int | None = None) -> bool:
