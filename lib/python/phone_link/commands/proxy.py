@@ -44,10 +44,15 @@ Stops the proxy app's listener over adb, then waits until the service is gone.
 """
 
 USAGE_SETUP = """usage: phone-proxy-setup [--check] [--port N] [--user NAME] [--no-auto-start]
+                         [--max-connections N]
 
 Starts the proxy on the given port with the credentials from the secrets file,
 turns auto-start on unless --no-auto-start is given, and verifies a request
 through the listener. --check only reports the current settings.
+
+--max-connections sets how many SOCKS connections the listener may keep open at
+once, 16..1024. Left out, the app keeps its saved value — 256 on a fresh
+install — and an app too old to know the setting ignores it.
 """
 
 USAGE_SWITCH = """usage: phone-proxy-switch [--check | --list] (--port N | --profile NAME)
@@ -254,15 +259,21 @@ def _request(address: str, port: str, user: str, password: str) -> str:
     return code or "000"
 
 
-def _settings(dump: str) -> tuple[str, str, str]:
-    """Port, user and auto-start as the service prints them."""
+def _settings(dump: str) -> tuple[str, str, str, str]:
+    """Port, user, auto-start and connection ceiling as the service prints them.
+
+    The ceiling has its own line (`max_connections 512`), which only the app
+    builds that know the setting print; an older app leaves it empty.
+    """
     using = _field(dump, "using")
     port = re.search(r"\bport (\d+)", using)
     user = re.search(r"\buser (\S+)", using)
+    ceiling = re.search(r"\b(\d+)\b", _field(dump, "max_connections"))
     return (
         port.group(1) if port else "",
         user.group(1) if user else "",
         _field(dump, "auto-start"),
+        ceiling.group(1) if ceiling else "",
     )
 
 
@@ -273,6 +284,7 @@ def phone_proxy_setup(args: list[str]) -> int:
     port = str(settings.active_port())
     user = settings.PHONE_PROXY_USER
     auto_start = True
+    max_connections: str | None = None
     check_only = False
     index = 0
     while index < len(args):
@@ -289,6 +301,11 @@ def phone_proxy_setup(args: list[str]) -> int:
                 die("--user needs a value")
             user = args[index + 1]
             index += 1
+        elif value == "--max-connections":
+            if index + 1 >= len(args):
+                die("--max-connections needs a value")
+            max_connections = args[index + 1]
+            index += 1
         elif value == "--no-auto-start":
             auto_start = False
         elif value in ("-h", "--help"):
@@ -303,6 +320,11 @@ def phone_proxy_setup(args: list[str]) -> int:
         die(f"port must be numeric: {port}")
     if not 1 <= int(port) <= 65535:
         die(f"port out of range: {port}")
+    if max_connections is not None:
+        if not max_connections.isdigit():
+            die(f"max_connections must be numeric: {max_connections}")
+        if not 16 <= int(max_connections) <= 1024:
+            die(f"max_connections must be 16..1024, got {max_connections}")
     if not user:
         die("username cannot be empty")
 
@@ -324,11 +346,15 @@ def phone_proxy_setup(args: list[str]) -> int:
     if check_only:
         dump = _dump(serial)
         state = _field(dump, "state")
-        current_port, current_user, current_auto = _settings(dump)
+        current_port, current_user, current_auto, current_max = _settings(dump)
         running = _running(state)
         sys.stderr.write(f"port       {current_port or '?'} (want {port})\n")
         sys.stderr.write(f"username   {current_user or '<empty>'} (want {user})\n")
         sys.stderr.write(f"auto-start {current_auto or '?'} (want {want_auto})\n")
+        # An app build that does not know the setting prints no line; the
+        # value is informational unless a ceiling was asked for.
+        want_max = f" (want {max_connections})" if max_connections is not None else ""
+        sys.stderr.write(f"max-connections {current_max or '<unknown>'}{want_max}\n")
         sys.stderr.write(
             f"proxy      {'listening' if running else (state or 'stopped')} "
             "(want listening)\n"
@@ -344,6 +370,7 @@ def phone_proxy_setup(args: list[str]) -> int:
             current_port == port
             and current_user == user
             and current_auto == want_auto
+            and (max_connections is None or current_max == max_connections)
             and running
             and verified
         )
@@ -351,9 +378,7 @@ def phone_proxy_setup(args: list[str]) -> int:
 
     log(f"phone: {serial}")
     log(f"starting the proxy on port {port} as {user}")
-    _send(
-        serial,
-        START,
+    extras = [
         "--ei",
         "port",
         port,
@@ -369,7 +394,10 @@ def phone_proxy_setup(args: list[str]) -> int:
         "--ez",
         "auto_start",
         want_auto,
-    )
+    ]
+    if max_connections is not None:
+        extras += ["--ei", "max_connections", max_connections]
+    _send(serial, START, *extras)
 
     state = _wait(serial, lambda each: _running(each) or _gated(each), 15)
     if not _running(state):
@@ -380,17 +408,29 @@ def phone_proxy_setup(args: list[str]) -> int:
             )
         die(f"proxy did not start ({state or 'the service gave no state'})")
 
-    written_port, written_user, written_auto = _settings(_dump(serial))
+    written_port, written_user, written_auto, written_max = _settings(_dump(serial))
     if written_port != port or written_user != user or written_auto != want_auto:
         die(
             "the app did not take the settings "
             f"(port {written_port}, user '{written_user}', "
             f"auto-start {written_auto})"
         )
-    log(
+    if max_connections is not None and written_max and written_max != max_connections:
+        die(
+            "the app did not take max-connections "
+            f"(want {max_connections}, got {written_max})"
+        )
+    if max_connections is not None and not written_max:
+        # An older build ignores the extra and prints no line; the setup still
+        # worked, so say which part was not applied instead of failing it.
+        log("the app did not report max-connections (older build; extra ignored)")
+    written = (
         f"settings written: port {port}, user {user}, "
         f"password {len(password)} chars, auto-start {want_auto}"
     )
+    if max_connections is not None and written_max:
+        written += f", max-connections {written_max}"
+    log(written)
 
     verified = ""
     for address in phone.phone_ips(serial):
