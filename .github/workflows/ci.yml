@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@v32
 
       # `checks` covers the scripts, the module evaluation, the GUI and the
       # hermetic test suites, so this one command is the whole gate.
