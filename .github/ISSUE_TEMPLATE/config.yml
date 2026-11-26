@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Android app and APK issues (phone-link-proxy)
+    url: https://github.com/MBanucu/phone-link-proxy/issues
+    about: The proxy app, its panel and the APK are their own project.

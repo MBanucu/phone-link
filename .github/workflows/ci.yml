@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A pull request from a fork gets a read-only token, and every check here is
+# hermetic: no secrets, no phone, no publishing.
+permissions:
+  contents: read
+
+# A new push to the same branch makes the previous run irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flake-check:
+    name: nix flake check
+    runs-on: ubuntu-latest
+    # The GUI check builds GTK and renders a window under Xvfb; a cold cache
+    # pays for the whole Nix store, so give it room but not forever.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+
+      # `checks` covers the scripts, the module evaluation, the GUI and the
+      # hermetic test suites, so this one command is the whole gate.
+      - name: Check the flake
+        run: nix flake check --print-build-logs
