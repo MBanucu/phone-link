@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The tunnel can follow more than one phone address. `phoneLink.proxyHost` is
+  still the primary, and the new `phoneLink.proxyHosts` lists fallbacks in the
+  order they should be tried, e.g. the USB tether `10.23.190.38` before the AP
+  address. The 5 s probe tries each effective host and writes the first that
+  answers to `/run/phone-link/proxy-host`; `phone-tun`'s generated config and
+  the relay read that file, so switching between USB and the AP needs no
+  rebuild. With `proxyHosts = []` the probe and the tunnel behave exactly as
+  before.
+
 - The pinned adb port is asked first. The keeper app on the phone keeps adbd on
   `PHONE_ADB_PORT` (5555) after every reboot, so `adb.py` now probes
   `<AP or hotspot address>:5555` whenever a serial has to be resolved or
