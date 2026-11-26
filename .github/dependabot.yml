@@ -1,0 +1,8 @@
+version: 2
+updates:
+  # Keep the workflow actions current. The flake inputs are updated by hand
+  # (`nix flake update`) so a bump is reviewed together with its lock file.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

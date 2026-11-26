@@ -1,0 +1,57 @@
+name: Bug report
+description: A command, the module or the AP does not behave as documented
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Problems with the Android app or the APK belong in
+        [phone-link-proxy](https://github.com/MBanucu/phone-link-proxy/issues).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: The command you ran, and what it printed instead of what it should have.
+      placeholder: |
+        $ phone-doctor
+        ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest sequence that shows the problem. Say if it needs a phone.
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: NixOS version, Nix version, phone model and Android version.
+      placeholder: NixOS 26.05, Nix 2.34, Pixel 7 / Android 15
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Logs, `journalctl` lines or the doctor's report. Remove secrets and addresses you do not want public.
+      render: shell
+    validations:
+      required: false

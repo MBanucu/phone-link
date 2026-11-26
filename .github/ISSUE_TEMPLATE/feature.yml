@@ -1,0 +1,36 @@
+name: Feature request
+description: A command, module option or workflow that should exist
+title: "[feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is hard or missing today?
+      description: The situation, not the implementation — what you have to do by hand or cannot do at all.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What should it do?
+      description: The command, option or behaviour you want, and what "done" looks like.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you tried, or other designs that would also solve it.
+    validations:
+      required: false
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence it is needed
+      description: Output, timings or a link to a discussion. A speed claim needs a measurement.
+    validations:
+      required: false

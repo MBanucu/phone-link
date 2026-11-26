@@ -1,0 +1,46 @@
+name: Research
+description: A question to measure or decide before committing to code
+title: "[research]: "
+labels: ["research"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What are we trying to find out, in one or two sentences?
+    validations:
+      required: true
+
+  - type: textarea
+    id: measured
+    attributes:
+      label: What was measured?
+      description: The numbers, commands or observations you already have, and how they were taken.
+      placeholder: |
+        Measured ... with ... over ... minutes: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: options
+    attributes:
+      label: Options
+      description: The approaches on the table, with their trade-offs.
+    validations:
+      required: true
+
+  - type: textarea
+    id: criteria
+    attributes:
+      label: Decision criteria
+      description: What would make one option the answer? Speed, reliability, maintenance cost, phone impact.
+    validations:
+      required: true
+
+  - type: textarea
+    id: links
+    attributes:
+      label: Links
+      description: Related issues, documentation, upstream discussions or previous measurements.
+    validations:
+      required: false
