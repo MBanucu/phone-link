@@ -34,6 +34,13 @@ class Context:
         return self.get("PHONE_AP_CON", "phonelink")
 
     @property
+    def ap_declarative(self) -> bool:
+        """Whether the module declares the AP (`phoneLink.ap.enable`)."""
+        return Path(
+            self.get("PHONE_AP_DECLARATIVE", "/etc/phone-link/ap-profile")
+        ).is_file()
+
+    @property
     def ap_ip(self) -> str:
         return self.get("PHONE_AP_IP", "192.168.77.232")
 

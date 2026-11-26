@@ -2,6 +2,7 @@
 
 from . import (
     adb_wifi,
+    ap,
     app,
     flake,
     host,
@@ -15,6 +16,18 @@ from . import (
 
 # The app's own section follows the proxy checks: it is only meaningful once the
 # phone and the app are reachable.
-MODULES = [flake, host, phone, secrets, proxy, app, tunnel, tether, internet, adb_wifi]
+MODULES = [
+    flake,
+    host,
+    ap,
+    phone,
+    secrets,
+    proxy,
+    app,
+    tunnel,
+    tether,
+    internet,
+    adb_wifi,
+]
 
 __all__ = ["MODULES"]

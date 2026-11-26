@@ -97,10 +97,40 @@ sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/sysctl"
 
 cat >"$STUBS/systemctl" <<'EOF'
 #!/usr/bin/env bash
-cat "$LOG/tunnel"
-[ "$(cat "$LOG/tunnel")" = active ]
+case "$*" in
+  "is-active phone-tun.service")
+    cat "$LOG/tunnel"
+    [ "$(cat "$LOG/tunnel")" = active ] ;;
+  "is-active phone-link-ap-dhcp.service")
+    cat "$LOG/ap_dhcp"
+    [ "$(cat "$LOG/ap_dhcp")" = active ] ;;
+  "is-active phone-link-ap-noforward.service")
+    cat "$LOG/ap_noforward"
+    [ "$(cat "$LOG/ap_noforward")" = active ] ;;
+  *)
+    cat "$LOG/tunnel"
+    [ "$(cat "$LOG/tunnel")" = active ] ;;
+esac
 EOF
 sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/systemctl"
+
+cat >"$STUBS/nft" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  "list table inet phone_link_ap")
+    [ -f "$LOG/nft" ] && cat "$LOG/nft" ;;
+  *) exit 1 ;;
+esac
+EOF
+sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/nft"
+
+cat >"$STUBS/iw" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  "dev wlp110s0 station dump") cat "$LOG/iw_station" 2>/dev/null ;;
+esac
+EOF
+sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/iw"
 
 cat >"$STUBS/curl" <<'EOF'
 #!/usr/bin/env bash
@@ -132,6 +162,9 @@ chmod +x "$STUBS"/*
 export PATH="$STUBS:$PATH"
 export PHONE_SECRETS=$TMP/secrets
 export PHONE_DOCTOR_RESOLV=$LOG/resolv.conf
+# phoneLink.ap's marker: absent means hotspot mode, so the AP checks are skipped
+# unless a case turns the module-owned AP on.
+export PHONE_AP_DECLARATIVE=$LOG/ap-profile
 export PHONE_APK_CACHE=$TMP/cache
 export PHONE_PROXY_APK=$TMP/app.apk
 # The port in use normally comes from /run/phone-link/proxy-port; the suite
@@ -151,6 +184,13 @@ fresh_state() {
   printf 'package:/data/app/base.apk\n' >"$LOG/pm"
   printf 'wlp110s0 UP 192.168.77.1/24\n' >"$LOG/ap_addr"
   printf 'phonelink\n' >"$LOG/nmcli_cons"
+  # The module owns the AP: both units, the nft drop and the phone's station.
+  printf 'phonelink\n' >"$LOG/ap-profile"
+  printf 'active\n' >"$LOG/ap_dhcp"
+  printf 'active\n' >"$LOG/ap_noforward"
+  printf 'table inet phone_link_ap {\n\tchain forward {\n\t\tiifname "wlp110s0" drop\n\t}\n}\n' \
+    >"$LOG/nft"
+  printf 'Station aa:bb:cc:dd:ee:ff (on wlp110s0)\n' >"$LOG/iw_station"
   printf '1\n' >"$LOG/forward"
   printf 'active\n' >"$LOG/tunnel"
   printf '2022: from all fwmark 0x7e6 lookup 2022\n' >"$LOG/rules"
@@ -194,6 +234,15 @@ grep -q 'ok    proxy port.*laptop 1080, phone 1080' "$LOG/out" \
   && ok "matches the laptop's port with the phone's" \
   || bad "matches the laptop's port with the phone's" "$(cat "$LOG/out")"
 grep -q 'network transport' "$LOG/out" && ok "reports adb over Wi-Fi" || bad "reports adb over Wi-Fi"
+grep -q 'ok    ap dhcp' "$LOG/out" && ok "checks the AP DHCP unit" || bad "checks the AP DHCP unit"
+grep -q 'ok    ap noforward' "$LOG/out" && ok "checks the AP no-forward unit" \
+  || bad "checks the AP no-forward unit" "$(cat "$LOG/out")"
+grep -q 'ok    ap forward drop' "$LOG/out" && ok "checks the nft forward drop" \
+  || bad "checks the nft forward drop" "$(cat "$LOG/out")"
+grep -q 'ok    ap station.*1 on wlp110s0' "$LOG/out" && ok "checks the phone association" \
+  || bad "checks the phone association" "$(cat "$LOG/out")"
+grep -q 'ok    secrets mode.*600' "$LOG/out" && ok "checks the secrets mode" \
+  || bad "checks the secrets mode" "$(cat "$LOG/out")"
 
 # 2. No phone: required failure, phone checks skipped, rest still checked.
 fresh_state
@@ -222,14 +271,18 @@ run --analyze || true
 grep -q '^warn ip_forward ' "$LOG/out" && ok "--analyze reports it as a warning" \
   || bad "--analyze reports it as a warning" "$(cat "$LOG/out")"
 
-# 5. Hotspot mode: no AP interface, missing AP profile only warns.
+# 5. Hotspot mode: no AP interface, missing AP profile only warns, and the
+#    module-only AP pieces are skipped.
 fresh_state
 : >"$LOG/ap_addr"
 : >"$LOG/nmcli_cons"
+rm -f "$LOG/ap-profile"
 printf '2: wlan0    inet 10.244.108.165/24 brd 10.244.108.255 scope global wlan0\n' >"$LOG/ips"
 if run; then ok "hotspot mode exits 0"; else bad "hotspot mode exits 0" "$(cat "$LOG/out")"; fi
 grep -q 'warn  ap profile' "$LOG/out" && ok "warns about the AP profile" || bad "warns about the AP profile"
 grep -q 'warn  ap address' "$LOG/out" && ok "warns about the AP address" || bad "warns about the AP address"
+grep -q 'skip  ap units.*phoneLink.ap is off' "$LOG/out" \
+  && ok "skips the module-only AP checks" || bad "skips the module-only AP checks" "$(cat "$LOG/out")"
 grep -q 'proxy request.*10.244.108.165:1080 -> 200' "$LOG/out" && ok "checks the hotspot address" \
   || bad "checks the hotspot address" "$(cat "$LOG/out")"
 
@@ -258,6 +311,14 @@ grep -q 'FAIL  secrets' "$LOG/out" && ok "fails the secrets condition" || bad "f
 grep -q 'FAIL  proxy request.*PHONE_SOCKS_PASS' "$LOG/out" && ok "explains the missing password" \
   || bad "explains the missing password" "$(cat "$LOG/out")"
 
+# 7b. A secrets file readable by others is a warning, not a failed setup.
+fresh_state
+chmod 644 "$PHONE_SECRETS"
+if run; then ok "an open secrets file still exits 0"; else bad "an open secrets file still exits 0" "$(cat "$LOG/out")"; fi
+grep -q 'warn  secrets mode.*644 (should be 600)' "$LOG/out" \
+  && ok "warns about the secrets mode" || bad "warns about the secrets mode" "$(cat "$LOG/out")"
+chmod 600 "$PHONE_SECRETS"
+
 # 8. An inactive tunnel is optional, but its route is not checked then.
 fresh_state
 printf 'inactive\n' >"$LOG/tunnel"
@@ -279,6 +340,57 @@ grep -q 'FAIL  ap address' "$LOG/out" && ok "fails the AP address" || bad "fails
 run --analyze || true
 grep -q '^fail ap_address ' "$LOG/out" && ok "--analyze names ap_address" \
   || bad "--analyze names ap_address" "$(cat "$LOG/out")"
+
+# 10b. A stopped AP DHCP or no-forward unit is a required failure.
+fresh_state
+printf 'inactive\n' >"$LOG/ap_dhcp"
+if run; then bad "a stopped AP DHCP unit exits 1"; else ok "a stopped AP DHCP unit exits 1"; fi
+grep -q 'FAIL  ap dhcp.*inactive (phone-link-ap-dhcp.service)' "$LOG/out" \
+  && ok "names the stopped DHCP unit" || bad "names the stopped DHCP unit" "$(cat "$LOG/out")"
+fresh_state
+printf 'failed\n' >"$LOG/ap_noforward"
+if run; then bad "a failed no-forward unit exits 1"; else ok "a failed no-forward unit exits 1"; fi
+grep -q 'FAIL  ap noforward.*failed (phone-link-ap-noforward.service)' "$LOG/out" \
+  && ok "names the failed no-forward unit" || bad "names the failed no-forward unit" "$(cat "$LOG/out")"
+
+# 10c. A missing nft table or forward drop is a required failure.
+fresh_state
+rm -f "$LOG/nft"
+if run; then bad "a missing nft table exits 1"; else ok "a missing nft table exits 1"; fi
+grep -q 'FAIL  ap forward drop.*table inet phone_link_ap missing' "$LOG/out" \
+  && ok "names the missing nft table" || bad "names the missing nft table" "$(cat "$LOG/out")"
+fresh_state
+printf 'table inet phone_link_ap {\n\tchain forward {\n\t\tpolicy accept\n\t}\n}\n' >"$LOG/nft"
+if run; then bad "a table without the drop exits 1"; else ok "a table without the drop exits 1"; fi
+grep -q 'FAIL  ap forward drop.*no drop for wlp110s0' "$LOG/out" \
+  && ok "names the missing drop" || bad "names the missing drop" "$(cat "$LOG/out")"
+
+# 10d. An AP with no associated station is a required failure.
+fresh_state
+: >"$LOG/iw_station"
+if run; then bad "no station exits 1"; else ok "no station exits 1"; fi
+grep -q 'FAIL  ap station.*no phone associated on wlp110s0' "$LOG/out" \
+  && ok "names the missing station" || bad "names the missing station" "$(cat "$LOG/out")"
+run --analyze || true
+grep -q '^fail ap_station ' "$LOG/out" && ok "--analyze names ap_station" \
+  || bad "--analyze names ap_station" "$(cat "$LOG/out")"
+
+# 10e. Missing tools are skips, not crashes: the checks run with no PATH.
+marker=$LOG/ap-profile
+printf 'phonelink\n' >"$marker"
+if PYTHONPATH="$ROOT/lib/python" python3 - "$marker" >"$LOG/ap_skip" 2>&1 <<'PY'
+import sys
+
+from phone_doctor.checks import ap
+from phone_doctor.context import Context
+
+ctx = Context({"PATH": "/nonexistent", "PHONE_AP_DECLARATIVE": sys.argv[1]})
+results = ap.check(ctx)
+assert len(results) == 4, results
+assert all(r.status.value == "skip" for r in results), results
+print("skipped: " + " ".join(r.cid for r in results))
+PY
+then ok "missing tools only skip"; else bad "missing tools only skip" "$(cat "$LOG/ap_skip")"; fi
 
 # 11. The app off the Doze allowlist cannot come back at boot.
 fresh_state
