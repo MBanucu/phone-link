@@ -62,7 +62,7 @@ let
           "type": "socks",
           "tag": "phone",
           "server": "${cfg.proxyHost}",
-          "server_port": @PHONE_SOCKS_PORT@,
+          "server_port": "@PHONE_SOCKS_PORT@",
           "version": "5",
           "username": "${cfg.proxyUser}",
           "password": "@PHONE_SOCKS_PASS@"
@@ -83,12 +83,51 @@ let
 
   # The store config has placeholders for the two things that change at run
   # time: the password (root-only secrets file) and the port (the panel).
-  tunConfig = pkgs.writeShellScript "phone-tun-config" ''
-    port=$(${runtimePort} ${portFile} ${toString cfg.proxyPort})
-    ${pkgs.gnused}/bin/sed \
-      -e "s|@PHONE_SOCKS_PASS@|$PHONE_SOCKS_PASS|" \
-      -e "s|@PHONE_SOCKS_PORT@|$port|" \
-      ${singboxConfig} > /run/phone-tun/config.json
+  # Python rather than sed reads the template as JSON, so the password is never
+  # on a command line and any character in it survives; the result is root-only.
+  tunConfig = pkgs.writeScript "phone-tun-config" ''
+    #!${pkgs.python3}/bin/python3
+    import json
+    import os
+    import tempfile
+
+    template = "${singboxConfig}"
+    target = "/run/phone-tun/config.json"
+    port_file = "${portFile}"
+    fallback_port = ${toString cfg.proxyPort}
+
+    try:
+        with open(port_file, encoding="utf-8") as f:
+            port = int(f.read().strip())
+    except (OSError, ValueError):
+        port = fallback_port
+    if not 0 < port < 65536:
+        port = fallback_port
+
+    password = os.environ["PHONE_SOCKS_PASS"]
+
+    with open(template, encoding="utf-8") as f:
+        config = json.load(f)
+    for outbound in config["outbounds"]:
+        if outbound.get("tag") == "phone":
+            outbound["server_port"] = port
+            outbound["password"] = password
+
+    directory = os.path.dirname(target)
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".config.", dir=directory)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2)
+            f.write("\n")
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
   '';
 
   toggle = pkgs.writeShellScript "phone-tun-toggle" ''
@@ -358,6 +397,8 @@ in
             # Started and stopped by phone-tun-toggle.service, never at boot.
             serviceConfig = {
               RuntimeDirectory = "phone-tun";
+              RuntimeDirectoryMode = "0700";
+              UMask = "0077";
               EnvironmentFile = cfg.secretsFile;
               ExecStartPre = tunConfig;
               ExecStart = "${pkgs.sing-box}/bin/sing-box run -c /run/phone-tun/config.json";

@@ -346,6 +346,12 @@
               on.systemd.timers.phone-tun-toggle.timerConfig.OnBootSec == "20s"
             ) "the probe must not fire before the network is up";
             assert lib.assertMsg (
+              on.systemd.services.phone-tun.serviceConfig.UMask == "0077"
+            ) "the tunnel's generated config must stay root-only";
+            assert lib.assertMsg (
+              on.systemd.services.phone-tun.serviceConfig.RuntimeDirectoryMode == "0700"
+            ) "the tunnel's runtime directory must stay root-only";
+            assert lib.assertMsg (
               on.networking.firewall.interfaces.wlptest0.allowedUDPPorts == [ 67 ]
             ) "the AP interface must allow DHCP";
             assert lib.assertMsg (
@@ -447,14 +453,14 @@
             ) "the AP profile must be opt-in";
             pkgs.runCommand "phone-link-module-check" { } ''
               grep -q '"server": "10.9.9.9"' ${tunnelConfig}
-              grep -q '"server_port": @PHONE_SOCKS_PORT@' ${tunnelConfig}
+              grep -q '"server_port": "@PHONE_SOCKS_PORT@"' ${tunnelConfig}
               grep -q '"interface_name": "phone-tun"' ${tunnelConfig}
               grep -q '"password": "@PHONE_SOCKS_PASS@"' ${tunnelConfig}
               grep -qF 'sing-box run -c /run/phone-tun/config.json' \
                 ${pkgs.writeText "phone-tun-exec-start" on.systemd.services.phone-tun.serviceConfig.ExecStart}
               # The port is not baked into the units: each one reads the file the
               # panel writes, with phoneLink.proxyPort as its fallback.
-              grep -qF '/run/phone-link/proxy-port 1081' \
+              grep -qF '/run/phone-link/proxy-port' \
                 ${on.systemd.services.phone-tun.serviceConfig.ExecStartPre}
               grep -qF '/run/phone-link/proxy-port 1081' \
                 ${on.systemd.services.phone-tun-toggle.serviceConfig.ExecStart}

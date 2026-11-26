@@ -56,6 +56,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The generated sing-box config no longer puts the proxy password on a command
+  line or leaves it world-readable. `phone-tun-config` used `sed` to substitute
+  `PHONE_SOCKS_PASS` into a template, which exposed the password in
+  `/proc/<pid>/cmdline`, broke on `|`, `&` or `\` in the password, and wrote
+  `/run/phone-tun/config.json` as `0644`. It is a small Python writer now: it
+  reads the password from the environment, parses the template as JSON, sets the
+  outbound port and password, and writes the result atomically with mode
+  `0600`. The unit also sets `UMask = "0077"` and
+  `RuntimeDirectoryMode = "0700"`.
+
 - The PhoneLink AP is a link, not the phone's internet uplink. The declarative
   profile used NetworkManager's `shared` method, which ran dnsmasq with a router
   and DNS option and installed NAT and forwarding, so Android validated the AP
