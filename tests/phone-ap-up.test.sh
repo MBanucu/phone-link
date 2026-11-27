@@ -7,37 +7,24 @@ set -u
 BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/bin/phone-ap-up
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+
+. "$ROOT/tests/lib/harness.sh"
+tmpdir TMP
 export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
 mkdir -p "$LOG" "$STUBS"
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
-
-cat >"$STUBS/id" <<'EOF'
-#!/usr/bin/env bash
+stub_cmd id "$STUBS" <<'EOF'
 printf '0\n'
 EOF
 
-cat >"$STUBS/iw" <<'EOF'
-#!/usr/bin/env bash
+stub_cmd iw "$STUBS" <<'EOF'
 case "$*" in
   list) printf '\t* AP\n\t* managed\n' ;;
   "dev wlp110s0 station dump") : ;;
 esac
 EOF
 
-cat >"$STUBS/nmcli" <<'EOF'
-#!/usr/bin/env bash
+stub_cmd nmcli "$STUBS" <<'EOF'
 case "$*" in
   "-g wifi.backend") printf 'wpa_supplicant\n' ;;
   "-t -f NAME con show") printf 'phonelink\n' ;;
@@ -45,8 +32,7 @@ case "$*" in
 esac
 EOF
 
-cat >"$STUBS/ip" <<'EOF'
-#!/usr/bin/env bash
+stub_cmd ip "$STUBS" <<'EOF'
 case "$*" in
   "-4 -br addr show wlp110s0") printf 'wlp110s0 UP 192.168.77.1/24\n' ;;
 esac
@@ -54,19 +40,15 @@ EOF
 
 # The regression is about not needing forwarding: a run that asks sysctl at all
 # leaves a marker, and every answer here is 0.
-cat >"$STUBS/sysctl" <<'EOF'
-#!/usr/bin/env bash
+stub_cmd sysctl "$STUBS" <<'EOF'
 printf '%s\n' "$*" >>"$LOG/sysctl"
 printf '0\n'
 EOF
 
-cat >"$STUBS/sudo" <<'EOF'
-#!/usr/bin/env bash
+stub_cmd sudo "$STUBS" <<'EOF'
 exec "$@"
 EOF
 
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS"/*
-chmod +x "$STUBS"/*
 export PATH="$STUBS:$PATH"
 export PHONE_AP_DECLARATIVE=$TMP/ap-profile
 
@@ -85,16 +67,17 @@ grep -q 'AP up' "$LOG/out" && ok "reports the AP up" || bad "reports the AP up" 
 [ -e "$LOG/sysctl" ] && bad "never reads ip_forward" || ok "never reads ip_forward"
 
 # 2. A driver without AP mode still fails.
-printf '#!%s\nprintf "no AP here\\n"\n' "$BASH_BIN" >"$STUBS/iw"
-chmod +x "$STUBS/iw"
+stub_cmd iw "$STUBS" <<'EOF'
+printf 'no AP here\n'
+EOF
 if run; then bad "a driver without AP mode exits 1"; else ok "a driver without AP mode exits 1"; fi
 grep -q 'no AP mode' "$LOG/out" && ok "names the missing AP mode" \
   || bad "names the missing AP mode" "$(cat "$LOG/out")"
 
 # 3. --help.
-printf '#!%s\nprintf "\\t* AP\\n"\n' "$BASH_BIN" >"$STUBS/iw"
-chmod +x "$STUBS/iw"
+stub_cmd iw "$STUBS" <<'EOF'
+printf '\t* AP\n'
+EOF
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

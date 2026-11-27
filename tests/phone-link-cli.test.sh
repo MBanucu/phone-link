@@ -6,23 +6,13 @@ set -u
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 LINK=$ROOT/bin/phone-link
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+
+. "$ROOT/tests/lib/harness.sh"
+tmpdir TMP
 STUBS=$TMP/bin
 mkdir -p "$STUBS"
 export HOME=$TMP XDG_CACHE_HOME=$TMP/cache
 export PATH="$ROOT/bin:$PATH"
-
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
 # Through bash explicitly: the checkout wrapper has a /usr/bin/env shebang,
 # which a hermetic build sandbox does not provide.
@@ -52,6 +42,7 @@ for file in "$ROOT"/bin/*; do
   printf '%s\n' "$name" >>"$TMP/expected"
 done
 sort -o "$TMP/expected" "$TMP/expected"
+mapfile -t expected <"$TMP/expected"
 if diff -u "$TMP/expected" "$TMP/ids" >"$TMP/diff"; then
   ok "the registry covers every script"
 else
@@ -59,12 +50,12 @@ else
 fi
 
 # 2. check-registry agrees, and catches a script with no entry.
-if run check-registry $(cat "$TMP/expected"); then
+if run check-registry "${expected[@]}"; then
   ok "check-registry accepts bin/"
 else
   bad "check-registry accepts bin/" "$(cat "$TMP/err")"
 fi
-if run check-registry $(cat "$TMP/expected") extra-script; then
+if run check-registry "${expected[@]}" extra-script; then
   bad "check-registry rejects a missing action"
 else
   ok "check-registry rejects a missing action"
@@ -165,5 +156,4 @@ if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 grep -q 'check-registry' "$TMP/out" && ok "--help lists the commands" \
   || bad "--help lists the commands"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish
