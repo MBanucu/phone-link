@@ -193,7 +193,10 @@ for version in 1 2 3 4; do
   touch -d "2026-11-0$version 00:00" "$PHONE_APK_CACHE/v0.$version.0-phone-link-proxy-0.1.0.apk"
 done
 run --releases 1
-left=$(ls "$PHONE_APK_CACHE" | grep -c '^v0\.' || true)
+left=0
+for apk in "$PHONE_APK_CACHE"/v0.*; do
+  [ -e "$apk" ] && left=$((left + 1))
+done
 [ "$left" = 1 ] && ok "a big kit is pruned back to what was asked for" \
   || bad "a big kit is pruned back to what was asked for" "$(ls "$PHONE_APK_CACHE")"
 if [ -e "$PHONE_APK_CACHE/v0.1.0-phone-link-proxy-0.1.0.apk" ]; then

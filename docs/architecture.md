@@ -41,10 +41,11 @@ flake.nix  →  modules/*.nix  →  lib/python/* + lib/*.sh  →  bin/*  →  te
 | Change the GUI | `lib/python/phone_link_gui/app.py` (pages beside it); argv still comes from `lib/python/phone_link/actions.py` | `nix build .#checks.x86_64-linux.gui` and `.#checks.x86_64-linux.gui-registry` |
 | Change the proxy install | `lib/python/phone_link/commands/phone.py` (`phone_proxy_install`); the app itself is `MBanucu/phone-link-proxy` | `bash tests/phone-proxy-install.test.sh` |
 
-[`nix build .#checks.x86_64-linux.format`](checks.md) guards the Nix files, and
-[`shellcheck`](checks.md) guards `bin/` and `lib/*.sh`. Every suite also runs
-through the `script` check inside `nix flake check`; [checks.md](checks.md) has
-the full table and how to run one target.
+[`nix build .#checks.x86_64-linux.format`](checks.md) guards the Nix files,
+[`shellcheck`](checks.md) guards `bin/`, `lib/*.sh` and every `*.sh` under
+`tests/`, and [`python`](checks.md) compiles `lib/python/`. Every suite also
+runs through the `script` check inside `nix flake check`; [checks.md](checks.md)
+has the full table and how to run one target.
 
 ## Module options and the units they create
 
