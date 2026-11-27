@@ -296,6 +296,20 @@
               };
             }
           ];
+          # The rejoin watchdog is on by default with ap.enable, and off when
+          # ap.rejoin = false.
+          apNoRejoin = evalModule [
+            {
+              networking.networkmanager.enable = true;
+              phoneLink = {
+                enable = true;
+                ap = {
+                  enable = true;
+                  rejoin = false;
+                };
+              };
+            }
+          ];
           # The AP's forward drop must not depend on the NixOS firewall.
           apNoFirewall = evalModule [
             {
@@ -563,6 +577,31 @@
               !(on.systemd.services ? phone-link-ap-noforward)
             ) "the AP forward drop must be opt-in";
             assert lib.assertMsg (
+              !(on.systemd.services ? phone-link-ap-rejoin)
+            ) "the rejoin watchdog must be opt-in with ap.enable";
+            assert lib.assertMsg (
+              apOn.systemd.services ? phone-link-ap-rejoin
+            ) "ap.enable must define the rejoin watchdog by default";
+            assert lib.assertMsg (
+              apOn.systemd.services.phone-link-ap-rejoin.serviceConfig.Type == "oneshot"
+            ) "the rejoin watchdog must be a oneshot";
+            assert lib.assertMsg (
+              apOn.systemd.services.phone-link-ap-rejoin.serviceConfig.EnvironmentFile
+              == "/etc/nixos/phone-socks-secrets"
+            ) "the rejoin watchdog must read the PSK from the secrets file";
+            assert lib.assertMsg (
+              apOn.systemd.timers.phone-link-ap-rejoin.timerConfig.OnUnitActiveSec == "30s"
+            ) "the rejoin watchdog must tick every 30 s";
+            assert lib.assertMsg (
+              apOn.systemd.timers.phone-link-ap-rejoin.timerConfig.OnBootSec == "45s"
+            ) "the rejoin watchdog must wait for the AP to come up";
+            assert lib.assertMsg (
+              !(apNoRejoin.systemd.services ? phone-link-ap-rejoin)
+            ) "ap.rejoin = false must not define the rejoin watchdog";
+            assert lib.assertMsg (
+              !(apNoRejoin.systemd.timers ? phone-link-ap-rejoin)
+            ) "ap.rejoin = false must not define the rejoin timer";
+            assert lib.assertMsg (
               apOn.networking.networkmanager.ensureProfiles.profiles.phonelink.wifi.band == "a"
             ) "the AP must default to 5 GHz";
             assert lib.assertMsg (
@@ -603,6 +642,12 @@
               grep -qF '/run/phone-link/proxy-host' "$toggle"
               grep -qF "PHONE_TUN_HOSTS='10.9.9.9 10.23.190.38 10.9.9.8'" "$toggle"
               grep -qF 'phone-tun.service' "$toggle"
+              # The rejoin watchdog binds the configured SSID and the runtime
+              # throttle file; adb comes from its PATH, not an absolute path.
+              rejoin=${apOn.systemd.services.phone-link-ap-rejoin.serviceConfig.ExecStart}
+              grep -qF 'PHONE_AP_SSID=TestLink' "$rejoin"
+              grep -qF 'PHONE_AP_REJOIN_STATE=/run/phone-link/ap-rejoin.last' "$rejoin"
+              grep -qF 'android-tools' "$rejoin"
               touch $out
             '';
 

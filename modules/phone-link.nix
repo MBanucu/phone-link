@@ -160,6 +160,30 @@ let
     exec ${pkgs.bash}/bin/bash ${../lib/phone-tun-toggle.sh}
   '';
 
+  # Android marks the link-only AP as "no internet" and temporarily disables
+  # auto-join for the saved network, so the phone never returns after the AP
+  # restarts.  This re-asserts the association over USB adb instead of making
+  # the AP answer the connectivity probe, which would route the phone's traffic
+  # through the link-only AP.  The logic is in lib/ so a test can drive it with
+  # stub iw/adb/sleep commands; the throttle state lives under /run and is
+  # therefore reset by a reboot, where the AP profile is fresh anyway.
+  rejoin = pkgs.writeShellScript "phone-link-ap-rejoin" ''
+    export PHONE_AP_IF=${lib.escapeShellArg cfg.apInterface}
+    export PHONE_AP_SSID=${lib.escapeShellArg cfg.ap.ssid}
+    export PHONE_AP_SECURITY=wpa2
+    export PHONE_AP_REJOIN_STATE=${lib.escapeShellArg "${runtimeDir}/ap-rejoin.last"}
+    export PATH=${
+      lib.makeBinPath [
+        pkgs.bash
+        pkgs.coreutils
+        pkgs.iw
+        pkgs.android-tools
+        pkgs.iproute2
+      ]
+    }
+    exec ${pkgs.bash}/bin/bash ${../lib/phone-ap-rejoin.sh}
+  '';
+
   relay = pkgs.writeShellScript "phone-socks-relay" ''
     port=$(${runtimePort} ${portFile} ${toString cfg.proxyPort})
     host=$(${pkgs.coreutils}/bin/cat ${hostFile} 2>/dev/null || true)
@@ -229,6 +253,21 @@ in
           profile stays down until `phone-ap-up` runs.  Turning it on reserves
           the radio for the AP; a 5 GHz activation that fails then leaves no
           link at all (see #7).
+        '';
+      };
+
+      rejoin = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Re-assert the phone's association with the AP when the AP comes back
+          with no station.  Android validates the link-only AP as "no
+          internet" and temporarily disables auto-join for the saved network,
+          so after any AP restart the phone stays away until something forces
+          it (issue #33).  The watchdog runs over USB adb only, is throttled to
+          one attempt every five minutes, and does nothing while any station is
+          associated.  Requires `phoneLink.ap.enable`; set it to false when the
+          phone is not on USB, in which case it must be rejoined by hand.
         '';
       };
 
@@ -586,6 +625,28 @@ in
           systemd.services.NetworkManager-ensure-profiles.preStart = ''
             rm -f -- ${lib.escapeShellArg "/etc/NetworkManager/system-connections/${cfg.ap.name}.nmconnection"}
           '';
+
+          # The phone's own auto-join is off for this network (Android saw no
+          # internet), so a 30 s tick re-asserts the association over USB adb.
+          # The service exits non-zero when the phone is away; that is normal
+          # and must not fail the boot, hence no Restart and no boot ordering.
+          systemd.services.phone-link-ap-rejoin = lib.mkIf cfg.ap.rejoin {
+            description = "Re-assert the phone's association with the PhoneLink AP";
+            serviceConfig = {
+              Type = "oneshot";
+              EnvironmentFile = cfg.secretsFile;
+              ExecStart = rejoin;
+            };
+          };
+
+          systemd.timers.phone-link-ap-rejoin = lib.mkIf cfg.ap.rejoin {
+            wantedBy = [ "timers.target" ];
+            timerConfig = {
+              OnBootSec = "45s";
+              OnUnitActiveSec = "30s";
+              AccuracySec = "1s";
+            };
+          };
 
           # Lets the scripts tell a declarative profile from a hand-made one.
           environment.etc."phone-link/ap-profile".text = cfg.ap.name;
