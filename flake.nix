@@ -39,6 +39,11 @@
 
       # Everything the scripts call at runtime.  The wrappers put these on PATH,
       # so a script behaves the same from the store and from a checkout.
+      #
+      # nmcli is the exception: it talks to the host's NetworkManager daemon,
+      # so the host's client is the one that matches it.  A newer bundled
+      # client warns about the version skew (and can mis-read properties), so
+      # `networkmanager` is appended after these instead of prepended.
       runtimeDeps =
         pkgs: with pkgs; [
           android-tools
@@ -52,7 +57,6 @@
           gnused
           iproute2
           iw
-          networkmanager
           python3
           sing-box
           systemd
@@ -99,7 +103,8 @@
                   # exist in every environment the scripts run in.
                   patchShebangs "$out/share/phone-link/bin/${name}"
                   wrapProgram "$out/share/phone-link/bin/${name}" \
-                    --prefix PATH : ${lib.makeBinPath deps}
+                    --prefix PATH : ${lib.makeBinPath deps} \
+                    --suffix PATH : ${lib.makeBinPath [ pkgs.networkmanager ]}
                   ln -s "$out/share/phone-link/bin/${name}" "$out/bin/${name}"
                 '') (scripts ++ coreScripts)}
               '';

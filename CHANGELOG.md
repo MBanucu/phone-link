@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Scripts prefer the host's `nmcli` over the bundled one (#104). The bundle
+  comes from the flake's nixpkgs, which can be newer than the host's
+  NetworkManager daemon; the 1.58.1 client warned about the 1.56.0 daemon on
+  every doctor/status run, with advice a restart cannot satisfy. The bundled
+  client stays at the end of PATH for hosts that have none.
+
 ## [0.20.0] - 2026-11-27
 
 ### Added
