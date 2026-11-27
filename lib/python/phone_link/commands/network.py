@@ -19,8 +19,8 @@ import sys
 import tempfile
 import time
 
-from .. import actions, phone, settings
-from ..shell import capture, die, log, must, run, run_text, status
+from .. import actions, phone, regdomain, settings
+from ..shell import capture, die, have, log, must, run, run_both, run_text, status
 
 USAGE_FORWARDING = """usage: phone-fix-forwarding [--check]
 
@@ -363,6 +363,79 @@ def _ap_is_external() -> bool:
     return settings.PHONE_AP_ROLE == "external"
 
 
+def _ap_channel_verdict() -> regdomain.Verdict | None:
+    """Read the regulatory state of the configured AP channel, read-only.
+
+    Returns None when `iw` is absent: the check must not block a setup that
+    works, and the caller keeps the activation path unchanged.
+    """
+    if not have("iw"):
+        return None
+    channel = int(settings.PHONE_AP_CHANNEL) if settings.PHONE_AP_CHANNEL.isdigit() else 0
+    if not channel:
+        return None
+    return regdomain.probe(
+        settings.PHONE_AP_BAND,
+        channel,
+        interface=settings.PHONE_AP_IF,
+        capture=capture,
+    )
+
+
+def _preflight_ap_channel() -> regdomain.Verdict | None:
+    """Refuse a channel the domain does not allow, before NetworkManager waits.
+
+    The supplicant timeout is about 25 s and its message ("802.1X supplicant
+    took too long to authenticate") names the wrong subsystem.  This is the
+    same check the doctor reports as `ap_channel`.
+    """
+    verdict = _ap_channel_verdict()
+    if verdict is None or verdict.allowed is not False:
+        return verdict
+    what = regdomain.channel_label(
+        settings.PHONE_AP_BAND, int(settings.PHONE_AP_CHANNEL)
+    )
+    die(
+        f"{what} is {verdict.reason} in "
+        f"{regdomain.country_label(verdict.country)}, so NetworkManager "
+        "cannot start the AP here (it would end in the 802.1X supplicant "
+        f"timeout). Fix: {regdomain.remediation(verdict.country)}. "
+        "Not waiting for the supplicant timeout"
+    )
+    return verdict
+
+
+# The activation failures the issue observed when wpa_supplicant is stale:
+# the domain allows the channel, but the supplicant's failed AP state survives
+# a regulatory change until NetworkManager restarts it.
+_ACTIVATION_FAILED_AP = (
+    "802.1x supplicant took too long to authenticate",
+    "failed to start ap functionality",
+)
+
+
+def _ap_activation_failed(
+    code: int, output: str, verdict: regdomain.Verdict | None
+) -> None:
+    """Report an `nmcli connection up` failure, adding the stale-supplicant hint."""
+    if output:
+        log(output)
+    if verdict is not None and verdict.allowed is True and any(
+        needle in output.lower() for needle in _ACTIVATION_FAILED_AP
+    ):
+        what = regdomain.channel_label(
+            settings.PHONE_AP_BAND, int(settings.PHONE_AP_CHANNEL)
+        )
+        log(
+            f"hint: {what} is allowed in "
+            f"{regdomain.country_label(verdict.country)}, so this is not the "
+            "regulatory domain. A failed wpa_supplicant AP state can survive "
+            "an `iw reg set`; restart NetworkManager to clear it: "
+            "sudo systemctl restart NetworkManager"
+        )
+    raise SystemExit(code)
+
+
 def phone_ap_up(args: list[str]) -> int:
     """Bring up the laptop access point the phone joins as a Wi-Fi client."""
     phone.as_root("phone-ap-up", args)
@@ -385,6 +458,8 @@ def phone_ap_up(args: list[str]) -> int:
     if capture(["nmcli", "-g", "wifi.backend"]) == "iwd":
         die("NetworkManager uses iwd; AP mode needs wpa_supplicant")
 
+    verdict = _preflight_ap_channel()
+
     if not _profile_exists():
         if phone.ap_declarative():
             log(f"profile {settings.PHONE_AP_CON} missing; reloading it from phoneLink.ap")
@@ -403,7 +478,11 @@ def phone_ap_up(args: list[str]) -> int:
                     "(run phone-ap-create)"
                 )
 
-    must(["nmcli", "connection", "up", settings.PHONE_AP_CON])
+    code, output = run_both(["nmcli", "connection", "up", settings.PHONE_AP_CON])
+    if code != 0:
+        _ap_activation_failed(code, output, verdict)
+    if output:
+        log(output)
     _request_ap_rejoin()
     must(["ip", "-4", "-br", "addr", "show", settings.PHONE_AP_IF])
     log("AP up. The phone must have Wi-Fi (client) on, not the hotspot.")

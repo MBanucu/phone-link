@@ -98,6 +98,24 @@ width (NetworkManager 1.50+ supports the setting; 2.4 GHz is capped at 40 MHz).
 The hand-made profile from `phone-ap-create` uses the same band, channel and
 width.
 
+The channel only works where the regulatory domain allows IR. A fresh boot with
+no Wi-Fi client association stays in `country 00`, where 149 is passive-scan
+only, so wpa_supplicant cannot start AP mode and NetworkManager reports a
+misleading 802.1X supplicant timeout (#91). Set
+
+```nix
+phoneLink.ap.country = "DE";   # your uppercase ISO 3166-1 alpha-2 code
+```
+
+to add `cfg80211.ieee80211_regdom=DE` to `boot.kernelParams`; it applies on the
+next boot and survives a NetworkManager restart. For the running boot use
+`sudo iw reg set DE`. `phone-ap-up` checks the channel before activation and
+fails fast with the country and these fixes; `phone-doctor` reports the same
+state as `ap channel` (`ok`, or a `warn` naming the country and the fixes). If
+the domain allows the channel but activation still reports `Failed to start AP
+functionality`, a stale wpa_supplicant can be the cause: `sudo systemctl restart
+NetworkManager` is the recovery.
+
 ## Hairpin uplink: `ap.uplink = "tunnel"`
 
 The link-only AP is the default, but Android then never validates it and this

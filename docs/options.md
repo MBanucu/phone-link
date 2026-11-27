@@ -16,6 +16,7 @@ they disagree. The fail-open options are declared in
 | `phoneLink.ap.name` | `phonelink` | NetworkManager connection name |
 | `phoneLink.ap.ssid` | `PhoneLink` | SSID of the laptop access point; with `role = "external"` the external AP's SSID the rejoin watchdog nudges to |
 | `phoneLink.ap.band` / `channel` / `channelWidth` | `a` / `149` / `80` | 802.11 band, channel and AP channel width (5 GHz, non-DFS); local role only |
+| `phoneLink.ap.country` | `null` | uppercase ISO 3166-1 alpha-2 code (e.g. `"DE"`) added to `boot.kernelParams` as `cfg80211.ieee80211_regdom`; `null` leaves the domain alone. Takes effect on the next boot; without it a fresh boot in `country 00` cannot use 149 for AP mode |
 | `phoneLink.ap.address` | `192.168.77.1/24` | IPv4 address of the local AP interface; local role only |
 | `phoneLink.ap.uplink` | `none` | `none` keeps the AP link-only; `tunnel` hairpins one client through `phone-tun` so the AP can validate; must stay `none` with `role = "external"` |
 | `phoneLink.ap.forwardClient` | `phoneLink.proxyHost` | the one AP client accepted when `uplink = "tunnel"`; every other source stays dropped (local role only) |

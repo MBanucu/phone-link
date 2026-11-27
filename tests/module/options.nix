@@ -8,6 +8,7 @@ let
     apOn
     apNamed
     apAutoconnect
+    apCountry
     apNoRejoin
     apNoFirewall
     apHairpin
@@ -130,6 +131,13 @@ assert lib.assertMsg (
 assert lib.assertMsg (
   apAutoconnect.networking.networkmanager.ensureProfiles.profiles.phonelink.ipv4.method == "manual"
 ) "ap.autoconnect must not change the link-only IPv4 method";
+assert lib.assertMsg (lib.elem "cfg80211.ieee80211_regdom=DE" apCountry.boot.kernelParams)
+  "ap.country must reach the kernel command line";
+assert lib.assertMsg (lib.elem "quiet" apCountry.boot.kernelParams)
+  "ap.country must merge with existing boot.kernelParams";
+assert lib.assertMsg (
+  !(lib.any (param: lib.hasPrefix "cfg80211.ieee80211_regdom=" param) on.boot.kernelParams)
+) "ap.country unset must leave the regulatory domain alone";
 assert lib.assertMsg (
   !(apAutoconnect.networking.networkmanager.ensureProfiles.profiles.phonelink.ipv4 ? gateway)
 ) "ap.autoconnect must not install a default gateway";

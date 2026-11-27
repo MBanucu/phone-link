@@ -45,6 +45,22 @@ class Context:
         return self.get("PHONE_AP_SSID", "PhoneLink")
 
     @property
+    def ap_band(self) -> str:
+        return self.get("PHONE_AP_BAND", "a")
+
+    @property
+    def ap_channel(self) -> int:
+        """The AP channel, from the same env/default as phone-ap-create.
+
+        The module writes PHONE_AP_BAND/PHONE_AP_CHANNEL even at their
+        defaults, so the doctor reads the profile's own source rather than the
+        generated keyfile; a deployment that never used the module falls back
+        to the command's built-in default (5 GHz 149).
+        """
+        value = self.get("PHONE_AP_CHANNEL", "149")
+        return int(value) if value.isdigit() else 149
+
+    @property
     def ap_role(self) -> str:
         """Whether this host owns the AP (`local`) or is only a client of it.
 

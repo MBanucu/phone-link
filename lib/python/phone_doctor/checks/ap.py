@@ -9,6 +9,8 @@ does not own the profile, because hotspot mode has none of these pieces.
 
 from __future__ import annotations
 
+from phone_link import regdomain
+
 from ..context import Context
 from ..model import Result, fail, ok, skip, warn
 
@@ -38,6 +40,41 @@ def _forward_drop(ctx: Context) -> Result:
                 return ok(cid, label, f"{ctx.ap_if} dropped")
         return fail(cid, label, f"table inet phone_link_ap has no drop for {ctx.ap_if}")
     return fail(cid, label, "table inet phone_link_ap missing or unreadable")
+
+
+def _channel(ctx: Context) -> Result:
+    """Whether the configured AP channel is usable in the current domain.
+
+    Independent of the AP: it reads `iw`, not the profile's activation, so it
+    answers the fresh-boot case where nothing is up yet.  The parse is shared
+    with `phone-ap-up`, so the command and the doctor cannot disagree.
+    """
+    cid = "ap_channel"
+    label = "ap channel"
+    if not ctx.have("iw"):
+        return skip(cid, label, "iw not installed")
+    verdict = regdomain.probe(
+        ctx.ap_band,
+        ctx.ap_channel,
+        interface=ctx.ap_if,
+        capture=ctx.text,
+    )
+    what = regdomain.channel_label(ctx.ap_band, ctx.ap_channel)
+    if verdict.allowed is None:
+        return skip(cid, label, f"cannot read the regulatory domain for {what}")
+    if verdict.allowed:
+        return ok(
+            cid,
+            label,
+            f"{what} allowed in {regdomain.country_label(verdict.country)}",
+        )
+    return warn(
+        cid,
+        label,
+        f"{what} is {verdict.reason} in "
+        f"{regdomain.country_label(verdict.country)}; "
+        f"{regdomain.remediation(verdict.country)}",
+    )
 
 
 def _station(ctx: Context) -> Result:
@@ -134,11 +171,20 @@ def check(ctx: Context) -> list[Result]:
             "ap role",
             "external (another host owns the AP; the laptop is a client)",
         )
-        return [role, _external_link(ctx), _external_station(ctx)]
+        channel = skip(
+            "ap_channel",
+            "ap channel",
+            "external AP; this host does not own the channel",
+        )
+        return [role, channel, _external_link(ctx), _external_station(ctx)]
 
     role = ok("ap_role", "ap role", "local (this laptop owns the AP)")
     if not ctx.ap_declarative:
-        return [role, skip("ap_units", "ap units", "phoneLink.ap is off")]
+        return [
+            role,
+            skip("ap_channel", "ap channel", "phoneLink.ap is off"),
+            skip("ap_units", "ap units", "phoneLink.ap is off"),
+        ]
 
     return [
         role,
@@ -155,5 +201,6 @@ def check(ctx: Context) -> list[Result]:
             "ap noforward",
         ),
         _forward_drop(ctx),
+        _channel(ctx),
         _station(ctx),
     ]
