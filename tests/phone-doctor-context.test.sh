@@ -212,5 +212,88 @@ True
 False" ] && ok "resolves nft through the environment, the module file and PATH" \
   || bad "resolves nft through the environment, the module file and PATH" "$out"
 
+# 9. Two threads resolving serial, secrets and the nmcli profile probe do the
+#    work once and see one consistent answer. A module-level resolve_serial
+#    stub counts how often the serial cache actually ran.
+out=$(PYTHONPATH="$ROOT/lib/python" python3 - <<'PY'
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+
+import phone_doctor.context as context
+from phone_doctor.context import Context
+
+serial_calls = 0
+serial_lock = threading.Lock()
+
+
+def resolve(_env):
+    global serial_calls
+    with serial_lock:
+        serial_calls += 1
+    time.sleep(0.05)
+    return "SERIAL"
+
+
+context.resolve_serial = resolve
+
+
+class CountingSecrets:
+    def __init__(self):
+        self.calls = 0
+        self.lock = threading.Lock()
+
+    def read_text(self):
+        with self.lock:
+            self.calls += 1
+        time.sleep(0.05)
+        return "PHONE_SOCKS_PASS=secret\nPHONE_PIN=1234\n"
+
+
+class CountingContext(Context):
+    def __init__(self):
+        super().__init__({"PHONE_CONFIG_FILE": "/nonexistent"})
+        self.secret_path = CountingSecrets()
+        self.profile_calls = 0
+        self.profile_lock = threading.Lock()
+
+    @property
+    def secrets_file(self):
+        return self.secret_path
+
+    def text(self, argv, timeout=None):
+        if argv and argv[0] == "nmcli":
+            with self.profile_lock:
+                self.profile_calls += 1
+            time.sleep(0.05)
+            return "phonelink\n"
+        return ""
+
+
+ctx = CountingContext()
+
+
+def work(_index):
+    return (
+        ctx.serial,
+        ctx.secrets()["PHONE_PIN"],
+        ctx.profile_exists(),
+        ctx.serial_error,
+    )
+
+
+with ThreadPoolExecutor(max_workers=8) as pool:
+    answers = list(pool.map(work, range(8)))
+
+assert answers == [("SERIAL", "1234", True, "")] * 8, answers
+assert serial_calls == 1, serial_calls
+assert ctx.secret_path.calls == 1, ctx.secret_path.calls
+assert ctx.profile_calls == 1, ctx.profile_calls
+print("initialised-once")
+PY
+)
+[ "$out" = initialised-once ] && ok "concurrent caches initialise once" \
+  || bad "concurrent caches initialise once" "$out"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

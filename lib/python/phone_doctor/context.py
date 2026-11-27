@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 
 # The doctor shares the adb transport fallback with the commands: a phone that
@@ -27,6 +28,16 @@ class Context:
         self._serial_error = ""
         self._profile: bool | None = None
         self._secrets: dict[str, str] | None = None
+        self._secrets_loaded = False
+        # The lazy caches share one re-entrant lock: the initialisation is
+        # double-checked, and no check runs while another worker is only
+        # reading a value that is already there.
+        self._lock = threading.RLock()
+        # adb's prepare/retry path can reconnect to a rotated wireless port.
+        # A separate lock keeps two workers from racing that recovery without
+        # serialising the actual command, and without nesting with the cache
+        # lock in a way that can deadlock.
+        self._adb_lock = threading.Lock()
 
     # -- configuration -------------------------------------------------
     def get(self, name: str, default: str) -> str:
@@ -165,14 +176,20 @@ class Context:
         self, argv: list[str], timeout: float | None = None
     ) -> subprocess.CompletedProcess[str] | None:
         try:
-            argv = prepare(argv)
+            # prepare() can discover and connect to a rotated wireless port.
+            # Only that recovery path is serialised; the command itself runs
+            # outside the lock so independent checks still overlap.
+            with self._adb_lock:
+                argv = prepare(argv)
         except SerialError as exc:
-            self._serial_error = str(exc)
+            with self._lock:
+                self._serial_error = str(exc)
             return None
         proc = self._spawn(argv, timeout)
         if proc is None or proc.returncode == 0:
             return proc
-        recovered = retry(argv)
+        with self._adb_lock:
+            recovered = retry(argv)
         if recovered is None:
             return proc
         return self._spawn(recovered, timeout)
@@ -197,17 +214,23 @@ class Context:
     @property
     def serial(self) -> str | None:
         if not self._serial_loaded:
-            self._serial_loaded = True
-            try:
-                self._serial = resolve_serial(self.env)
-            except SerialError as exc:
-                self._serial_error = str(exc)
+            with self._lock:
+                if not self._serial_loaded:
+                    try:
+                        # Resolving a serial can itself discover and connect a
+                        # rotated port, so it shares adb's recovery lock.
+                        with self._adb_lock:
+                            self._serial = resolve_serial(self.env)
+                    except SerialError as exc:
+                        self._serial_error = str(exc)
+                    self._serial_loaded = True
         return self._serial
 
     @property
     def serial_error(self) -> str:
         """Why no serial could be chosen, when it was ambiguous rather than absent."""
-        return self._serial_error
+        with self._lock:
+            return self._serial_error
 
     def adb(self, *args: str, timeout: float | None = None) -> str:
         if self.serial is None:
@@ -248,8 +271,9 @@ class Context:
     def adb_connect(self, address: str) -> str | None:
         """Connect to `address`, forget the cached device, and return it."""
         self.text(["adb", "connect", address], timeout=15)
-        self._serial = None
-        self._serial_loaded = False
+        with self._lock:
+            self._serial = None
+            self._serial_loaded = False
         return self.serial
 
     def phone_ips(self) -> list[str]:
@@ -264,8 +288,10 @@ class Context:
 
     def profile_exists(self) -> bool:
         if self._profile is None:
-            names = self.text(["nmcli", "-t", "-f", "NAME", "con", "show"])
-            self._profile = self.ap_con in names.splitlines()
+            with self._lock:
+                if self._profile is None:
+                    names = self.text(["nmcli", "-t", "-f", "NAME", "con", "show"])
+                    self._profile = self.ap_con in names.splitlines()
         return self._profile
 
     @property
@@ -279,25 +305,29 @@ class Context:
         return self.hotspot_ip
 
     def secrets(self) -> dict[str, str] | None:
-        if self._secrets is None:
-            path = self.secrets_file
-            try:
-                text = path.read_text()
-            except OSError:
-                return None
-            values: dict[str, str] = {}
-            for raw in text.splitlines():
-                line = raw.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, _, value = line.partition("=")
-                key = key.strip().removeprefix("export ").strip()
-                value = value.strip()
-                if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-                    value = value[1:-1]
-                if key:
-                    values[key] = value
-            self._secrets = values
+        if not self._secrets_loaded:
+            with self._lock:
+                if not self._secrets_loaded:
+                    path = self.secrets_file
+                    try:
+                        text = path.read_text()
+                    except OSError:
+                        self._secrets_loaded = True
+                        return None
+                    values: dict[str, str] = {}
+                    for raw in text.splitlines():
+                        line = raw.strip()
+                        if not line or line.startswith("#") or "=" not in line:
+                            continue
+                        key, _, value = line.partition("=")
+                        key = key.strip().removeprefix("export ").strip()
+                        value = value.strip()
+                        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                            value = value[1:-1]
+                        if key:
+                            values[key] = value
+                    self._secrets = values
+                    self._secrets_loaded = True
         return self._secrets
 
     def proxy_pass(self) -> str | None:
