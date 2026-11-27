@@ -339,6 +339,20 @@ ACTIONS: tuple[Action, ...] = (
         supports_check=True,
     ),
     Action(
+        "phone-proxy-export",
+        "proxy",
+        "Back up the saved proxies",
+        "Pull every saved proxy into a root-only file beside the secrets.",
+        root=True,
+    ),
+    Action(
+        "phone-proxy-import",
+        "proxy",
+        "Restore the saved proxies",
+        "Write a saved-proxy backup back into the app, replacing what is there.",
+        root=True,
+    ),
+    Action(
         "phone-proxy-data-clear",
         "proxy",
         "Clear proxy app data",

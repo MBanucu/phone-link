@@ -65,12 +65,15 @@ CURL
 # fetches: this checkout no longer builds it.
 run() {
   HOME="$WORK/home" PATH="$WORK/stub:$PATH" PHONE_APK_DIR="$WORK/cache" \
-    PHONE_PROXY_PKG=com.tokyoxpa3.androidproxy bash "$SCRIPT" "$@" 2>&1
+    PHONE_PROXY_PKG=com.tokyoxpa3.androidproxy \
+    PHONE_PROXY_BACKUP="$WORK/backup.json" PHONE_PROXY_TRANSFER_WAIT=0 \
+    bash "$SCRIPT" "$@" 2>&1
 }
 
 run_absent() {
   HOME="$WORK/home" PATH="$WORK/stub:$PATH" PHONE_APK_DIR="$WORK/cache" \
     PHONE_PROXY_PKG=com.tokyoxpa3.androidproxy \
+    PHONE_PROXY_BACKUP="$WORK/backup.json" PHONE_PROXY_TRANSFER_WAIT=0 \
     ADB_STUB_ABSENT=1 bash "$SCRIPT" "$@" 2>&1
 }
 
@@ -182,6 +185,7 @@ fi
 release_run() {
   HOME="$WORK/home" PATH="$WORK/stub:$PATH" PHONE_APK_DIR="$WORK/cache" \
     PHONE_PROXY_PKG=org.phonelink.proxy PHONE_PROXY_REPO=example/phone-link-proxy \
+    PHONE_PROXY_BACKUP="$WORK/backup.json" PHONE_PROXY_TRANSFER_WAIT=0 \
     bash "$SCRIPT" "$@" 2>&1
 }
 release_cache="$WORK/cache/phone-link-proxy-0.1.0.apk"
@@ -265,14 +269,18 @@ else
 fi
 
 : > "$WORK/adb.log"
-release_run --replace-signer --yes "$WORK/local.apk" >/dev/null
-uninstall_line=$(grep -n 'uninstall org.phonelink.proxy' "$WORK/adb.log" | head -1 | cut -d: -f1)
-install_line=$(grep -n ' install -r -g' "$WORK/adb.log" | head -1 | cut -d: -f1)
-if [ -n "$uninstall_line" ] && [ -n "$install_line" ] && [ "$uninstall_line" -lt "$install_line" ]; then
-  ok "--replace-signer uninstalls before installing"
+out=$(release_run --replace-signer --yes "$WORK/local.apk")
+rc=$?
+[ "$rc" = 1 ] && ok "a replace that cannot export exits 1" \
+  || bad "a replace that cannot export exits 1" "exit $rc: $out"
+if grep -q 'uninstall org.phonelink.proxy' "$WORK/adb.log"; then
+  bad "no export means no uninstall" "$(cat "$WORK/adb.log")"
 else
-  bad "--replace-signer uninstalls before installing" "$(cat "$WORK/adb.log")"
+  ok "no export means no uninstall"
 fi
+# The ordering of a successful replacement (export, uninstall, install,
+# import, start) is covered by tests/phone-proxy-transfer.test.sh, where a
+# stub device can answer the one-shot socket.
 
 expect_exit "--release --status is rejected" 1 --release --status
 expect_exit "--fdroid --release is rejected" 1 --fdroid --release

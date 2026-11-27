@@ -91,6 +91,18 @@ PHONE_APP_NAMESPACE = "org.phonelink.proxy"
 PHONE_PROXY_REPO = _env("PHONE_PROXY_REPO", "MBanucu/phone-link-proxy")
 PHONE_ADB_PORT = _env("PHONE_ADB_PORT", "5555")
 PHONE_SECRETS = _env("PHONE_SECRETS", "/etc/nixos/phone-socks-secrets")
+# The saved proxies pulled off the phone live beside the secrets, root-only:
+# the document holds every proxy's password in clear text. `phone-proxy-export`
+# writes it 0600 and `phone-proxy-import` reads it back; `phone-proxy-install
+# --replace-signer` uses the same file so an uninstall does not lose them.
+PHONE_PROXY_BACKUP = _env(
+    "PHONE_PROXY_BACKUP",
+    os.path.join(os.path.dirname(PHONE_SECRETS), "phone-link-proxies.json"),
+)
+# How long to wait for the app's one-shot transfer socket after adb forward:
+# the service binds on a background thread, so a refused connect for a moment
+# is normal. A test with a stub adb sets it to 0.
+PHONE_PROXY_TRANSFER_WAIT = float(_env("PHONE_PROXY_TRANSFER_WAIT", "8"))
 PHONE_NM_SYSTEM_CONNECTIONS = _env(
     "PHONE_NM_SYSTEM_CONNECTIONS", "/etc/NetworkManager/system-connections"
 )

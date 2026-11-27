@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# phone-proxy-export lives in ../lib/python/phone_link/commands (one function per
+# script). This wrapper only resolves the package next to the checkout or the
+# store install, then hands over to it.
+set -eu
+
+here=$(dirname -- "$(readlink -f -- "$0")")
+for candidate in "$here/../lib/python" "$here/../share/phone-link/lib/python"; do
+  if [ -d "$candidate/phone_link" ]; then
+    export PYTHONPATH="$candidate${PYTHONPATH:+:$PYTHONPATH}"
+    break
+  fi
+done
+export PYTHONDONTWRITEBYTECODE=1
+shim="$here/${0##*/}"
+export PHONE_LINK_SHIM="$shim"
+exec python3 -m phone_link.commands phone-proxy-export "$@"

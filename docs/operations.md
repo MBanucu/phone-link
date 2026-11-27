@@ -501,7 +501,15 @@ phone-proxy-install --release --replace-signer
 
 That last one is for a phone whose app was built locally: the debug key is a
 different signature, so adb refuses to update in place and the app has to go
-first — which clears its saved proxies. There is nothing to fetch otherwise.
+first — which used to clear its saved proxies. For `org.phonelink.proxy` the
+command now exports them first (`phone-proxy-export`), uninstalls and installs,
+then imports them back (`phone-proxy-import`), starts the proxy that was in use
+and verifies it answers on the port it had. If the installed app is too old to
+export, nothing is uninstalled: update it in place first, or accept the loss by
+uninstalling it yourself. The backup is
+`$PHONE_PROXY_BACKUP` (default `/etc/nixos/phone-link-proxies.json`, beside the
+secrets), mode 0600, and holds every proxy's password in clear text. Both
+actions need the phone unlocked; the laptop never prints a password.
 For a phone that still runs the vendored F-Droid app, that app is on F-Droid and
 the script can use it as an update channel:
 
