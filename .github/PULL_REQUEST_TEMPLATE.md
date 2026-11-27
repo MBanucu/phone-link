@@ -21,7 +21,7 @@ phone was touched.
 
 ## Linked issues
 
-<!-- Closes #... / Refs #... / TODO.md section, if any. -->
+<!-- Closes #... / Refs #... — one issue per PR where it can be. -->
 
 ## Checklist
 
