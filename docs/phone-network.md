@@ -59,6 +59,14 @@ The tether address is assigned per connection (it has been `172.26.192.42`,
 `10.207.119.29` and `10.186.76.251`); the hotspot and AP addresses below are
 stable.
 
+A third topology, an external always-on AP that the laptop joins as a client,
+keeps this link across a laptop reboot: it is the only one that removes the
+failure instead of recovering from it. Its invariants are the same link-only
+rules measured here — no NAT, no DHCP router/DNS option, no uplink, no
+forwarding — plus a DHCP reservation for the phone. The setup and the
+comparison with the phone hotspot are in [ap-topology](ap-topology.md); the
+module option is `phoneLink.ap.role = "external"`.
+
 ## USB-primary and the runtime host
 
 `rndis0` has carried `10.23.190.38`, and the proxy binds it as well as the

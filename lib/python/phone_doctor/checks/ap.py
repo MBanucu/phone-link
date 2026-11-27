@@ -70,11 +70,78 @@ def _station(ctx: Context) -> Result:
     return fail(cid, label, f"no phone associated on {ctx.ap_if}")
 
 
+def _external_link(ctx: Context) -> Result:
+    """Whether this laptop is a client of the external AP.
+
+    There is no local AP to be down, so this never reports "AP down": an
+    absent client link is a setup step on this host, not a dead access point.
+    """
+    cid = "ap_link"
+    label = "external ap link"
+    if not ctx.have("iw"):
+        return skip(cid, label, "iw not installed")
+    link = ctx.text(["iw", "dev", ctx.ap_if, "link"])
+    if "Connected to" not in link:
+        return warn(
+            cid,
+            label,
+            f"laptop is not a client of {ctx.ap_ssid} on {ctx.ap_if} "
+            "(the external AP is up independently; join it in NetworkManager)",
+        )
+    ssid = ""
+    for line in link.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("SSID: "):
+            ssid = stripped.removeprefix("SSID: ")
+            break
+    if ssid and ssid != ctx.ap_ssid:
+        return warn(
+            cid,
+            label,
+            f"laptop is on {ssid}, not {ctx.ap_ssid}",
+        )
+    return ok(cid, label, f"client of {ssid or ctx.ap_ssid} on {ctx.ap_if}")
+
+
+def _external_station(ctx: Context) -> Result:
+    """Whether the phone holds its reservation on the external AP.
+
+    The laptop cannot see the external AP's station table, so the phone's own
+    address list is the evidence; it is read over adb.  A missing association
+    mirrors the local role's warning (the link can come back on its own or be
+    re-asserted) instead of failing the setup or blaming the AP.
+    """
+    cid = "ap_station"
+    label = "ap station"
+    if ctx.serial is None:
+        return skip(cid, label, "no adb")
+    target = ctx.proxy_host
+    ips = ctx.phone_ips()
+    if target in ips:
+        return ok(cid, label, f"phone {target} on {ctx.ap_ssid}")
+    return warn(
+        cid,
+        label,
+        f"phone {target} is not on {ctx.ap_ssid} "
+        f"(has: {' '.join(ips) or 'none'}; run phone-wifi-connect {ctx.ap_ssid})",
+    )
+
+
 def check(ctx: Context) -> list[Result]:
+    if ctx.ap_external:
+        role = ok(
+            "ap_role",
+            "ap role",
+            "external (another host owns the AP; the laptop is a client)",
+        )
+        return [role, _external_link(ctx), _external_station(ctx)]
+
+    role = ok("ap_role", "ap role", "local (this laptop owns the AP)")
     if not ctx.ap_declarative:
-        return [skip("ap_units", "ap units", "phoneLink.ap is off")]
+        return [role, skip("ap_units", "ap units", "phoneLink.ap is off")]
 
     return [
+        role,
         _unit(
             ctx,
             "phone-link-ap-dhcp.service",

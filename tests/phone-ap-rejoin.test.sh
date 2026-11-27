@@ -25,6 +25,12 @@ case "$*" in
       *) printf 'Interface wlp110s0\n' ;;
     esac
     ;;
+  "dev "*" link")
+    case "$(cat "$LOG/link_state" 2>/dev/null)" in
+      connected) printf 'Connected to aa:bb:cc:dd:ee:ff (on wlp110s0)\n\tSSID: PhoneLink\n' ;;
+      *) printf 'Not connected.\n' ;;
+    esac
+    ;;
 esac
 EOF
 
@@ -35,17 +41,30 @@ case "$*" in
     [ -e "$LOG/usb" ] || exit 1
     printf 'device\n'
     ;;
+  "-d shell ip -4 -o addr show")
+    cat "$LOG/phone_ip" 2>/dev/null
+    ;;
   "-d shell cmd wifi connect-network "*)
     printf '%s\n' "$*" >>"$LOG/connect"
     if [ -e "$LOG/connect_helps" ]; then
-      printf 'station\n' >"$LOG/iw_state"
+      if [ "${PHONE_AP_ROLE:-local}" = external ]; then
+        printf '2: wlan0    inet %s/24 brd 192.168.77.255 scope global wlan0\n' \
+          "${PHONE_PROXY_HOST:-192.168.77.232}" >"$LOG/phone_ip"
+      else
+        printf 'station\n' >"$LOG/iw_state"
+      fi
     fi
     ;;
   "-d shell svc wifi disable") printf 'disable\n' >>"$LOG/fallback" ;;
   "-d shell svc wifi enable")
     printf 'enable\n' >>"$LOG/fallback"
     if [ -e "$LOG/fallback_helps" ]; then
-      printf 'station\n' >"$LOG/iw_state"
+      if [ "${PHONE_AP_ROLE:-local}" = external ]; then
+        printf '2: wlan0    inet %s/24 brd 192.168.77.255 scope global wlan0\n' \
+          "${PHONE_PROXY_HOST:-192.168.77.232}" >"$LOG/phone_ip"
+      else
+        printf 'station\n' >"$LOG/iw_state"
+      fi
     fi
     ;;
 esac
@@ -83,6 +102,8 @@ reset() {
   : >"$LOG/fallback"
   rm -f "$STATE" "$LOG/usb" "$LOG/connect_helps" "$LOG/fallback_helps"
   printf 'empty\n' >"$LOG/iw_state"
+  printf 'disconnected\n' >"$LOG/link_state"
+  : >"$LOG/phone_ip"
 }
 
 connect_count() {
@@ -166,6 +187,68 @@ printf 'empty\n' >"$LOG/iw_state"
 if run; then ok "a throttled run exits 0"; else bad "a throttled run exits 0"; fi
 [ -s "$LOG/adb_calls" ] && bad "a throttled run makes no adb call" \
   || ok "a throttled run makes no adb call"
+
+# 6b. External role: the laptop is a client, so the phone's association is
+#     asked over USB.  Without the laptop's client link the watchdog stays out.
+export PHONE_AP_ROLE=external
+export PHONE_PROXY_HOST=192.168.77.232
+
+# Not linked to the external AP: no adb call at all.
+reset
+: >"$LOG/usb"
+if run; then ok "external: an unlinked laptop exits 0"; else
+  bad "external: an unlinked laptop exits 0" "$(cat "$LOG/err")"
+fi
+[ -s "$LOG/adb_calls" ] && bad "external: an unlinked laptop makes no adb call" \
+  || ok "external: an unlinked laptop makes no adb call"
+[ -e "$STATE" ] && bad "external: an unlinked laptop writes no state" \
+  || ok "external: an unlinked laptop writes no state"
+
+# Linked, and the phone already holds its reservation: nothing to do.
+reset
+: >"$LOG/usb"
+printf 'connected\n' >"$LOG/link_state"
+printf '2: wlan0    inet 192.168.77.232/24 brd 192.168.77.255 scope global wlan0\n' \
+  >"$LOG/phone_ip"
+if run; then ok "external: an associated phone exits 0"; else
+  bad "external: an associated phone exits 0" "$(cat "$LOG/err")"
+fi
+[ "$(connect_count)" = 0 ] && ok "external: an associated phone is not nudged" \
+  || bad "external: an associated phone is not nudged" "$(cat "$LOG/connect")"
+if grep -q 'station dump' "$LOG/iw_calls"; then
+  bad "external: no local station dump is consulted"
+else
+  ok "external: no local station dump is consulted"
+fi
+
+# Linked, phone away, USB present: connect-network brings it back and the
+# phone's own address list is what confirms it.
+reset
+: >"$LOG/usb"
+printf 'connected\n' >"$LOG/link_state"
+: >"$LOG/connect_helps"
+if run; then ok "external: connect-network recovers the phone"; else
+  bad "external: connect-network recovers the phone" "$(cat "$LOG/err")"
+fi
+[ "$(connect_count)" = 1 ] && ok "external: connect-network is called once" \
+  || bad "external: connect-network is called once (got $(connect_count))"
+grep -q 'inet 192.168.77.232/' "$LOG/phone_ip" \
+  && ok "external: the phone holds its reservation after the nudge" \
+  || bad "external: the phone holds its reservation after the nudge" "$(cat "$LOG/phone_ip")"
+[ -s "$STATE" ] && ok "external: the attempt writes the throttle state" \
+  || bad "external: the attempt writes the throttle state"
+
+# Linked but no USB: nothing to act through, and the window is not consumed.
+reset
+printf 'connected\n' >"$LOG/link_state"
+if run; then ok "external: no USB exits 0"; else
+  bad "external: no USB exits 0" "$(cat "$LOG/err")"
+fi
+[ "$(connect_count)" = 0 ] && ok "external: no USB makes no connect call" \
+  || bad "external: no USB makes no connect call" "$(cat "$LOG/connect")"
+[ -e "$STATE" ] && bad "external: no USB writes no state" \
+  || ok "external: no USB writes no state"
+unset PHONE_AP_ROLE PHONE_PROXY_HOST
 
 # 7. The PSK never reaches stdout or stderr, even when the phone does not come
 #    back and the fallback runs.

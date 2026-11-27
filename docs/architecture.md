@@ -54,7 +54,7 @@ All option defaults and descriptions are in the [options table](options.md).
 | Group | Options | Units and generated files |
 |---|---|---|
 | Tunnel | `enable`, `proxyHost`, `proxyHosts`, `proxyPort`, `proxyUser`, `interfaceName`, `tunAddress`, `logLevel`, `manageResolver`, `enableRelay`, `relaySocksPort`, `relayHttpPort` | `phone-tun.service`, `phone-tun-toggle.service` + `.timer`, `phone-socks-relay.service` (with `enableRelay`); `/etc/phone-link/env` and the `/run/phone-link` tmpfiles — in `modules/phone-link.nix` |
-| AP | `apInterface`, `ap.*`, `openApFirewall` | the `NetworkManager-ensure-profiles` AP profile, `phone-link-ap-dhcp.service`, `phone-link-ap-noforward.service`, `phone-link-ap-rejoin.service` + `.timer`, and the DHCP firewall hole — in `modules/phone-link.nix` |
+| AP | `apInterface`, `ap.role`, `ap.*`, `openApFirewall` | with `ap.role = "local"`: the `NetworkManager-ensure-profiles` AP profile, `phone-link-ap-dhcp.service`, `phone-link-ap-noforward.service` and the DHCP firewall hole; `phone-link-ap-rejoin.service` + `.timer` in both roles — in `modules/phone-link.nix` |
 | Fail-open | `apFailOpen.enable`, `apFailOpen.client`, `apFailOpen.grace`, `apFailOpen.throttle`, `apFailOpen.nat` | `phone-link-ap-failopen.service` + `.timer` — in `modules/phone-link-failopen.nix` |
 | Packaging | `cacheProxyApk` | `system.activationScripts.phone-apk-cache` (an activation script, not a unit) — in `modules/phone-link.nix` |
 | Secrets | `secretsFile`, `proxyUser` | no unit of its own: the file is the `EnvironmentFile` of `phone-tun`, `phone-socks-relay` and `phone-link-ap-rejoin`, and supplies the AP profile's PSK placeholder |
@@ -93,6 +93,8 @@ All option defaults and descriptions are in the [options table](options.md).
   setup, uninstall and troubleshooting.
 - [docs/phone-network.md](phone-network.md) — measured topology, DNS and the
   traps that cost time.
+- [docs/ap-topology.md](ap-topology.md) — laptop-local AP vs external always-on
+  AP vs phone hotspot, and what each does on a laptop reboot.
 - [docs/hairpin-measure.md](hairpin-measure.md) — the before/after live runbook.
 - [docs/proxy-boundary.md](proxy-boundary.md) — which repository owns the app
   contract, build, install and live harnesses, and the change order.

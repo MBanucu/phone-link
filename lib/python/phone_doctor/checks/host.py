@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..context import Context
-from ..model import Result, fail, ok, warn
+from ..model import Result, fail, ok, skip, warn
 
 SECTION = "[host]"
 
@@ -38,15 +38,28 @@ def check(ctx: Context) -> list[Result]:
     if forward == "1":
         results.append(ok("ip_forward", "ip_forward", "1"))
     else:
+        link_only = (
+            "the external AP is link-only too"
+            if ctx.ap_external
+            else "the link-only AP does not forward"
+        )
         results.append(
             warn(
                 "ip_forward",
                 "ip_forward",
-                f"{forward or 'unknown'} (the link-only AP does not forward)",
+                f"{forward or 'unknown'} ({link_only})",
             )
         )
 
-    if ctx.profile_exists():
+    if ctx.ap_external:
+        results.append(
+            skip(
+                "ap_profile",
+                "ap profile",
+                "external AP (no local NetworkManager profile)",
+            )
+        )
+    elif ctx.profile_exists():
         results.append(ok("ap_profile", "ap profile", ctx.ap_con))
     else:
         results.append(
@@ -58,7 +71,20 @@ def check(ctx: Context) -> list[Result]:
         )
 
     address = _ap_address(ctx)
-    if ctx.profile_exists():
+    if ctx.ap_external:
+        if address:
+            results.append(
+                ok("ap_address", "ap address", f"{ctx.ap_if} {address} (external AP client)")
+            )
+        else:
+            results.append(
+                warn(
+                    "ap_address",
+                    "ap address",
+                    f"{ctx.ap_if} has no IPv4 (not joined to the external AP)",
+                )
+            )
+    elif ctx.profile_exists():
         if address:
             results.append(ok("ap_address", "ap address", f"{ctx.ap_if} {address}"))
         else:

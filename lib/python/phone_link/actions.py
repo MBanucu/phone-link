@@ -133,14 +133,16 @@ ACTIONS: tuple[Action, ...] = (
         "phone-ap-up",
         "ap",
         "Bring the access point up",
-        "Preflight the radio, then activate the phonelink AP profile.",
+        "Preflight the radio, then activate the phonelink AP profile; with "
+        "ap.role = \"external\" this only nudges the phone back over USB.",
         root=True,
     ),
     Action(
         "phone-ap-down",
         "ap",
         "Drop the access point",
-        "Stop the AP and rejoin the phone's own hotspot.",
+        "Stop the AP and rejoin the phone's own hotspot; with an external AP "
+        "nothing is stopped.",
         root=True,
         destructive=True,
         confirm="The phone leaves the laptop's access point.",

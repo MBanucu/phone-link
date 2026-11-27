@@ -61,6 +61,7 @@ MANUAL_HINTS = {
     "ap_noforward": "enable phoneLink.ap and rebuild (nixos-rebuild switch)",
     "ap_noforward_rules": "reload the AP forward drop: systemctl restart phone-link-ap-noforward",
     "ap_station": "join the phone to the AP: phone-wifi-connect PhoneLink",
+    "ap_link": "join this laptop to the external AP in NetworkManager",
     "wifi_reconnect": "apply the reconnect globals explicitly: phone-wifi-reconnect",
     "secrets_mode": "chmod 600 the secrets file (it holds PHONE_SOCKS_PASS)",
     "resolver": "pin /etc/resolv.conf via phoneLink.manageResolver and rebuild",

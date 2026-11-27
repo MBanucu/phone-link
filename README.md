@@ -59,6 +59,14 @@ missing phone or a stopped proxy app cannot blackhole traffic. The pinning
 detail and the one-time setup are in
 [operations](docs/operations.md#install-the-module).
 
+The access point is local to this laptop by default. To use an always-on
+external AP — the only topology that keeps the phone associated through a
+laptop reboot — set `phoneLink.ap.role = "external"` and point `proxyHost` at
+the phone's DHCP reservation on that AP; the module then owns no AP profile,
+DHCP, nftables rules or firewall hole, and the laptop joins the AP as a client.
+The requirements, the laptop-as-client setup and the comparison with the phone
+hotspot are in [ap-topology](docs/ap-topology.md).
+
 ## Three commands
 
 ```sh
@@ -91,6 +99,8 @@ runs exactly that; `bash tests/check.sh --list` names every target.
   timing history
 - [docs/operations.md](docs/operations.md) — install detail, the two modes,
   one-time setup, uninstall and troubleshooting
+- [docs/ap-topology.md](docs/ap-topology.md) — laptop-local AP, external
+  always-on AP (`#37`) and phone hotspot (`#38`) compared
 - [docs/phone-network.md](docs/phone-network.md) — measured behaviour, evidence
   and the traps
 - [docs/hairpin-measure.md](docs/hairpin-measure.md) — the before/after runbook

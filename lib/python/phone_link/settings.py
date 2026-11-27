@@ -40,6 +40,10 @@ PHONE_PROXY_HOSTS = tuple(
     if host
 )
 PHONE_AP_CON = _env("PHONE_AP_CON", "phonelink")
+# Who owns the AP: "local" is the profile this host declares; "external" is an
+# always-on AP elsewhere, where the laptop is only a client. The module writes
+# the value, so the commands and the doctor agree without another marker file.
+PHONE_AP_ROLE = _env("PHONE_AP_ROLE", "local")
 PHONE_AP_SSID = _env("PHONE_AP_SSID", "PhoneLink")
 PHONE_AP_IF = _env("PHONE_AP_IF", "wlp110s0")
 PHONE_AP_ADDRESS = _env("PHONE_AP_ADDRESS", "192.168.77.1/24")

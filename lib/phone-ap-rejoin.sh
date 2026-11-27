@@ -26,6 +26,9 @@
 #   PHONE_AP_SSID           SSID the phone must join (default PhoneLink)
 #   PHONE_AP_SECURITY       key management for connect-network (default wpa2)
 #   PHONE_AP_PASS           PSK; empty skips connect-network (never printed)
+#   PHONE_AP_ROLE           "local" (default) or "external"; external checks the
+#                           phone over USB instead of a local station dump
+#   PHONE_PROXY_HOST        phone's address on the AP, for the external role
 #   PHONE_AP_REJOIN_STATE   last-run epoch file (default /run/phone-link/ap-rejoin.last)
 #   PHONE_AP_REJOIN_INTERVAL seconds between actions (default 300)
 #   PHONE_AP_REJOIN_WAIT    seconds to wait for a station after each action (default 30)
@@ -40,6 +43,8 @@ iface=${PHONE_AP_IF:-wlp110s0}
 ssid=${PHONE_AP_SSID:-PhoneLink}
 security=${PHONE_AP_SECURITY:-wpa2}
 psk=${PHONE_AP_PASS:-}
+role=${PHONE_AP_ROLE:-local}
+proxy_host=${PHONE_PROXY_HOST:-}
 state_file=${PHONE_AP_REJOIN_STATE:-/run/phone-link/ap-rejoin.last}
 interval=${PHONE_AP_REJOIN_INTERVAL:-300}
 wait_seconds=${PHONE_AP_REJOIN_WAIT:-30}
@@ -69,16 +74,61 @@ station_present() {
   return 1
 }
 
-# Condition 1: the AP must exist and be up.  `station dump` fails on a missing
-# or down interface, and succeeds with no station on a beaconing AP.
-if ! dump=$("$iw_cmd" dev "$iface" station dump 2>/dev/null); then
-  exit 0
+# External role: the laptop is a client of someone else's AP, so its station
+# dump says nothing about the phone.  Two USB-adb facts replace it:
+#
+#   linked_to_external_ap  the laptop is associated to ap.ssid.  When it is
+#                          not, the phone is not this topology's business
+#                          (another Wi-Fi, or the phone's hotspot) and the
+#                          watchdog stays out of the way.
+#   phone_associated       the phone holds proxyHost on one of its interfaces.
+#                          That address is the DHCP reservation on the AP, so
+#                          it is the phone-side proof that it is associated.
+linked_to_external_ap() {
+  local link
+  link=$("$iw_cmd" dev "$iface" link 2>/dev/null) || return 1
+  case "$link" in
+    *"SSID: $ssid"*) return 0 ;;
+  esac
+  return 1
+}
+
+phone_associated() {
+  [ -n "$proxy_host" ] || return 1
+  local out
+  out=$("$adb_cmd" -d shell ip -4 -o addr show 2>/dev/null) || return 1
+  case "$out" in
+    *"inet $proxy_host/"*) return 0 ;;
+  esac
+  return 1
+}
+
+if [ "$role" = "external" ]; then
+  # Condition 1: the laptop must be on the external AP.  Without that link the
+  # phone may be on its hotspot or any other network, and a nudge would be
+  # acting on a topology nobody asked for.
+  linked_to_external_ap || exit 0
+
+  # Condition 2: never touch a phone that already holds its reservation.
+  if [ -n "$proxy_host" ] && "$adb_cmd" -d get-state >/dev/null 2>&1 \
+    && phone_associated; then
+    exit 0
+  fi
 fi
 
-# Condition 2: never touch a phone that is already associated.
-case "$dump" in
-  Station* | *$'\n'Station*) exit 0 ;;
-esac
+# Condition 1 (local role): the AP must exist and be up.  `station dump` fails
+# on a missing or down interface, and succeeds with no station on a beaconing
+# AP.
+if [ "$role" != "external" ]; then
+  if ! dump=$("$iw_cmd" dev "$iface" station dump 2>/dev/null); then
+    exit 0
+  fi
+
+  # Condition 2: never touch a phone that is already associated.
+  case "$dump" in
+    Station* | *$'\n'Station*) exit 0 ;;
+  esac
+fi
 
 # Condition 3: the throttle.  A missing or malformed file is "never run"; a
 # timestamp in the future (clock stepped back) is also treated as stale so the
@@ -109,7 +159,9 @@ printf '%s\n' "$now_epoch" >"$state_file" 2>/dev/null || true
 wait_for_station() {
   deadline=$(($(now) + wait_seconds))
   while :; do
-    if station_present; then
+    if [ "$role" = "external" ]; then
+      phone_associated && return 0
+    elif station_present; then
       return 0
     fi
     if [ "$(now)" -ge "$deadline" ]; then

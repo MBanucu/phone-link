@@ -45,6 +45,20 @@ class Context:
         return self.get("PHONE_AP_SSID", "PhoneLink")
 
     @property
+    def ap_role(self) -> str:
+        """Whether this host owns the AP (`local`) or is only a client of it.
+
+        A typo is treated as `local`: that is the historical behaviour, and the
+        external branch deliberately assumes none of the local units exist.
+        """
+        role = self.get("PHONE_AP_ROLE", "local")
+        return role if role in ("local", "external") else "local"
+
+    @property
+    def ap_external(self) -> bool:
+        return self.ap_role == "external"
+
+    @property
     def ap_declarative(self) -> bool:
         """Whether the module declares the AP (`phoneLink.ap.enable`)."""
         return Path(
@@ -256,7 +270,13 @@ class Context:
 
     @property
     def target_ip(self) -> str:
-        return self.proxy_host if self.profile_exists() else self.hotspot_ip
+        # The phone's address on the AP is the primary host in every topology
+        # where the module owns the link.  With an external AP there is no local
+        # profile to ask, and the hotspot address would be the wrong phone
+        # network; proxyHost is the reservation the setup promises.
+        if self.ap_external or self.profile_exists():
+            return self.proxy_host
+        return self.hotspot_ip
 
     def secrets(self) -> dict[str, str] | None:
         if self._secrets is None:

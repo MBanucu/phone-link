@@ -38,6 +38,26 @@ the cause and the pending 30-minute screen-off acceptance. USB tethering is the
 practical unattended fallback until it is fixed. The short #4 run only showed
 that the forwarding loop was gone; it finished before the drop.
 
+## External always-on AP
+
+A laptop reboot is a local-AP reboot: the phone loses the link and may not
+auto-join the link-only AP again (#33). Setting `phoneLink.ap.role = "external"`
+moves the AP to a separate always-on box so a laptop reboot cannot disconnect
+the phone; the full comparison, the invariants and the laptop-as-client setup
+are in [ap-topology](ap-topology.md).
+
+In that role the module creates no AP profile, DHCP server, nftables table or
+DHCP firewall hole, and `phone-ap-up` / `phone-ap-down` explain the role and
+change nothing on the radio. `ap.ssid` is the external AP's SSID, `apInterface`
+is the laptop's client interface, and `proxyHost` must be the phone's DHCP
+reservation on that AP. The external AP itself must stay link-only: no NAT, no
+DHCP router or DNS option, no uplink and no forwarded traffic, or Android will
+validate the Wi-Fi and drop cellular as the default. `ap.rejoin` keeps the USB
+nudge working: it asks the phone over adb whether it holds `proxyHost` and calls
+`cmd wifi connect-network <ap.ssid>` when it does not. The doctor reports the
+role, the laptop's client link and the phone's association instead of an
+"AP down" failure.
+
 ## Freeing the radio for normal Wi-Fi
 
 The single radio cannot be the AP and a client on another channel at once, so
@@ -391,6 +411,13 @@ If you previously created the profile with `phone-ap-create`, no manual step is
 needed: the ensure unit removes the persistent `/etc` copy before writing the
 declarative one, so only one profile with that name remains. The running AP
 drops with the old profile, so run `sudo phone-ap-up` after the switch.
+
+With `phoneLink.ap.role = "external"` there is no profile to create: configure
+the external AP itself (link-only, DHCP reservation for `proxyHost`) and join
+it from NetworkManager as a normal client. Keep `PHONE_AP_PASS` in the secrets
+file so the rejoin watchdog can nudge the phone back over USB; `ap.enable` is
+not needed. See [ap-topology](ap-topology.md) for the invariants and the
+laptop-as-client example.
 
 The proxy is a signed release APK from `MBanucu/phone-link-proxy`, not a build
 of this checkout; `phone-proxy-install` fetches the latest release unless you
