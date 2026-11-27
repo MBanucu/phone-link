@@ -28,6 +28,7 @@ from phone_link import actions as registry
 from .log_window import RunWindow
 from .port_page import PortPage
 from .status_page import AP_OFF_SUBTITLE, PROBLEM_FIXES, StatusPage
+from .version import gui_version
 
 APP_ID = "org.phonelink.Gui"
 # The doctor's findings get their own page, separate from the "status" action
@@ -226,6 +227,7 @@ class Window(Adw.ApplicationWindow):
         menu = Gio.Menu()
         menu.append("Search actions", "win.search")
         menu.append("Refresh status", "win.refresh")
+        menu.append("About phone-link", "win.about")
         menu.append("Quit", "app.quit")
         menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic")
         menu_button.set_menu_model(menu)
@@ -438,6 +440,23 @@ class Window(Adw.ApplicationWindow):
     def report_error(self, heading: str, body: str) -> None:
         self._toasts.add_toast(Adw.Toast(title=f"{heading}: {body}", timeout=8))
 
+    def _about_dialog(self) -> Adw.AboutDialog:
+        """The About dialog, separate from presenting it so a test can read it."""
+        dialog = Adw.AboutDialog()
+        dialog.set_application_name("phone-link")
+        dialog.set_application_icon("phone-link-gui")
+        dialog.set_version(gui_version())
+        dialog.set_developer_name("MBanucu")
+        dialog.set_comments(
+            "Tunnel, access point and adb control for the phone link."
+        )
+        dialog.set_website("https://github.com/MBanucu/phone-link")
+        dialog.set_issue_url("https://github.com/MBanucu/phone-link/issues")
+        return dialog
+
+    def _show_about(self) -> None:
+        self._about_dialog().present(self)
+
     # -- actions -------------------------------------------------------
     def _register_actions(self) -> None:
         refresh = Gio.SimpleAction.new("refresh", None)
@@ -449,6 +468,10 @@ class Window(Adw.ApplicationWindow):
             "activate", lambda _a, _p: self._search_button.set_active(True)
         )
         self.add_action(search)
+
+        about = Gio.SimpleAction.new("about", None)
+        about.connect("activate", lambda _a, _p: self._show_about())
+        self.add_action(about)
 
         for action in registry.ACTIONS:
             if action.supports_check:
@@ -612,6 +635,18 @@ def selftest() -> int:
             window.present()
             for name in window.page_names():
                 window.show_page(name)
+            if window.lookup_action("about") is None:
+                raise RuntimeError("the window has no About action")
+            version = gui_version()
+            if not version:
+                raise RuntimeError("the About dialog would show no version")
+            if window._about_dialog().get_version() != version:
+                raise RuntimeError("the About dialog shows another version")
+            saved = os.environ.pop("PHONE_LINK_VERSION", None)
+            if gui_version() != "development":
+                raise RuntimeError("an unpackaged run invents a version")
+            if saved is not None:
+                os.environ["PHONE_LINK_VERSION"] = saved
             if window.search("tunnel") < 1:
                 raise RuntimeError("the search found nothing for 'tunnel'")
             if root_badge(registry.BY_ID["phone-ap-up"]) is None:
