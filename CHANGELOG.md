@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-11-27
+
 ### Fixed
 
 - Scripts prefer the host's `nmcli` over the bundled one (#104). The bundle
@@ -1515,7 +1517,8 @@ with it.
 - `phone-doctor` installs under `lib/python`, where its wrapper looks for it.
 - The proxy APK cache is found when `HOME` is unset during activation.
 
-[Unreleased]: https://github.com/MBanucu/phone-link/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/MBanucu/phone-link/compare/v0.20.1...HEAD
+[0.20.1]: https://github.com/MBanucu/phone-link/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/MBanucu/phone-link/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/MBanucu/phone-link/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/MBanucu/phone-link/compare/v0.17.0...v0.18.0
