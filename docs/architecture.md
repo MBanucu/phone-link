@@ -95,6 +95,8 @@ All option defaults and descriptions are in the [options table](options.md).
   traps that cost time.
 - [docs/ap-topology.md](ap-topology.md) — laptop-local AP vs external always-on
   AP vs phone hotspot, and what each does on a laptop reboot.
+- [docs/external-ap-acceptance.md](external-ap-acceptance.md) — the three-reboot
+  hardware runbook for #37, with the AP invariants and the evidence table.
 - [docs/hairpin-measure.md](hairpin-measure.md) — the before/after live runbook.
 - [docs/proxy-boundary.md](proxy-boundary.md) — which repository owns the app
   contract, build, install and live harnesses, and the change order.

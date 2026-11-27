@@ -126,7 +126,9 @@ the AP go away.
 ## Live acceptance still pending from #37
 
 The software half is what this change implements. The hardware half is still a
-live step on the real external AP and is **not** proven by the hermetic tests:
+live step on the real external AP and is **not** proven by the hermetic tests.
+The step-by-step procedure, AP invariants and evidence table are in
+[external-ap-acceptance.md](external-ap-acceptance.md):
 
 - reboot the laptop three times with the phone on the external AP and confirm
   the phone stays associated and `phone-tun` starts within 30 s each time, with
