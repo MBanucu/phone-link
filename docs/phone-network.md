@@ -66,6 +66,28 @@ Wi-Fi addresses. How to list the tether and the AP in `proxyHost`/`proxyHosts`,
 and how the 5 s probe keeps `/run/phone-link/proxy-host` current, is in
 [operations](operations.md#usb-primary-and-host-fallback).
 
+Android assigns the USB tether subnet per boot, so a USB address written into
+`proxyHost`/`proxyHosts` eventually goes stale (`10.23.190.38` after one boot,
+`10.19.134.25` after the next). Discovery covers that without a rebuild:
+
+1. The declared hosts are probed first, in order: `proxyHost`, then
+   `proxyHosts`, duplicates removed. The AP host stays first and is a link, not
+   an uplink, so it is never probed through the tunnel.
+2. Only after every declared host fails does the toggle gather gateways, once
+   per tick: the next hop of each `ip route show default` entry and the peer
+   address of every point-to-point link from `ip -4 addr show` (a tether/rndis
+   link shows `inet 10.x.y.z peer 10.x.y.w/32`).
+3. Candidates are deduplicated against the declared hosts and against the AP
+   host, then probed on the proxy port exactly like a declared host. A normal
+   router rejects the proxy port, so a wrong gateway costs one TCP attempt.
+
+The first host that answers still wins, a change is confirmed on the next tick,
+and the running tunnel is restarted when the confirmed host differs from the
+one in its generated config. The AP being down and the phone on a fresh USB
+subnet therefore brings `phone-tun` up within two ticks without editing
+`configuration.nix`. `proxyHosts` is still accepted: it pins the addresses and
+their order ahead of discovery.
+
 ## The AP band
 
 It used to be 2.4 GHz channel 1 at 20 MHz, the most crowded part of the band
