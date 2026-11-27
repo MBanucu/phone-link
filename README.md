@@ -72,6 +72,12 @@ scripts to `./result/bin/`, and `nix develop` is a shell with the scripts and
 their tools. `nix run .#gui` opens the panel. Every other command and flag is in
 [scripts](docs/scripts.md).
 
+## Checks
+
+`bash tests/check.sh fast` runs format, shellcheck, python, module and script in
+order before a push. `nix flake check` is the gate, and `bash tests/check.sh all`
+runs exactly that; `bash tests/check.sh --list` names every target.
+
 ## Documentation
 
 - [docs/architecture.md](docs/architecture.md) — the layers, the first file for

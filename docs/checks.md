@@ -22,6 +22,22 @@ APK, the manual APK step, manual-only and failed-fix paths) and the fix scripts 
 profile creation from the secret, forwarding, mobile data, tunnel: apply,
 no-op and read-only `--check`).
 
+### One entry point
+
+`tests/check.sh` builds the checks above through the flake and reimplements
+none of them.
+
+```sh
+bash tests/check.sh fast     # format, shellcheck, python, module, script
+bash tests/check.sh all      # nix flake check, the gate
+bash tests/check.sh --list   # every target, one line each
+```
+
+`fast` runs the five cheap targets one after another and stops at the first
+failure, naming it. Any single target also works (`bash tests/check.sh module`),
+and `SYSTEM=` selects another system. CI is unchanged: it still runs
+`nix flake check`.
+
 ### Where the check's time goes
 
 `nix build .#checks.x86_64-linux.script` times itself: `timings.csv` in the

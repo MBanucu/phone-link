@@ -50,10 +50,11 @@ rules the work here has settled into, not a style guide.
   read as it runs; a half-written file is a run that fails somewhere unrelated.
 - **A speed claim needs a measurement.** Say what was measured and by how much,
   or leave the number out.
-- **Leave the tree green.** `nix flake check` (or at least
-  `bash tests/check-timings.sh`) before committing; `shellcheck -S warning` and
-  `actionlint` where they apply. Fix the cause of a failing check; never
-  weaken an assertion to make one pass.
+- **Leave the tree green.** `bash tests/check.sh fast` (format, shellcheck,
+  python, module and script, stopping at the first failure) before pushing;
+  `nix flake check` is the gate CI runs. `tests/check.sh all` is that same
+  command. `shellcheck -S warning`, `actionlint` and `nixfmt` where they apply.
+  Fix the cause of a failing check; never weaken an assertion to make one pass.
 
 ## Working the issue backlog autonomously
 

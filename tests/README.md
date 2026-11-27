@@ -31,6 +31,9 @@ bash tests/phone-ap-rejoin.test.sh
 # Every suite, through the same glob CI uses.
 nix build .#checks.x86_64-linux.script
 
+# The cheap set before a push: format, shellcheck, python, module, script.
+bash tests/check.sh fast
+
 # The same build, keeping per-suite times in result-checks/timings.csv and
 # printing each suite beside its last measurement.
 bash tests/check-timings.sh
