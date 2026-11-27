@@ -4,6 +4,9 @@ Nix flake with scripts and a NixOS module for using an unrooted Android phone as
 the laptop's internet uplink and as an adb target over Wi-Fi, without a USB
 cable.
 
+**Start here:** [`docs/architecture.md`](docs/architecture.md) maps the layers,
+the first file to open for each task, and the units the module options create.
+
 - `packages.<system>.phone-link` — the diagnostic/control scripts, with every
   runtime tool wrapped onto their `PATH`
 - `packages.<system>.phone-link-gui` — the GTK4/libadwaita control panel (since
