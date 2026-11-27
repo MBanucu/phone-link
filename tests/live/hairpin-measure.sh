@@ -106,6 +106,7 @@ FALLBACK_RESTORE=
 FALLBACK_TIMER_WAS=0
 FALLBACK_TUNNEL_WAS=0
 STARTED_AT=$(date -u +%Y%m%dT%H%M%SZ)
+STARTED_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 usage() {
   cat <<'USAGE'
@@ -1132,7 +1133,7 @@ write_summary() {
     >"$WORK/results.rows"
   {
     printf '# Hairpin measurement — %s\n\n' "$PHASE"
-    printf 'Started %s. Evidence: `%s`.\n\n' "$(utc_now)" "$OUT"
+    printf 'Started %s. Evidence: `%s`.\n\n' "$STARTED_ISO" "$OUT"
     printf '| measurement | value | state |\n|---|---|---|\n'
     cat "$WORK/results.rows"
     printf '\n## Proxy and battery\n\n'

@@ -147,5 +147,15 @@ fi
 grep -q '^usage:' "$TMP/noargs" && ok "no arguments prints usage" \
   || bad "no arguments prints usage"
 
+# 6. The summary's "Started" line is the run's start, not the moment the
+#    summary is written.  meta.env already records the start; the summary used
+#    to print utc_now at the end, which mislabelled every evidence directory.
+grep -Fq 'STARTED_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)' "$SCRIPT" &&
+  ok "the start timestamp is captured at startup" ||
+  bad "the start timestamp is captured at startup"
+grep -Fq 'Started %s. Evidence: `%s`.\n\n'"'"' "$STARTED_ISO" "$OUT"' "$SCRIPT" &&
+  ok "the summary prints the captured start" ||
+  bad "the summary prints the captured start"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
