@@ -35,6 +35,7 @@ NetworkManager installs no DHCP, NAT or forwarding. A separate dnsmasq answers
 DHCP without a router or DNS option, and forwarded packets entering `wlp110s0`
 are dropped in a dedicated nftables table. The phone therefore has no internet
 path through the laptop and keeps mobile data as its default. The
+`ap.uplink = "tunnel"` mode below is the explicit, scoped exception. The
 laptop→`192.168.77.232` direction is output, not forwarding, so the proxy, adb
 and sshfs are unaffected.
 
@@ -120,6 +121,68 @@ The single-radio constraint in trap 4 still holds: the card cannot be a client
 and an AP on different channels. In AP mode that is exactly the intended case —
 the phone is the client and the laptop's uplink is `phone-tun` — so the AP owns
 the radio and needs no client link of its own.
+
+## The AP hairpin: `ap.uplink = "tunnel"`
+
+The link-only AP above is the default. `phoneLink.ap.uplink = "tunnel"` makes
+the phone (the one address in `ap.forwardClient`, default `proxyHost`) a real
+uplink, so Android can validate the AP while every other AP client stays
+dropped. It is one scoped exception, not NetworkManager's old shared NAT.
+
+Packet path, laptop side:
+
+```
+phone 192.168.77.232 -> 1.1.1.1
+  wlp110s0 (forward, inet phone_link_ap priority -10)
+    iifname "wlp110s0" ip saddr 192.168.77.232 accept
+    iifname "wlp110s0" drop              # everyone else
+  ip rule 9001: not from all iif lo lookup 2022
+  phone-tun: via 172.19.0.2
+  ip phone_link_hairpin postrouting (priority srcnat)
+    oifname "phone-tun" ip saddr 192.168.77.232 masquerade
+  sing-box socks outbound -> 192.168.77.232:1080 (main table, 192.168.0.0/16 excluded)
+  proxy -> cellular (app's explicit cellular NetworkRequest)
+```
+
+The reverse path is already safe: conntrack un-NATs the reply to
+`192.168.77.232` and the `9002: from all iif phone-tun goto 9010` rule leaves it
+on the main table, where `192.168.77.232` is the connected route on `wlp110s0`.
+The tunnel's own socket to the proxy also stays on the main table, so the AP
+carries the phone's traffic once and the proxy's cellular egress does not come
+back over it.
+
+The DHCP server is the other half: with `uplink = "tunnel"` dnsmasq adds
+`--dhcp-option=option:router,192.168.77.1` and
+`--dhcp-option=option:dns-server,1.1.1.1` (`ap.uplinkDns`). The link-only DHCP
+sends neither, and the phone's main table has no default route, so without both
+the hairpin would have nothing to accept.
+
+DNS deliberately adds **no ip rule**. Measured on this laptop:
+
+```
+$ ip route get 1.1.1.1 from 192.168.77.232 iif wlp110s0
+1.1.1.1 from 192.168.77.232 via 172.19.0.2 dev phone-tun table 2022
+$ ip route get 192.168.77.232
+192.168.77.232 dev wlp110s0 src 192.168.77.1
+```
+
+Rule 9001 (`not from all iif lo lookup 2022`) runs before the dport-53-to-main
+rule, so the phone's DNS packet enters the TUN like any other forwarded packet.
+sing-box's existing `{"protocol": "dns", "action": "hijack-dns"}` rule answers
+port 53 with the `remote` DoH server through the proxy, so the TCP-only SOCKS
+upstream never sees UDP and the phone's later lookups take the same path. The
+alternative considered in #44 — a dnsmasq on `192.168.77.1:53` — is not needed.
+
+Failure semantics: the nft accept does not test `phone-tun`. When the tunnel is
+not running, sing-box's ip rules and the table-2022 route are gone as well, so
+the accepted packet is no longer sent into the tunnel: with no other default
+route the kernel fails it as unreachable, and with a second uplink such as a USB
+tether it can follow the laptop's main table. The fail-open watchdog that
+removes `ip phone_link_hairpin` and restores the plain `inet phone_link_ap`
+drop in that state is #46, a separate change. There are no NixOS firewall rules
+for the hairpin: the only forward drop in this setup is `inet phone_link_ap`,
+and the doctor keeps reporting its `iifname "wlp110s0" drop` as the AP forward
+drop.
 
 ## How the proxy gets out over cellular
 
