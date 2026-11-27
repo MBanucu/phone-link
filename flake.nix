@@ -267,7 +267,13 @@
           '';
 
           format = pkgs.runCommand "phone-link-format-check" { nativeBuildInputs = [ pkgs.nixfmt ]; } ''
-            nixfmt --check ${./flake.nix} ${./modules/phone-link.nix} ${./modules/phone-link-failopen.nix}
+            nixfmt --check ${./flake.nix} ${
+              lib.escapeShellArgs (
+                lib.filter (path: lib.hasSuffix ".nix" (toString path)) (
+                  lib.filesystem.listFilesRecursive ./modules ++ lib.filesystem.listFilesRecursive ./tests/module
+                )
+              )
+            }
             touch $out
           '';
 
