@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `phone-proxy-boot --check` and the doctor's `app_boot` read one shared set of
+  pre-unlock facts from `dumpsys package`: the device-idle allowlist,
+  `auto_start`, fine/coarse and background location, `POST_NOTIFICATIONS` when
+  the app targets API 33+, `RECEIVE_BOOT_COMPLETED`, the direct-boot flag and
+  the `LOCKED_BOOT_COMPLETED` receiver. The fixer grants every
+  declared-but-denied permission; a manifest fact fails with "reinstall the
+  release" instead of passing as "restarts at boot: ok" (#73).
+
 ## [0.16.0] - 2026-11-27
 
 ### Added

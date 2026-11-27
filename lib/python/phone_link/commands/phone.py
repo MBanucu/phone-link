@@ -13,7 +13,7 @@ import re
 import sys
 import time
 
-from .. import phone, settings
+from .. import boot, phone, settings
 from ..shell import capture, die, have, log, run_both, run_text, status
 
 
@@ -372,8 +372,11 @@ def phone_proxy_battery_whitelist(args: list[str]) -> int:
 USAGE_BOOT = """usage: phone-proxy-boot [--check]
 
 Makes this repository's app come back by itself after a reboot: adds it to the
-device-idle allowlist, grants the location permissions a boot start needs, and
-turns auto_start on (which also starts the proxy). --check only reports.
+device-idle allowlist, grants the location and notification permissions a boot
+start needs, and turns auto_start on (which also starts the proxy). It also
+checks that the installed build can start before the first unlock: the
+direct-boot flag and a receiver for LOCKED_BOOT_COMPLETED. --check only
+reports, naming each missing input; a manifest fact needs a reinstall.
 """
 
 
@@ -393,56 +396,86 @@ def phone_proxy_boot(args: list[str]) -> int:
     if not any(line.startswith("package:") for line in installed.splitlines()):
         die(f"{package} is not installed; run phone-proxy-install first")
 
+    def package_dump() -> str:
+        return _shell(serial, "dumpsys", "package", package)
+
+    def device_sdk() -> str:
+        return _shell(serial, "getprop", "ro.build.version.sdk").strip()
+
     def whitelisted() -> bool:
         return f",{package}," in _shell(serial, "dumpsys", "deviceidle", "whitelist")
 
-    def granted(permission: str) -> bool:
-        dump = _shell(serial, "dumpsys", "package", package)
-        match = re.search(rf"{permission}: granted=(true|false)", dump)
-        return bool(match) and match.group(1) == "true"
-
     def auto_start() -> str:
-        dump = _shell(serial, "dumpsys", "activity", "service", service)
-        match = re.search(r"auto-start\s+(true|false)", dump)
-        return match.group(1) if match else ""
+        # A stopped service prints nothing; the app's state file still answers,
+        # the same fallback the doctor uses.
+        text = _shell(serial, "dumpsys", "activity", "service", service)
+        state = _shell(
+            serial,
+            "cat",
+            f"/sdcard/Android/data/{package}/files/state.txt",
+        )
+        return boot.auto_start_state(text, state)
 
-    problems: list[str] = []
-    if not whitelisted():
-        problems.append("not on the battery allowlist")
-    if not granted("ACCESS_BACKGROUND_LOCATION"):
-        problems.append("background location is not granted")
-    if auto_start() == "false":
-        problems.append("auto_start is off")
+    fixable, reinstall, unknown = boot.inspect(
+        package_dump(), device_sdk(), auto_start(), whitelisted()
+    )
+    missing = fixable + reinstall
 
-    if not problems:
+    if not missing and not unknown:
         log(f"{package}: already comes back after a reboot")
+        log(
+            "every boot input the app needs is present; a reboot without "
+            "unlocking is the only proof"
+        )
         return 0
     if check_only:
-        for problem in problems:
+        for problem in missing + unknown:
             log(f"{package}: {problem}")
+        if reinstall:
+            log(f"{package}: reinstall the release; adb cannot add a manifest fact")
         return 1
 
+    # Grants first, then the allowlist and auto_start, so the final read sees
+    # the same state a boot would.
+    for permission in boot.grants_needed(package_dump(), device_sdk()):
+        status(
+            [
+                "adb", "-s", serial, "shell", "pm", "grant", package,
+                f"android.permission.{permission}",
+            ]
+        )
     if not whitelisted():
         status(
-            ["adb", "-s", serial, "shell", "cmd", "deviceidle", "whitelist",
-             f"+{package}"]
+            [
+                "adb", "-s", serial, "shell", "cmd", "deviceidle", "whitelist",
+                f"+{package}",
+            ]
         )
-    for permission in ("ACCESS_FINE_LOCATION", "ACCESS_BACKGROUND_LOCATION"):
-        if not granted(permission):
-            status(
-                ["adb", "-s", serial, "shell", "pm", "grant", package,
-                 f"android.permission.{permission}"]
-            )
     if auto_start() != "true":
         status(
-            ["adb", "-s", serial, "shell", "am", "start-foreground-service",
-             "-n", service, "-a", f"{package}.action.START",
-             "--ez", "auto_start", "true"]
+            [
+                "adb", "-s", serial, "shell", "am", "start-foreground-service",
+                "-n", service, "-a", f"{package}.action.START",
+                "--ez", "auto_start", "true",
+            ]
         )
-        time.sleep(3)
+        # The app writes auto_start when it handles the intent; give it up to
+        # ten seconds instead of trusting a fixed sleep.
+        deadline = time.time() + 10
+        while auto_start() != "true" and time.time() < deadline:
+            time.sleep(1)
 
-    if not (whitelisted() and granted("ACCESS_BACKGROUND_LOCATION")):
-        die("the phone did not keep the allowlist or the permission grant")
+    fixable, reinstall, unknown = boot.inspect(
+        package_dump(), device_sdk(), auto_start(), whitelisted()
+    )
+    if fixable or unknown:
+        die("; ".join(fixable + unknown))
+    if reinstall:
+        die(
+            f"{package}: this install cannot start before unlock: "
+            + "; ".join(reinstall)
+            + " (reinstall the release)"
+        )
     log(f"{package}: will come back after a reboot")
     return 0
 
