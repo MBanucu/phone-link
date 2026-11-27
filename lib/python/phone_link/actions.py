@@ -143,7 +143,10 @@ ACTIONS: tuple[Action, ...] = (
         "Stop the AP and rejoin the phone's own hotspot.",
         root=True,
         destructive=True,
-        confirm="The phone leaves the laptop's access point and rejoins its hotspot.",
+        confirm="The phone leaves the laptop's access point.",
+        variants=(
+            Variant("Leave Wi-Fi free for a normal network", ("--client",)),
+        ),
     ),
     Action(
         "phone-ap-create",

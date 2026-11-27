@@ -38,6 +38,31 @@ the cause and the pending 30-minute screen-off acceptance. USB tethering is the
 practical unattended fallback until it is fixed. The short #4 run only showed
 that the forwarding loop was gone; it finished before the drop.
 
+## Freeing the radio for normal Wi-Fi
+
+The single radio cannot be the AP and a client on another channel at once, so
+while `phonelink` is active NetworkManager sees only PhoneLink and
+`iw dev wlp110s0 scan` fails with `Operation not supported (-95)`. The default
+`phone-ap-down` is not the way out: it stops the AP and then joins the phone's
+own hotspot, which is still not a normal network.
+
+```sh
+sudo phone-ap-down --client   # stop the AP; join nothing; the radio is free
+```
+
+`--client` stops the AP and never calls
+`nmcli connection up "$PHONE_HOTSPOT_CON"`. NetworkManager can then scan and
+join a normal network from system settings. The Status page's **PhoneLink
+access point** switch is the same control: on runs `phone-ap-up`, off runs
+`phone-ap-down --client`, both through the GUI's sudo/pkexec flow. When the
+switch is off its subtitle says the phone link is down by design.
+
+This is deliberately not persisted — no file and no NetworkManager change
+survives the toggle. A reboot returns to the configured boot state: with
+`phoneLink.ap.autoconnect = true` the AP comes back, otherwise it stays down
+until `phone-ap-up`. Switching back on restores the AP, the phone rejoins, and
+the hairpin/tunnel return.
+
 ## The AP band
 
 The AP defaults to 5 GHz channel 149 at 80 MHz. 149 is non-DFS and one of the

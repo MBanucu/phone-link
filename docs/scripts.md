@@ -47,7 +47,7 @@ Or straight from the checkout: `./bin/phone-net-status`.
 | `phone-ap-create` | create the `phonelink` AP profile on 5 GHz channel 149 at 80 MHz from the root-only `PHONE_AP_PASS` secret (`--refresh` rewrites it after a PSK change, `--check` reports) |
 | `phone-ap-delete` | delete the `phonelink` AP profile from NetworkManager, bringing it down first if active (`--check` reports, `--yes` skips the prompt; a declared profile returns at the next boot) |
 | `phone-ap-up` | preflight the radio, then `nmcli connection up phonelink` |
-| `phone-ap-down` | drop the AP and rejoin the phone's hotspot |
+| `phone-ap-down` | drop the AP and rejoin the phone's hotspot; `--client` stops the AP and leaves the radio free for NetworkManager, without joining anything |
 | `phone-link-uninstall` | remove the AP profile and APK caches after unwiring the module (`--check`, `--yes`, `--keep-cache`); straight from the checkout |
 | `adb-wifi-connect` | connect adb to the phone over TCP |
 | `adb-wifi-connect --prepare` | once over USB: `adb tcpip 5555` (the tether blips) |
@@ -102,6 +102,16 @@ with its desktop entry and icon:
 ```nix
 environment.systemPackages = [ phone-link.packages.${pkgs.system}.phone-link-gui ];
 ```
+
+The **Status** page opens with a **PhoneLink access point** switch, above the
+doctor's findings. It reads the real state without root (the AP connection
+active, or `iw dev <ap_if> info` reporting `type AP`) and runs `phone-ap-up`
+when switched on or `phone-ap-down --client` when switched off, through the same
+sudo/pkexec path as the action rows. While it is off the subtitle says the phone
+link is down by design and that a network is joined in system settings; the
+switch is not persisted, so a reboot returns to the configured boot state
+(`phoneLink.ap.autoconnect`). The action row's menu carries the same
+`--client` variant.
 
 Every action has its `--check` preview plus its variants (F-Droid install,
 tunnel through `adb reverse`, legacy adb port, keep-cache uninstall, …) in the

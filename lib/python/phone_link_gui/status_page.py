@@ -9,7 +9,16 @@ import threading
 from gi.repository import Adw, GLib, Gtk
 
 from phone_link import actions as registry
+from phone_link import settings
+from phone_link.ap_state import ap_is_on
 from phone_link.runner import stream
+
+AP_ON_SUBTITLE = (
+    "On — the phone joins PhoneLink; this radio cannot scan for other networks."
+)
+AP_OFF_SUBTITLE = (
+    "Off — the phone link is down by design; join a network in system settings."
+)
 
 SECTION_TITLES = {
     "[flake]": "Flake",
@@ -65,6 +74,20 @@ class ProbeError(RuntimeError):
     """The doctor could not be run or did not answer with JSON."""
 
 
+def probe_ap() -> bool:
+    """Whether the AP is really on, without root or a NetworkManager-only view."""
+    active = stream(
+        ["nmcli", "-t", "-f", "NAME,DEVICE", "con", "show", "--active"],
+        timeout=5,
+    )
+    info = stream(["iw", "dev", settings.PHONE_AP_IF, "info"], timeout=5)
+    return ap_is_on(
+        "" if active.error else active.text(),
+        "" if info.error else info.text(),
+        settings.PHONE_AP_CON,
+    )
+
+
 def probe(*, escalate: bool = False) -> dict:
     """Run `phone-doctor --json`, as the user or through pkexec."""
     exe = registry.doctor_bin()
@@ -101,6 +124,10 @@ class StatusPage(Gtk.Box):
         self._escalated = False
         self._pending_escalation = False
         self._is_root = os.geteuid() == 0
+        self._ap_probing = False
+        self._ap_acting = False
+        self._ap_updating = False
+        self._ap_shut = False
 
         self._banner = Adw.Banner(
             title="Secrets are root-only; some checks need authentication.",
@@ -112,6 +139,18 @@ class StatusPage(Gtk.Box):
 
         self._page = Adw.PreferencesPage()
         self._page.set_vexpand(True)
+
+        # The one control on this page: the doctor explains, this switches. It
+        # stays above the findings and is probed without root, so opening the
+        # window never asks for a password.
+        self._ap_group = Adw.PreferencesGroup(title="Wi-Fi mode")
+        self._ap_switch = Adw.SwitchRow(title="PhoneLink access point")
+        self._ap_switch.set_subtitle("Checking whether the access point is on…")
+        self._ap_switch.set_sensitive(False)
+        self._ap_switch.connect("notify::active", self._on_ap_toggled)
+        self._ap_group.add(self._ap_switch)
+        self._page.add(self._ap_group)
+        self.connect("destroy", self._on_ap_destroy)
 
         # A blank page while the first probe runs reads as "broken"; a failed
         # probe used to leave the page empty with only a toast behind it.
@@ -131,6 +170,7 @@ class StatusPage(Gtk.Box):
         self._view.add_named(self._placeholder, "placeholder")
         self._view.add_named(self._page, "page")
         self.append(self._view)
+        self.refresh_ap()
 
     # -- probing -------------------------------------------------------
     def refresh(self, *, escalate: bool | None = None) -> None:
@@ -162,6 +202,71 @@ class StatusPage(Gtk.Box):
     def _escalation_for(self, escalate: bool | None) -> bool:
         """An explicit request wins; otherwise stay as authenticated."""
         return self._escalated if escalate is None else escalate
+
+    # -- access point switch -------------------------------------------
+    def refresh_ap(self) -> None:
+        """Read the AP state in the background; never block the page."""
+        if self._ap_shut or self._ap_probing:
+            return
+        self._ap_probing = True
+        self._ap_switch.set_sensitive(False)
+        if not self._ap_acting:
+            self._ap_switch.set_subtitle("Checking whether the access point is on…")
+        threading.Thread(target=self._read_ap, daemon=True).start()
+
+    def _read_ap(self) -> None:
+        on = False
+        error = ""
+        try:
+            on = probe_ap()
+        except Exception as exc:  # the row reports any failure, never a traceback
+            error = str(exc)
+        GLib.idle_add(self._apply_ap, on, error)
+
+    def _apply_ap(self, on: bool, error: str) -> bool:
+        self._ap_probing = False
+        if self._ap_shut:
+            return False
+        self._ap_updating = True
+        self._ap_switch.set_active(on)
+        self._ap_updating = False
+        if error:
+            self._ap_switch.set_subtitle(f"Could not read the access point: {error}")
+        else:
+            self._ap_switch.set_subtitle(AP_ON_SUBTITLE if on else AP_OFF_SUBTITLE)
+        self._ap_switch.set_sensitive(not self._ap_acting)
+        return False
+
+    def _on_ap_toggled(self, row, _pspec) -> None:
+        if self._ap_updating or self._ap_acting:
+            return
+        wanted = row.get_active()
+        self._ap_acting = True
+        row.set_sensitive(False)
+        row.set_subtitle(
+            "Bringing the access point up…"
+            if wanted
+            else "Stopping the access point; the phone link drops by design…"
+        )
+        if not self._window.start_ap_switch(wanted):
+            # The action could not be planned: put the switch back where it was.
+            self._ap_acting = False
+            self._ap_updating = True
+            row.set_active(not wanted)
+            self._ap_updating = False
+            row.set_sensitive(True)
+            row.set_subtitle(AP_ON_SUBTITLE if not wanted else AP_OFF_SUBTITLE)
+            self._window.report_error(
+                "PhoneLink access point", "could not start the action"
+            )
+
+    def ap_action_finished(self) -> None:
+        """The run ended: the switch is usable again and the radio is re-probed."""
+        self._ap_acting = False
+        self.refresh_ap()
+
+    def _on_ap_destroy(self, _widget) -> None:
+        self._ap_shut = True
 
     def _probe(self, escalate: bool) -> None:
         data = None

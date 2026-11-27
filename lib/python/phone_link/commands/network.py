@@ -58,6 +58,15 @@ NetworkManager-ensure-profiles unit instead of editing NetworkManager.
 AP_DHCP_UNIT = "phone-link-ap-dhcp.service"
 AP_NOFORWARD_UNIT = "phone-link-ap-noforward.service"
 
+USAGE_AP_DOWN = """usage: phone-ap-down [--client] [--help]
+
+Stops the PhoneLink access point. By default the laptop then joins the phone's
+own hotspot (PHONE_HOTSPOT_CON), as before. --client stops the AP and does not
+join the hotspot, leaving the radio free for NetworkManager to scan for and
+join a normal network. Nothing is persisted: a reboot returns to the configured
+boot state. Needs root.
+"""
+
 USAGE_AP_DELETE = """usage: phone-ap-delete [--yes] [--check]
 
 Deletes the NetworkManager connection phonelink (the laptop AP) after
@@ -359,14 +368,36 @@ def phone_ap_up(args: list[str]) -> int:
 
 
 def phone_ap_down(args: list[str]) -> int:
-    """Stop the access point and go back to the phone's own hotspot."""
+    """Stop the access point, then optionally rejoin the phone's own hotspot."""
+    client_only = False
+    for value in args:
+        if value == "--client":
+            client_only = True
+        elif value in ("-h", "--help"):
+            print(USAGE_AP_DOWN, end="", file=sys.stderr)
+            return 0
+        else:
+            print(USAGE_AP_DOWN, end="", file=sys.stderr)
+            die(f"unknown argument: {value}")
+
     phone.as_root("phone-ap-down", args)
 
-    status(["nmcli", "connection", "down", settings.PHONE_AP_CON])
-    if status(["nmcli", "connection", "up", settings.PHONE_HOTSPOT_CON]) != 0:
+    if status(["nmcli", "connection", "down", settings.PHONE_AP_CON]) != 0:
+        die(f"could not stop {settings.PHONE_AP_CON}")
+
+    if client_only:
         log(
-            f"could not join {settings.PHONE_HOTSPOT_CON} "
+            "AP down; Wi-Fi is free for NetworkManager to scan and join a "
+            "normal network (the phone link is down by design)"
+        )
+    elif status(["nmcli", "connection", "up", settings.PHONE_HOTSPOT_CON]) != 0:
+        log(
+            f"AP down; could not join {settings.PHONE_HOTSPOT_CON} "
             "(is the phone sharing it?)"
+        )
+    else:
+        log(
+            f"AP down; joined the phone hotspot {settings.PHONE_HOTSPOT_CON}"
         )
     must(["nmcli", "-t", "-f", "NAME,DEVICE", "con", "show", "--active"])
     return 0
