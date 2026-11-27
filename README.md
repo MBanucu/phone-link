@@ -145,10 +145,10 @@ The packet path is short and entirely on the laptop:
    `oifname "phone-tun" ip saddr 192.168.77.232` to the TUN address, so
    sing-box's gvisor stack sees `172.19.0.1` and conntrack can reverse it on the
    way back.
-5. The tunnel's SOCKS connection to `192.168.77.232:1080` stays on the main
-   table (`192.168.0.0/16` is in the sing-box `route_exclude_address` list), so
-   the forwarded packet and the tunnel's own uplink meet at the proxy without
-   the proxy entering the tunnel.
+5. The tunnel's SOCKS connection to `192.168.77.232:<phoneLink.proxyPort>`
+   (1080 by default) stays on the main table (`192.168.0.0/16` is in the
+   sing-box `route_exclude_address` list), so the forwarded packet and the
+   tunnel's own uplink meet at the proxy without the proxy entering the tunnel.
 
 The DHCP server changes with the mode: it advertises the AP address as the
 router and `uplinkDns` as the resolver. The link-only DHCP sends neither, and
@@ -163,9 +163,12 @@ SOCKS, and the phone's later app DNS goes through the same hijack.
 
 Loop safety is the same property as before: the proxy's own egress is a
 cellular-bound request in the app, not the AP default route, and the laptop's
-tunnel socket to the proxy is excluded from the tunnel. The AP link therefore
-carries the phone's internet traffic at most once, and the phone's tunnel-bound
-packets do not come back over it.
+tunnel socket to the proxy is excluded from the tunnel. The hairpin is not
+free: every phone byte crosses the AP link **twice** — phone→laptop as the
+forwarded packet and laptop→phone inside the tunnel's SOCKS connection to the
+proxy. That is not a loop, because both crossings terminate at the proxy and
+its egress is cellular, but it halves the useful airtime of the single-radio AP
+and adds the extra Wi-Fi hop to the round-trip latency.
 
 Failure semantics: the accept does not check the tunnel's state. If
 `phone-tun` is not running, sing-box's ip rules and the table-2022 route are

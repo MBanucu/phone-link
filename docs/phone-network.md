@@ -140,16 +140,23 @@ phone 192.168.77.232 -> 1.1.1.1
   phone-tun: via 172.19.0.2
   ip phone_link_hairpin postrouting (priority srcnat)
     oifname "phone-tun" ip saddr 192.168.77.232 masquerade
-  sing-box socks outbound -> 192.168.77.232:1080 (main table, 192.168.0.0/16 excluded)
+  sing-box socks outbound -> 192.168.77.232:<phoneLink.proxyPort> (main table, 192.168.0.0/16 excluded)
   proxy -> cellular (app's explicit cellular NetworkRequest)
 ```
 
 The reverse path is already safe: conntrack un-NATs the reply to
 `192.168.77.232` and the `9002: from all iif phone-tun goto 9010` rule leaves it
 on the main table, where `192.168.77.232` is the connected route on `wlp110s0`.
-The tunnel's own socket to the proxy also stays on the main table, so the AP
-carries the phone's traffic once and the proxy's cellular egress does not come
-back over it.
+The tunnel's own socket to the proxy also stays on the main table, so the proxy's
+cellular egress does not come back over the AP.
+
+The hairpin still crosses the AP link twice: the phone's payload goes
+phone→laptop as the forwarded packet, and laptop→phone again inside the tunnel's
+SOCKS connection to the proxy (`phoneLink.proxyPort`, 1080 by default; 1081 on
+the live phone). That is not a loop, because both crossings terminate at the
+proxy and its egress is an explicit cellular request, but it halves the useful
+airtime of the single-radio AP and adds the extra Wi-Fi hop to the round-trip
+latency.
 
 The DHCP server is the other half: with `uplink = "tunnel"` dnsmasq adds
 `--dhcp-option=option:router,192.168.77.1` and
