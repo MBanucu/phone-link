@@ -79,6 +79,8 @@ their tools. `nix run .#gui` opens the panel. Every other command and flag is in
 - [docs/options.md](docs/options.md) — every module option and its default
 - [docs/scripts.md](docs/scripts.md) — every command, the GUI and the
   screenshots runbook
+- [docs/commands.md](docs/commands.md) — the shell/Python split and the recipe
+  for adding a command
 - [docs/checks.md](docs/checks.md) — what each `checks.*` target proves and the
   timing history
 - [docs/operations.md](docs/operations.md) — install detail, the two modes,
@@ -87,4 +89,6 @@ their tools. `nix run .#gui` opens the panel. Every other command and flag is in
   and the traps
 - [docs/hairpin-measure.md](docs/hairpin-measure.md) — the before/after runbook
   for the AP hairpin (#47)
+- [docs/proxy-boundary.md](docs/proxy-boundary.md) — which repository owns the
+  app contract, build, install and live harnesses, and the change order
 - [CHANGELOG.md](CHANGELOG.md) — released changes, Keep a Changelog format
