@@ -12,7 +12,7 @@
         "aarch64-linux"
       ];
       eachSystem = f: lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
-      version = "0.19.0";
+      version = "0.20.0";
 
       # Every script in bin/ is packaged, except the entry points that are not
       # actions: the CLI, which is coreScripts, and the GUI's two, which its own
