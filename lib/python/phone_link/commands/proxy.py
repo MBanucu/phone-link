@@ -15,6 +15,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
+import socket
 import sys
 import tempfile
 import time
@@ -30,6 +32,14 @@ CLASS = "org.phonelink.proxy"
 SERVICE = f"{settings.PHONE_PROXY_PKG}/{CLASS}.ProxyService"
 START = f"{CLASS}.action.START"
 STOP = f"{CLASS}.action.STOP"
+EXPORT = f"{CLASS}.action.EXPORT"
+IMPORT = f"{CLASS}.action.IMPORT"
+
+# The one-shot transfer between the laptop and the app. The app owns the same
+# numbers in ProfileTransfer.java; the README is the contract.
+TRANSFER_MAGIC = "PLX1"
+TRANSFER_MAX_BYTES = 1024 * 1024
+TRANSFER_APP = "phone-link-proxy"
 
 USAGE_START = """usage: phone-proxy-start [--check]
 
@@ -71,6 +81,28 @@ last, once the new one has answered.
 --check  report the laptop's port and the phone's listeners; exit 1 when the
          phone does not listen on the port the laptop uses
 --list   print the phone's saved proxies and listeners as JSON, for the panel
+"""
+
+USAGE_EXPORT = """usage: phone-proxy-export [--out FILE]
+
+Pulls every saved proxy off the phone over adb: one loopback socket, one
+one-shot token, the same ProfileDocument JSON the app's menu exports. The file
+holds every proxy's password in clear text, so it is written mode 0600 beside
+the secrets (PHONE_PROXY_BACKUP, default
+/etc/nixos/phone-link-proxies.json) unless --out names another path.
+
+The app exports only while the screen is on and the keyguard is not locked; a
+locked or sleeping phone binds nothing
+and this says so instead of waiting. The file is written after the whole
+document has arrived, so a refused or interrupted transfer leaves no backup.
+"""
+
+USAGE_IMPORT = """usage: phone-proxy-import FILE
+
+Puts a phone-proxy-export backup back into the app over the same one-shot
+socket. The import replaces every saved proxy, like the menu's Import … replace,
+and reports how many the app wrote. The app validates the whole document first,
+so a malformed file changes nothing.
 """
 
 
@@ -737,4 +769,386 @@ def phone_proxy_switch(args: list[str]) -> int:
         if active in _dump_listeners(dump):
             log(f"the phone still lists port {active}")
     log(f"the laptop uses port {target} now ({settings.PHONE_RUNTIME_PORT_FILE})")
+    return 0
+
+
+# -- past the app: export and import over a one-shot socket -----------------
+
+def backup_writable(path: str | None = None) -> bool:
+    """Whether this process may write the backup at `path` (default) now."""
+    target = path or settings.PHONE_PROXY_BACKUP
+    directory = os.path.dirname(os.path.abspath(target))
+    return os.path.isdir(directory) and os.access(directory, os.W_OK)
+
+
+def check_backup_path(path: str) -> None:
+    """Refuse a backup the repository would stage: a password file in git.
+
+    `/etc/nixos` is a git work tree on this machine, and the default backup
+    sits beside the secrets there. The file is not ignored by that repository,
+    so writing it would make every proxy password a `git add -A` away. A path
+    outside a work tree, or one the repository ignores, is fine; no `git` means
+    no repository to protect and is also fine.
+    """
+    target = os.path.abspath(path)
+    directory = os.path.dirname(target)
+    if not os.path.isdir(directory):
+        return
+    inside = capture(
+        ["git", "-C", directory, "rev-parse", "--is-inside-work-tree"], timeout=10
+    ).strip()
+    if inside != "true":
+        return
+    if status(["git", "-C", directory, "check-ignore", "-q", "--", target], timeout=10) == 0:
+        return
+    die(
+        "refusing to write the saved-proxy backup inside a git work tree: "
+        f"{target} is not ignored. Add it to .gitignore, or set "
+        "PHONE_PROXY_BACKUP/--out to a path outside the repository."
+    )
+
+
+def _read_line(sock: socket.socket, *, eof_ok: bool = False) -> str | None:
+    """One protocol line, without its LF.
+
+    `eof_ok` is for the first answer only: adb can accept a forwarded connection
+    a moment before the app has bound and then close it, and that is a retry,
+    not a refused transfer by the phone.
+    """
+    data = bytearray()
+    while len(data) <= 512:
+        chunk = sock.recv(1)
+        if not chunk:
+            if eof_ok and not data:
+                return None
+            die("the phone closed the transfer before answering")
+        if chunk == b"\n":
+            return data.decode("ascii", "replace").rstrip("\r")
+        data += chunk
+    die("the phone sent a transfer line that is too long")
+
+
+def _read_exact(sock: socket.socket, length: int) -> bytes:
+    body = bytearray()
+    while len(body) < length:
+        chunk = sock.recv(length - len(body))
+        if not chunk:
+            die("the phone closed the transfer in the middle of the document")
+        body += chunk
+    return bytes(body)
+
+
+def _forward(serial: str, device_port: int) -> int:
+    """Ask adb for a laptop port that reaches the app's loopback port."""
+    output = capture(
+        ["adb", "-s", serial, "forward", "tcp:0", f"tcp:{device_port}"], timeout=15
+    )
+    local = 0
+    if output.strip().isdigit():
+        local = int(output.strip())
+    else:
+        match = re.search(r"tcp:(\d+)\s+tcp:(\d+)", output)
+        if match:
+            local = int(match.group(1))
+    if not 1 <= local <= 65535:
+        die("adb forward did not give a laptop port to reach the transfer")
+    return local
+
+
+def _connect(serial: str, local: int, deadline: float) -> socket.socket:
+    """Wait for the app's listener, then connect to it on loopback only."""
+    while True:
+        try:
+            sock = socket.create_connection(("127.0.0.1", local), timeout=2)
+            sock.settimeout(30)
+            return sock
+        except OSError:
+            if time.time() >= deadline:
+                die(
+                    "the phone did not open the export/import socket: unlock the "
+                    "phone and turn the screen on, then run the command again (an "
+                    "app older than this command has no EXPORT/IMPORT and must be "
+                    "updated first)"
+                )
+            time.sleep(0.05)
+
+
+def _exchange(serial: str, action: str, body: bytes | None) -> tuple[int, bytes]:
+    """Start the action, speak the transfer protocol once, and clean up."""
+    device_port = 20000 + secrets.randbelow(40000)
+    token = secrets.token_hex(16)
+    _send(
+        serial,
+        action,
+        "--ei",
+        "port",
+        str(device_port),
+        "--es",
+        "token",
+        token,
+    )
+    deadline = time.time() + max(0.0, settings.PHONE_PROXY_TRANSFER_WAIT)
+    local = 0
+    sock: socket.socket | None = None
+    try:
+        while True:
+            local = _forward(serial, device_port)
+            sock = _connect(serial, local, deadline)
+            sock.sendall(f"{TRANSFER_MAGIC} {token}\n".encode("ascii"))
+            if body is not None:
+                sock.sendall(f"PUT {len(body)}\n".encode("ascii") + body)
+            header = _read_line(sock, eof_ok=True)
+            if header is not None:
+                break
+            # adb took the connection before the app bound and closed it again.
+            # The token has not been delivered, so one more forward is safe.
+            sock.close()
+            sock = None
+            status(["adb", "-s", serial, "forward", "--remove", f"tcp:{local}"])
+            local = 0
+            if time.time() >= deadline:
+                die(
+                    "the phone did not open the export/import socket: unlock the "
+                    "phone and turn the screen on, then run the command again (an "
+                    "app older than this command has no EXPORT/IMPORT and must be "
+                    "updated first)"
+                )
+            time.sleep(0.1)
+        if header.startswith("ERR "):
+            die(f"the phone refused the transfer: {header[4:]}")
+        if not header.startswith("OK "):
+            die("the phone answered the transfer with something unexpected")
+        try:
+            value = int(header[3:])
+        except ValueError:
+            die("the phone answered the transfer with a bad length")
+        if body is None:
+            if not 1 <= value <= TRANSFER_MAX_BYTES:
+                die("the phone offered a backup larger than the transfer allows")
+            return value, _read_exact(sock, value)
+        return value, b""
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
+        if local:
+            status(["adb", "-s", serial, "forward", "--remove", f"tcp:{local}"])
+
+
+def _document(body: bytes) -> dict:
+    """The shape every caller relies on, so a wrong answer is never written."""
+    if not 1 <= len(body) <= TRANSFER_MAX_BYTES:
+        die("the backup is empty or larger than the transfer allows")
+    try:
+        document = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        die("the backup is not JSON")
+    if not isinstance(document, dict) or document.get("app") != TRANSFER_APP:
+        die("the backup is not a phone-link-proxy document")
+    version = document.get("version", 1)
+    if not isinstance(version, int) or version > 1:
+        die("the backup is from a newer version of the app than this command reads")
+    if not isinstance(document.get("saved", []), list):
+        die("the backup has no list of saved proxies")
+    return document
+
+
+def _write_private(path: str, body: bytes) -> None:
+    """Write a backup atomically and root-only, never through a wider mode."""
+    target = os.path.abspath(path)
+    directory = os.path.dirname(target)
+    if not os.path.isdir(directory):
+        die(f"no directory for the backup: {directory}")
+    handle, temporary = tempfile.mkstemp(prefix=".phone-link-proxies.", dir=directory)
+    try:
+        os.fchmod(handle, 0o600)
+        with os.fdopen(handle, "wb") as out:
+            out.write(body)
+        os.replace(temporary, target)
+        os.chmod(target, 0o600)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+
+
+def export_to(serial: str, path: str) -> dict:
+    """Pull the app's saved proxies into `path`; return the parsed document."""
+    check_backup_path(path)
+    if not _installed(serial):
+        die(f"{settings.PHONE_PROXY_PKG} is not installed; nothing to export")
+    _, body = _exchange(serial, EXPORT, None)
+    document = _document(body)
+    _write_private(path, body)
+    saved = document.get("saved", [])
+    log(f"exported {len(saved)} saved proxies to {path} (mode 0600)")
+    return document
+
+
+def _read_file(path: str) -> bytes:
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        die(f"cannot read the backup: {path}")
+    if not 1 <= size <= TRANSFER_MAX_BYTES:
+        die(f"the backup is empty or larger than the transfer allows: {path}")
+    try:
+        with open(path, "rb") as handle:
+            return handle.read()
+    except OSError:
+        die(f"cannot read the backup: {path}")
+
+
+def import_from(serial: str, path: str) -> int:
+    """Write a backup into the app; return how many saved proxies it wrote."""
+    if not _installed(serial):
+        die(f"{settings.PHONE_PROXY_PKG} is not installed; run phone-proxy-install first")
+    body = _read_file(path)
+    _document(body)
+    count, _ = _exchange(serial, IMPORT, body)
+    log(f"imported {count} saved proxies from {path}")
+    return count
+
+
+def restore(serial: str, document: dict, path: str) -> None:
+    """Import a backup, start the proxy that was in use, and verify its port."""
+    count = import_from(serial, path)
+    saved = [entry for entry in document.get("saved", []) if isinstance(entry, dict)]
+    name = document.get("in_use") if isinstance(document.get("in_use"), str) else ""
+    entry = next((one for one in saved if one.get("name") == name), None)
+    if entry is None:
+        # Nothing named as in use: the configuration in use is still worth
+        # restoring, and a bare START resumes exactly that one.
+        active = document.get("active")
+        if isinstance(active, dict):
+            entry = active
+            name = ""
+    if entry is None:
+        log(
+            f"imported {count} saved proxies; the backup names no proxy in use, "
+            "so nothing was started"
+        )
+        return
+
+    port = entry.get("port")
+    if not isinstance(port, int) or not 1 <= port <= 65535:
+        log(f"imported {count} saved proxies; the backup does not name their port")
+        return
+
+    if port not in _dump_listeners(_dump(serial)):
+        if name:
+            log(f'starting the imported proxy "{name}" on port {port}')
+            _send(serial, START, "--es", "profile", name)
+        else:
+            log(f"starting the imported configuration on port {port}")
+            _send(serial, START)
+        state = _wait(
+            serial,
+            lambda state: _running(state) or _gated(state),
+            int(settings.PHONE_PROXY_WAIT),
+        )
+        if _gated(state):
+            log(
+                f"imported {count} saved proxies; the proxy is waiting for its "
+                f"network ({state}) and was not verified"
+            )
+            return
+        if not _running(state):
+            die(
+                f"imported {count} saved proxies, but the proxy did not start "
+                f"({state or 'no state'}); the backup is at {path}"
+            )
+
+    # The document the phone just sent back has the credentials, so the one
+    # request that proves the restore does not need the laptop's own secret.
+    anonymous = bool(entry.get("anonymous"))
+    user = "" if anonymous else str(entry.get("user") or "")
+    password = "" if anonymous else str(entry.get("password") or "")
+    verified = ""
+    for address in phone.phone_ips(serial):
+        code = _request(address, str(port), user, password)
+        log(f"{address}:{port} -> https://example.com = {code}")
+        if code == "200":
+            verified = address
+            break
+    if not verified:
+        die(
+            f"imported {count} saved proxies, but port {port} did not answer "
+            f"with 200; the backup is at {path}"
+        )
+    log(
+        f'imported {count} saved proxies and verified "{name or "the configuration"}" '
+        f"on port {port} through {verified}"
+    )
+
+
+def _needs_root_to_write(path: str) -> bool:
+    return not backup_writable(path)
+
+
+def _needs_root_to_read(path: str) -> bool:
+    return not os.access(path, os.R_OK)
+
+
+def _export_args(args: list[str]) -> str:
+    out = settings.PHONE_PROXY_BACKUP
+    index = 0
+    while index < len(args):
+        value = args[index]
+        if value == "--out":
+            if index + 1 >= len(args):
+                print(USAGE_EXPORT, end="", file=sys.stderr)
+                die("--out needs a file")
+            out = args[index + 1]
+            index += 1
+        elif value in ("-h", "--help"):
+            print(USAGE_EXPORT, end="", file=sys.stderr)
+            raise SystemExit(0)
+        else:
+            print(USAGE_EXPORT, end="", file=sys.stderr)
+            die(f"unknown argument: {value}")
+        index += 1
+    return out
+
+
+def phone_proxy_export(args: list[str]) -> int:
+    """Pull every saved proxy off the phone into a root-only backup."""
+    out = _export_args(args)
+    check_backup_path(out)
+    if _needs_root_to_write(out):
+        phone.as_root("phone-proxy-export", args)
+    serial = phone.phone_serial()
+    if not serial:
+        die("no phone attached (see adb devices)")
+    export_to(serial, out)
+    return 0
+
+
+def phone_proxy_import(args: list[str]) -> int:
+    """Write a phone-proxy-export backup back into the app."""
+    path = ""
+    for value in args:
+        if value in ("-h", "--help"):
+            print(USAGE_IMPORT, end="", file=sys.stderr)
+            return 0
+        if value.startswith("-"):
+            print(USAGE_IMPORT, end="", file=sys.stderr)
+            die(f"unknown argument: {value}")
+        if path:
+            print(USAGE_IMPORT, end="", file=sys.stderr)
+            die("one backup file at a time")
+        path = value
+    if not path:
+        print(USAGE_IMPORT, end="", file=sys.stderr)
+        die("name the backup to import")
+    if _needs_root_to_read(path):
+        phone.as_root("phone-proxy-import", args)
+    serial = phone.phone_serial()
+    if not serial:
+        die("no phone attached (see adb devices)")
+    import_from(serial, path)
     return 0

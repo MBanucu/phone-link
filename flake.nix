@@ -47,6 +47,7 @@
           coreutils
           curl
           gawk
+          git
           gnugrep
           gnused
           iproute2
@@ -336,6 +337,7 @@
                   pkgs.gawk
                   pkgs.gnugrep
                   pkgs.gnused
+                  pkgs.git
                   pkgs.python3
                 ];
               }

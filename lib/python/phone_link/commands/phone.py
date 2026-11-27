@@ -78,7 +78,11 @@ checkout of the app's repository is installed by naming the file.
 An app signed with a different key cannot be updated in place — adb refuses the
 install — so --replace-signer uninstalls it first. That also clears the app's
 saved proxies; --yes skips the prompt. It is what a phone moving from a locally
-built APK to a signed release needs, once.
+built APK to a signed release needs, once. For this app, the saved proxies are
+exported to PHONE_PROXY_BACKUP first, imported back after the install, and the
+proxy that was in use is started and verified on the port it had; if the
+installed app cannot export, nothing is uninstalled. The backup holds every
+password in clear text and is written mode 0600 beside the secrets.
 
 Downloads are cached in $PHONE_APK_DIR, defaulting to
 $XDG_CACHE_HOME/phone-link (or ~/.cache/phone-link), named
@@ -722,6 +726,11 @@ def phone_proxy_install(args: list[str]) -> int:
     package = settings.PHONE_PROXY_PKG
     log(f"phone: {serial}")
 
+    # The saved proxies live in the app, so replacing a differently signed app
+    # has to get them out first. Imported here, not at module load, because the
+    # proxy commands import this module.
+    from . import proxy as proxy_commands
+
     def remote_paths() -> list[str]:
         return [
             line.removeprefix("package:")
@@ -985,7 +994,11 @@ def phone_proxy_install(args: list[str]) -> int:
     # An app signed with another key cannot be updated in place; the only way
     # onto a differently signed build is to remove the old one, and the app's
     # data goes with it. Said before it happens, and asked about unless --yes.
-    if replace_signer and remote_paths():
+    # Our own app is asked for its saved proxies first, so the uninstall does
+    # not cost them; the backup is written root-only beside the secrets.
+    restore_document: dict | None = None
+    installed = remote_paths()
+    if replace_signer and installed:
         log(
             f"{package} is installed: replacing it with a differently signed "
             "build uninstalls it first, which clears the app's saved proxies"
@@ -996,13 +1009,38 @@ def phone_proxy_install(args: list[str]) -> int:
             if not _confirm_stdin(f"Uninstall {package} and install over it? [y/N] "):
                 log("aborted")
                 return 1
+        if package.startswith(settings.PHONE_APP_NAMESPACE):
+            proxy_commands.check_backup_path(settings.PHONE_PROXY_BACKUP)
+            if not proxy_commands.backup_writable():
+                # The backup belongs beside the root-only secrets; the export
+                # writes it there, so run the whole replacement as root.
+                phone.as_root("phone-proxy-install", args)
+            log("exporting the saved proxies before the uninstall")
+            restore_document = proxy_commands.export_to(
+                serial, settings.PHONE_PROXY_BACKUP
+            )
+        else:
+            log(
+                "the vendored proxy has no export action; its saved proxies "
+                "will be lost with the uninstall"
+            )
         if status(["adb", "-s", serial, "uninstall", package]) != 0:
             die("adb uninstall failed")
         log(f"uninstalled {package}")
 
     install_apks(local_apks)
+    if restore_document is not None:
+        # The app is back and empty; put its saved proxies back and prove the
+        # proxy that was in use answers on the port it had before.
+        log("importing the saved proxies after the install")
+        proxy_commands.restore(
+            serial, restore_document, settings.PHONE_PROXY_BACKUP
+        )
     show_status()
-    log("open the app once and start the proxy, then run phone-proxy-check")
+    if restore_document is not None:
+        log("the app's saved proxies are back; phone-proxy-check reports the link")
+    else:
+        log("open the app once and start the proxy, then run phone-proxy-check")
     return 0
 
 
