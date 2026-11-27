@@ -6,8 +6,25 @@ import argparse
 import json
 import sys
 
+from .checks import MODULES
+from .context import Context
+from .parallel import collect_parallel
 from .report import Report
-from .status import collect, summary
+from .status import summary
+
+
+def _jobs(value: str) -> int:
+    if value == "auto":
+        return min(8, len(MODULES))
+    try:
+        jobs = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"invalid job count: {value!r} (use a positive integer or 'auto')"
+        ) from None
+    if jobs < 1:
+        raise argparse.ArgumentTypeError("job count must be at least 1")
+    return jobs
 
 
 def _payload(sections) -> dict:
@@ -58,9 +75,19 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="print every result as JSON, for the GUI",
     )
+    parser.add_argument(
+        "--jobs",
+        type=_jobs,
+        default=1,
+        metavar="N|auto",
+        help=(
+            "run independent checks on N threads, or 'auto' for "
+            "min(8, sections); the report stays in section order (default: 1)"
+        ),
+    )
     args = parser.parse_args(argv)
 
-    sections = collect()
+    sections = collect_parallel(Context(), jobs=args.jobs)
     if args.json:
         payload = _payload(sections)
         print(json.dumps(payload, indent=2))
