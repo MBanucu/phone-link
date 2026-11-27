@@ -10,6 +10,7 @@ Run every target with `nix flake check`; run one with
 | `gui` | the real window, every page and the log window construct under Xvfb |
 | `package` | every script in the flake exists, is executable, kept its wrapped `PATH`, and `phone-net-status` prints a status |
 | `shellcheck` | `bin/` and `lib/*.sh` are clean at shellcheck warning level (the `tests/` suites are not shellchecked yet) |
+| `python` | every module under `lib/python/` compiles without being imported; GTK is not loaded |
 | `format` | `flake.nix`, both `modules/*.nix` files and `tests/module/*.nix` are nixfmt-clean |
 | `module` | the module generates the expected sing-box config and units (5 s probe, 20 s first run, AP DHCP hole, a DHCP-only AP with no router/DNS option, an nftables forward drop that also works with the firewall off, an opt-in hairpin with one accepted client, a scoped masquerade and DHCP router/DNS, a default-on fail-open watchdog with that hairpin and an explicit off switch, an opt-in AP autoconnect that leaves the profile link-only, an opt-in rejoin watchdog, pinned resolver, never started at boot) and defines nothing when disabled |
 | `script` | every `tests/*.test.sh` suite runs hermetically with stub `adb`/`curl`/`avahi-browse`; [architecture](architecture.md#i-want-to) shows how to run one suite |

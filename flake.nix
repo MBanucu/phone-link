@@ -266,6 +266,24 @@
             touch $out
           '';
 
+          # Parse every Python module without importing it. The GUI modules
+          # need GTK at import time, but `compileall` only reads syntax, so this
+          # needs no display, no typelibs and no network. The copy is what gets
+          # compiled: the store is read-only, and a stale `__pycache__` must not
+          # be able to stand in for the source.
+          python =
+            pkgs.runCommand "phone-link-python-check"
+              {
+                nativeBuildInputs = [ pkgs.python3 ];
+              }
+              ''
+                cp -r ${./lib/python} "$TMPDIR/python"
+                chmod -R u+w "$TMPDIR/python"
+                find "$TMPDIR/python" -name __pycache__ -type d -exec rm -rf {} +
+                python3 -m compileall -q "$TMPDIR/python"
+                touch $out
+              '';
+
           format = pkgs.runCommand "phone-link-format-check" { nativeBuildInputs = [ pkgs.nixfmt ]; } ''
             nixfmt --check ${./flake.nix} ${
               lib.escapeShellArgs (
