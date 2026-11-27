@@ -73,17 +73,19 @@ def _noticed(epoch: str) -> str:
 def _oem_autostart(state_text: str) -> Result:
     """The vendor gate is never a pass: unreadable is the best fact there is.
 
-    A dated `last_boot blocked` from the app is the only evidence that a boot
-    went by without the receiver, and even that is phrased as a suspicion: the
-    list itself cannot be read. A missing line is an older app or a missing
-    file, which is a different unknown, not "open".
+    A dated `last_boot no_broadcast` from the app is the only evidence that a
+    boot went by without the receiver, and even that is phrased as a suspicion:
+    the list itself cannot be read. The observation does not say why, so the
+    wording here supplies the conservative interpretation. A missing line, or
+    an old `last_boot blocked` line that states the conclusion, is a different
+    unknown, not proof.
     """
-    blocked = boot.last_boot_blocked(state_text)
-    if blocked:
+    missed = boot.last_boot_missed(state_text)
+    if missed:
         return warn(
             "app_oem_autostart",
             "OEM autostart",
-            f"likely blocked this boot (noticed {_noticed(blocked)}); no boot "
+            f"likely blocked this boot (noticed {_noticed(missed)}); no boot "
             f"broadcast reached the app. Open {AUTOSTART_SCREEN}, or run "
             f"{ADB_DRIVER} / {TOGGLE_DRIVER}",
         )

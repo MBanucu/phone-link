@@ -623,10 +623,10 @@ grep -q 'warn  OEM autostart.*unknown: this app does not report the DokeOS gate'
   && ok "a missing fact is unknown" \
   || bad "a missing fact is unknown" "$(cat "$LOG/out")"
 
-# 12c-4. The app's dated suspicion is reported as likely, with the screen and
-# both drivers, and never as a read of the vendor list.
+# 12c-4. The app's dated observation is turned into the conservative wording,
+# with the screen and both drivers, and never into a read of the vendor list.
 fresh_state
-printf 'auto_start true\nadb_wifi true\nport 1080\nssid PhoneLink\nany_network false\nin_use \noem_autostart unreadable\nlast_boot blocked 1700000000\n' \
+printf 'auto_start true\nadb_wifi true\nport 1080\nssid PhoneLink\nany_network false\nin_use \noem_autostart unreadable\nlast_boot no_broadcast 1700000000\n' \
   >"$LOG/app_state"
 if run; then ok "a likely-blocked boot still exits 0"; else bad "a likely-blocked boot still exits 0" "$(cat "$LOG/out")"; fi
 grep -q 'warn  OEM autostart.*likely blocked this boot (noticed 2023-11-14 22:13 UTC)' "$LOG/out" \
@@ -645,6 +645,19 @@ run --analyze || true
 grep -q '^warn app_oem_autostart .*likely blocked' "$LOG/out" \
   && ok "--analyze names the OEM check" \
   || bad "--analyze names the OEM check" "$(cat "$LOG/out")"
+
+# 12c-5. An old-style `last_boot blocked` line is the conclusion, not the
+# observation: it is not served as proof, and the check stays unknown.
+fresh_state
+printf 'auto_start true\nadb_wifi true\nport 1080\nssid PhoneLink\nany_network false\nin_use \noem_autostart unreadable\nlast_boot blocked 1700000000\n' \
+  >"$LOG/app_state"
+if run; then ok "an old-style blocked line still exits 0"; else bad "an old-style blocked line still exits 0" "$(cat "$LOG/out")"; fi
+grep -q 'warn  OEM autostart.*unknown: the DokeOS list is unreadable' "$LOG/out" \
+  && ok "an old blocked line is treated as unknown" \
+  || bad "an old blocked line is treated as unknown" "$(cat "$LOG/out")"
+grep -q 'likely blocked this boot' "$LOG/out" \
+  && bad "an old blocked line is not proof" \
+  || ok "an old blocked line is not proof"
 
 # 12d. A declared-but-denied grant is named on its own and points at the fixer.
 for entry in \

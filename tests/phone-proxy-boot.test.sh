@@ -170,15 +170,24 @@ if run --check; then bad "unreadable auto_start exits 1"; else ok "unreadable au
 grep -q 'auto_start could not be read' "$LOG/out" \
   && ok "names the unreadable switch" || bad "names the unreadable switch" "$(cat "$LOG/out")"
 
-# 5b. The app's dated suspicion is repeated, with the screen, and does not
-#     turn into an adb failure: the fixer cannot make the vendor list readable.
+# 5b. The app's dated observation is repeated as the conservative wording,
+#     with the screen, and does not turn into an adb failure: the fixer cannot
+#     make the vendor list readable.
 reset
-printf 'oem_autostart unreadable\nlast_boot blocked 1700000000\n' >"$LOG/state_extra"
+printf 'oem_autostart unreadable\nlast_boot no_broadcast 1700000000\n' >"$LOG/state_extra"
 if run --check; then ok "a likely-blocked boot still exits 0"; else bad "a likely-blocked boot still exits 0" "$(cat "$LOG/out")"; fi
 grep -q 'the app reports the last boot as likely blocked' "$LOG/out" \
   && ok "repeats the app's likely-blocked fact" || bad "repeats the app's likely-blocked fact" "$(cat "$LOG/out")"
 grep -q 'Auto Start Management' "$LOG/out" \
   && ok "points at the DokeOS screen" || bad "points at the DokeOS screen" "$(cat "$LOG/out")"
+
+# 5c. An old-style `last_boot blocked` line is a conclusion, not the
+#     observation, so it is not repeated as evidence.
+reset
+printf 'oem_autostart unreadable\nlast_boot blocked 1700000000\n' >"$LOG/state_extra"
+if run --check; then ok "an old-style blocked line still exits 0"; else bad "an old-style blocked line still exits 0" "$(cat "$LOG/out")"; fi
+grep -q 'the app reports the last boot as likely blocked' "$LOG/out" \
+  && bad "an old blocked line is not proof" || ok "an old blocked line is not proof"
 
 # 6. Not installed points at the installer and touches nothing.
 reset

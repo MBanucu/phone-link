@@ -23,10 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `app_oem_autostart` warning, separate from the battery allowlist: the vendor
   list is behind `com.freeme.freemanager.permission.ACCESS_INTERFACE`, so a
   battery-clear phone is reported as "unknown: the DokeOS list is unreadable",
-  never as ok. When the app writes `last_boot blocked <epoch>` — its boot
-  receiver missed the current boot with auto-start on — the doctor says
-  "likely blocked this boot (noticed …)" and names System Manager → App
-  Management → Auto Start Management plus the two drivers. A missing fact is a
+  never as ok. When the app writes the neutral observation
+  `last_boot no_broadcast <epoch>` — its boot receiver missed the current boot
+  with auto-start on — the doctor says "likely blocked this boot (noticed …)"
+  and names System Manager → App Management → Auto Start Management plus the
+  two drivers. A missing fact, or an old `last_boot blocked` conclusion, is a
   different unknown, not a pass. `phone-proxy-boot` names the same screen and
   no longer implies its adb-side checks prove a restart (phone-link-proxy#5).
 - `docs/phone-network.md` records the measurement behind the idle link's

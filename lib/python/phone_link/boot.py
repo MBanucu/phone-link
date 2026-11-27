@@ -97,16 +97,20 @@ def oem_autostart_state(state_text: str = "") -> str:
     return _state_value(state_text, "oem_autostart")
 
 
-def last_boot_blocked(state_text: str = "") -> str:
-    """The app's dated suspicion of a blocked boot, or "".
+def last_boot_missed(state_text: str = "") -> str:
+    """The app's dated observation of a boot with no broadcast, or "".
 
-    The line is `last_boot blocked <epoch seconds>` and only exists when the
-    app's boot receiver did not run in the current boot while auto-start was
-    on. The timestamp is when the app noticed, not the boot's own clock; the
-    caller should say "likely blocked", because the vendor list cannot be read.
+    The line is `last_boot no_broadcast <epoch seconds>` and only exists when
+    the app's boot receiver did not run in the current boot while auto-start
+    was on. It records the observation, not a cause; the caller may say
+    "likely blocked", because the vendor list cannot be read.
+
+    Older or unknown spellings — including a `last_boot blocked <epoch>` line
+    that states the suspicion — are deliberately ignored: they are not proof,
+    and the doctor falls back to "unknown".
     """
     parts = _state_value(state_text, "last_boot").split()
-    if len(parts) < 2 or parts[0] != "blocked":
+    if len(parts) < 2 or parts[0] != "no_broadcast":
         return ""
     return parts[1]
 

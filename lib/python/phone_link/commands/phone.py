@@ -431,7 +431,7 @@ def phone_proxy_boot(args: list[str]) -> int:
             '"Phone link proxy" there (System Manager > App Management > '
             "Auto Start Management)"
         )
-        if boot.last_boot_blocked(state_text()):
+        if boot.last_boot_missed(state_text()):
             log(
                 "the app reports the last boot as likely blocked by DokeOS "
                 "Auto Start Management; the same screen is where to enable it"

@@ -70,9 +70,10 @@ The app checks read the service's `dumpsys` while it runs, and the app's own
 `files/state.txt` when it does not: a stopped service prints nothing, which is
 exactly the state a broken phone is in, and `auto_start` is the fact the boot
 check needs. The file also carries `oem_autostart unreadable` because the
-DokeOS list is signature-protected, and `last_boot blocked <epoch>` only when
-the app's boot receiver missed the current boot with auto-start on; the doctor
-reports that as a dated suspicion, not as a read of the vendor list.
+DokeOS list is signature-protected, and `last_boot no_broadcast <epoch>` only
+when the app's boot receiver missed the current boot with auto-start on. That
+line is the observation, not the conclusion; the doctor renders the dated
+"likely blocked" wording, not a read of the vendor list.
 `lib/phone-net.sh` remains for the live harness in `tests/live`.
 
 `lib/python/phone_link/commands` holds the CLI half: one function per `bin/`
