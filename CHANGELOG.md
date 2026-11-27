@@ -5,6 +5,43 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-11-27
+
+### Added
+
+- `phone-ap-down --client` stops the access point and leaves the radio free for
+  NetworkManager instead of joining the phone's hotspot, and the Status page
+  shows a "PhoneLink access point" switch that runs `phone-ap-up` or
+  `phone-ap-down --client` through the same escalation path. Switching off is a
+  runtime mode: every boot still starts with the AP up (#71).
+- `phone-tun-toggle` probes the default-route gateways and the peer addresses
+  of point-to-point links after the declared hosts fail, so a USB tether on a
+  fresh `10.x` subnet is found without editing `proxyHosts`. The AP host is
+  never probed this way, and the declared hosts stay first (#34).
+- `tests/check.sh fast|all|--list` is the one local entry point: `fast` runs
+  format, shellcheck, python, module and script, stopping at the first failure
+  and naming it; `all` is `nix flake check` (#57).
+- `docs/architecture.md`, `docs/commands.md` and `docs/proxy-boundary.md`, and
+  the README split into `docs/options.md`, `docs/scripts.md`, `docs/checks.md`
+  and `docs/operations.md` (#52, #53, #56, #58).
+- `tests/lib/harness.sh` and `tests/README.md`: shared `ok`/`bad`/`finish`,
+  `tmpdir`, `stub_adb` and `stub_cmd` for the hermetic suites (#55).
+- A `python` check compiles every module under `lib/python/` without importing
+  GTK, and `shellcheck` now covers every tracked `*.sh` under `tests/` (#60).
+
+### Changed
+
+- The module-eval fixtures and assertions live in `tests/module/`, taking
+  `flake.nix` from 919 to 412 lines; the nixfmt list is derived from the tree
+  instead of a hand-kept filename list (#54).
+- Wishes live in GitHub issues, and app work is filed in
+  `MBanucu/phone-link-proxy`; `TODO.md` is a legacy pointer (#59).
+
+### Fixed
+
+- The hairpin evidence summary now prints the run start instead of the moment
+  the summary was written (#68).
+
 ## [0.15.0] - 2026-11-27
 
 ### Added
@@ -1348,7 +1385,8 @@ with it.
 - `phone-doctor` installs under `lib/python`, where its wrapper looks for it.
 - The proxy APK cache is found when `HOME` is unset during activation.
 
-[Unreleased]: https://github.com/MBanucu/phone-link/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/MBanucu/phone-link/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/MBanucu/phone-link/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/MBanucu/phone-link/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/MBanucu/phone-link/compare/v0.13.3...v0.14.0
 [0.13.3]: https://github.com/MBanucu/phone-link/compare/v0.13.2...v0.13.3
