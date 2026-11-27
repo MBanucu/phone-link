@@ -261,10 +261,23 @@
                 touch $out
               '';
 
-          shellcheck = pkgs.runCommand "phone-link-shellcheck" { nativeBuildInputs = [ pkgs.shellcheck ]; } ''
-              shellcheck -S warning ${./bin}/* ${./lib}/*.sh
-            touch $out
-          '';
+          # Everything a user or a maintainer runs: the entry points and the
+          # shared shell, then every tracked script under tests/ — the suites,
+          # the shared harness, check-timings.sh and the live runbooks. The test
+          # list is read from the directory so a new suite cannot be forgotten.
+          shellcheck =
+            pkgs.runCommand "phone-link-shellcheck"
+              {
+                nativeBuildInputs = [ pkgs.shellcheck ];
+              }
+              ''
+                shellcheck -S warning ${./bin}/* ${./lib}/*.sh ${
+                  lib.escapeShellArgs (
+                    lib.filter (path: lib.hasSuffix ".sh" (toString path)) (lib.filesystem.listFilesRecursive ./tests)
+                  )
+                }
+                touch $out
+              '';
 
           # Parse every Python module without importing it. The GUI modules
           # need GTK at import time, but `compileall` only reads syntax, so this
