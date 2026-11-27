@@ -7,7 +7,7 @@ Run every target with `nix flake check`; run one with
 |---|---|
 | `registry` | every script in `flake.nix` has an action in the GUI's table, and every action has an executable script |
 | `gui-registry` | the packaged GUI imports GTK4/libadwaita and its table matches the scripts |
-| `gui` | the real window, every page and the log window construct under Xvfb |
+| `gui` | the real window, every page and the log window construct under Xvfb, and a streamed refresh keeps the rows while marking them pending |
 | `package` | every script in the flake exists, is executable, kept its wrapped `PATH`, and `phone-net-status` prints a status |
 | `shellcheck` | `bin/`, `lib/*.sh` and every tracked `*.sh` under `tests/` — the suites, the shared harness, `check-timings.sh` and the live scripts — are clean at shellcheck warning level |
 | `python` | every module under `lib/python/` compiles without being imported; GTK is not loaded |
@@ -16,7 +16,9 @@ Run every target with `nix flake check`; run one with
 | `script` | every `tests/*.test.sh` suite runs hermetically with stub `adb`/`curl`/`avahi-browse`; [architecture](architecture.md#i-want-to) shows how to run one suite |
 
 The `script` check also covers `phone-doctor --analyze` (problem ids, AP down and
-a missing APK, warnings-only, no headers or `ok` lines),
+a missing APK, warnings-only, no headers or `ok` lines), the
+`--json-stream` event order and its reconstruction of the `--json` payload,
+the GUI's stream parser and pending/result/error state machine without GTK,
 `phone-doctor-fix` (dry run, ordered application, an install from the cached
 APK, the manual APK step, manual-only and failed-fix paths) and the fix scripts (ambulance APK, AP
 profile creation from the secret, forwarding, mobile data, tunnel: apply,

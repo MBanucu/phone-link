@@ -16,7 +16,7 @@ Or straight from the checkout: `./bin/phone-net-status`.
 | script | what it does |
 |---|---|
 | `phone-net-status` | links, routes, resolver, proxy probes, adb transports, phone state |
-| `phone-doctor` | check every runtime condition of the setup (forwarding, AP role and link/address, adb, phone link, secrets, proxy, the port the laptop uses against the phone's listeners, tunnel, tether, internet), the APK a repair would install, the version the installed app reports and the phone SDK, and whether the source checkout is newer than the installed flake lock; the `ap_channel` line checks the configured band/channel against the current regulatory domain without needing the AP up (ok, or warn naming the country and `phoneLink.ap.country`/`iw reg set`/2.4 GHz; skipped when the AP is off or external); exit non-zero if a required one is unmet; the adb check reconnects a phone whose wireless-debugging port changed by reading its `_adb-tls-connect._tcp` mDNS record, and reports the pinned port first when the phone answers there; it reports the two Wi-Fi reconnect globals as an optional line and names `phone-wifi-connect PhoneLink` when the AP is on air with no station; with `ap.role = "external"` it reports the external role, the laptop's client link and whether the phone holds `proxyHost`, instead of "AP is down"; `--analyze` prints one `fail`/`warn` line with a stable problem id for scripts |
+| `phone-doctor` | check every runtime condition of the setup (forwarding, AP role and link/address, adb, phone link, secrets, proxy, the port the laptop uses against the phone's listeners, tunnel, tether, internet), the APK a repair would install, the version the installed app reports and the phone SDK, and whether the source checkout is newer than the installed flake lock; the `ap_channel` line checks the configured band/channel against the current regulatory domain without needing the AP up (ok, or warn naming the country and `phoneLink.ap.country`/`iw reg set`/2.4 GHz; skipped when the AP is off or external); exit non-zero if a required one is unmet; the adb check reconnects a phone whose wireless-debugging port changed by reading its `_adb-tls-connect._tcp` mDNS record, and reports the pinned port first when the phone answers there; it reports the two Wi-Fi reconnect globals as an optional line and names `phone-wifi-connect PhoneLink` when the AP is on air with no station; with `ap.role = "external"` it reports the external role, the laptop's client link and whether the phone holds `proxyHost`, instead of "AP is down"; `--analyze` prints one `fail`/`warn` line with a stable problem id for scripts; `--json` prints the whole report as one document, and `--json-stream` prints `section`, `result` and `done` events as NDJSON, one flushed line each, sharing `--jobs` so a finished check's result arrives without waiting for the slow ones (with the default one job the order matches `--json`) |
 | `phone-doctor-fix` | list the fixes for the problems `phone-doctor --analyze` reports, run one dedicated script per problem in dependency order, then re-check (`--yes` skips the prompt, `--dry-run` only lists, `--required` leaves warnings alone, `--which-doctor` prints the `phone-doctor` it reads — the one beside the checkout unless `PHONE_DOCTOR` says otherwise; run with `sudo`) |
 | `phone-fix-apk` | stock the ambulance box: copy the app APK the cache or `PHONE_PROXY_APK` names into `/var/cache/phone-link` so a repair on a machine without a download can still reinstall the app; `--releases [N]` also keeps the APKs of the newest N releases (5 by default) as a repair kit of several versions, each checked against its `.sha256` and named after its tag, older ones pruned past three times N (`--refresh` replaces the copy and refreshes the kit, `--check` lists the box) |
 | `phone-fix-forwarding` | set `net.ipv4.ip_forward=1` for the running kernel (`--check` reports only) |
@@ -91,8 +91,8 @@ choosing Python, `lib/*.sh`, a module option or the GUI, is in
 ## GUI
 
 `packages.<system>.phone-link-gui` is a GTK4/libadwaita control panel for the
-same setup. It reads the doctor's `--json` report for its
-status page and runs the scripts with the flags declared in
+same setup. It reads the doctor's `--json-stream` events for its status page and
+runs the scripts with the flags declared in
 `lib/python/phone_link/actions.py`:
 
 ```sh
@@ -118,6 +118,15 @@ link is down by design and that a network is joined in system settings; the
 switch is not persisted, so a reboot returns to the configured boot state
 (`phoneLink.ap.autoconnect`). The action row's menu carries the same
 `--client` variant.
+
+Re-checking the setup no longer replaces the page with one loading screen: every
+row stays visible with its own spinner and a `Checking…` subtitle, the Fix
+button is disabled until that row's new result arrives, and each row flips in
+place as the doctor streams its result. The verdict row and the header badge
+count the results already in, and a failed or killed probe keeps the last
+report on screen with the error in a toast; only a first run that has never had
+a report falls back to the full-page placeholder. A first run starts with one
+pending row per section and fills them in as results arrive.
 
 Every action has its `--check` preview plus its variants (F-Droid install,
 tunnel through `adb reverse`, legacy adb port, keep-cache uninstall, …) in the

@@ -15,6 +15,7 @@ that glob in mind: a suite outside `tests/*.test.sh` does not run in CI.
 | a `bin/` script | `tests/<script>.test.sh` (the suite named after the script) |
 | unit logic in `lib/*.sh` | `phone-tun-toggle`, `phone-ap-rejoin`, `phone-ap-failopen` |
 | the CLI, action registry, or root escalation | `phone-link-cli`, `phone-link-escalation`, `phone-as-root` |
+| the GUI status stream or a doctor report field | `gui-status-stream`, `phone-doctor-stream`, `phone-doctor` |
 | adb serial discovery or the phone's adb transport | `phone-adb-serial`, `phone-adb-mdns`, `phone-adb-wifi` |
 | a NixOS module option or generated unit | the `module` check, not a shell suite (see #53) |
 | a real phone, end to end | `tests/live/doctor-fix-proxy.sh` |
