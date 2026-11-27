@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-11-27
+
 ### Added
 
 - `phoneLink.ap.country` (#91): an uppercase ISO 3166-1 alpha-2 code added to
@@ -1498,7 +1500,8 @@ with it.
 - `phone-doctor` installs under `lib/python`, where its wrapper looks for it.
 - The proxy APK cache is found when `HOME` is unset during activation.
 
-[Unreleased]: https://github.com/MBanucu/phone-link/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/MBanucu/phone-link/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/MBanucu/phone-link/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/MBanucu/phone-link/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/MBanucu/phone-link/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/MBanucu/phone-link/compare/v0.15.0...v0.16.0
