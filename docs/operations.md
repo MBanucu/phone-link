@@ -9,6 +9,12 @@ input URL, so `nix flake update phone-link` alone keeps the same tag: change the
 tag in `flake.nix` first, then run `nix flake update phone-link` to refresh
 `flake.lock`.
 
+`phone-doctor` compares the lock with the tag or branch the input actually
+tracks, not with the checkout's HEAD: while a tag pin still resolves to the
+locked commit, later commits on `main` are not reported as a stale system lock.
+For a branch input the branch head is still what counts, so a moved branch keeps
+the update warning.
+
 The module declares the tunnel and the AP but installs no packages, so without
 the `environment.systemPackages` line there is no `phone-ap-up`, `phone-doctor`
 or `phone-proxy-*` on the machine.
