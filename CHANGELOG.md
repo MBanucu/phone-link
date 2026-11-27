@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   disabled (naming the country and the `phoneLink.ap.country` / `iw reg set` /
   2.4 GHz fixes), skipped when the AP is off or external. It reads the domain
   with `iw`, not the AP's activation state.
+- `phone-doctor --json-stream` prints the report as NDJSON `section`, `result`
+  and `done` events, one flushed line each, and honours `--jobs` (#92). The
+  GUI's Status page consumes it: a re-check keeps every row and the verdict on
+  screen, marks each row pending with its own spinner and `Checking…` subtitle,
+  disables its Fix button, and fills it in place as that check's result
+  arrives — a slow check keeps spinning while the fast rows are already final.
+  A failed or killed probe keeps the last report and shows the error in a
+  toast; only a first run that has never had a report uses the full-page
+  placeholder.
 
 ### Fixed
 

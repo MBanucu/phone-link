@@ -86,7 +86,9 @@ sudo phone-ap-up   # activate the AP profile
 
 From a checkout, `nix run` runs `phone-net-status`, `nix build` writes the
 scripts to `./result/bin/`, and `nix develop` is a shell with the scripts and
-their tools. `nix run .#gui` opens the panel. Every other command and flag is in
+their tools. `nix run .#gui` opens the panel; its Status page reads
+`phone-doctor --json-stream`, so a re-check keeps the rows on screen and fills
+each one in as its result arrives. Every other command and flag is in
 [scripts](docs/scripts.md).
 
 ## Checks

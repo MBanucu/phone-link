@@ -27,6 +27,15 @@ def _jobs(value: str) -> int:
     return jobs
 
 
+def _result_json(result) -> dict:
+    return {
+        "status": result.status.value,
+        "id": result.cid,
+        "label": result.label,
+        "detail": result.detail,
+    }
+
+
 def _payload(sections) -> dict:
     counts = summary(sections)
     return {
@@ -35,19 +44,46 @@ def _payload(sections) -> dict:
         "sections": [
             {
                 "name": section.name,
-                "results": [
-                    {
-                        "status": result.status.value,
-                        "id": result.cid,
-                        "label": result.label,
-                        "detail": result.detail,
-                    }
-                    for result in section.results
-                ],
+                "results": [_result_json(result) for result in section.results],
             }
             for section in sections
         ],
     }
+
+
+def _emit(event: dict) -> None:
+    """One NDJSON event per line, flushed so a reader sees it immediately."""
+    print(json.dumps(event), flush=True)
+
+
+def _stream_json(jobs: int) -> int:
+    def section(name: str) -> None:
+        _emit({"event": "section", "name": name})
+
+    def result(name: str, value) -> None:
+        _emit(
+            {
+                "event": "result",
+                "section": name,
+                "result": _result_json(value),
+            }
+        )
+
+    sections = collect_parallel(
+        Context(),
+        jobs=jobs,
+        on_section=section,
+        on_result=result,
+    )
+    payload = _payload(sections)
+    _emit(
+        {
+            "event": "done",
+            "ready": payload["ready"],
+            "counts": payload["counts"],
+        }
+    )
+    return 0 if payload["ready"] else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -60,8 +96,10 @@ def main(argv: list[str] | None = None) -> int:
         epilog=(
             "--analyze prints one 'fail|warn ID detail' line per problem for "
             "scripts such as phone-doctor-fix; --json prints the same results "
-            "as a document for the GUI. Exits 0 when every required condition "
-            "is met and 1 otherwise."
+            "as a document for the GUI; --json-stream prints them as NDJSON "
+            "events (section, result, done) so the GUI can fill its rows as "
+            "each check finishes. Exits 0 when every required condition is met "
+            "and 1 otherwise."
         ),
     )
     output = parser.add_mutually_exclusive_group()
@@ -75,6 +113,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="print every result as JSON, for the GUI",
     )
+    output.add_argument(
+        "--json-stream",
+        action="store_true",
+        help="print section/result/done events as NDJSON, flushed per line",
+    )
     parser.add_argument(
         "--jobs",
         type=_jobs,
@@ -86,6 +129,9 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
+
+    if args.json_stream:
+        return _stream_json(args.jobs)
 
     sections = collect_parallel(Context(), jobs=args.jobs)
     if args.json:
