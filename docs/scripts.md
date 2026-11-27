@@ -78,7 +78,9 @@ script, grouped by area (`status`, `phone`, `network`, `proxy`, `device`,
 shared layer. A `bin/phone-*` file is a thin shim that resolves the package next
 to the checkout or the store install and hands over to it, so the script names
 stay the contract: `phone_link.actions`, the Nix wrappers, the doctor and the
-tests all address them by name.
+tests all address them by name. The recipe for adding one, and the rule for
+choosing Python, `lib/*.sh`, a module option or the GUI, is in
+[commands](commands.md).
 
 ## GUI
 

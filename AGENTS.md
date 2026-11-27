@@ -17,7 +17,8 @@ rules the work here has settled into, not a style guide.
 - `README.md` — the operator's view: every script, every option, every module
   setting.
 - `lib/python/phone_link/` — one function per command, `bin/` is a wrapper each;
-  `phone_doctor/` is the checker, one module per symptom group.
+  `phone_doctor/` is the checker, one module per symptom group. The full recipe
+  for a new command is `docs/commands.md`.
 - the proxy app is a project of its own: `MBanucu/phone-link-proxy` holds its
   source, `build.sh`, its flake, its live harness and its releases, and its own
   README is the manual for the adb contract, the panel and the settings. This

@@ -24,9 +24,9 @@ flake.nix  →  modules/*.nix  →  lib/python/* + lib/*.sh  →  bin/*  →  te
 - `tests/` — `*.test.sh` are hermetic (stub `adb`/`curl`/`avahi-browse`) and run
   from the flake's `script` check; `tests/live/` needs the real phone and is
   never part of `nix flake check`.
-- `docs/` — this map, `options.md`, `scripts.md`, `checks.md`, `operations.md`,
-  `phone-network.md` (measured behaviour and traps) and `hairpin-measure.md`
-  (the live runbook).
+- `docs/` — this map, `options.md`, `scripts.md`, `commands.md`, `checks.md`,
+  `operations.md`, `phone-network.md` (measured behaviour and traps) and
+  `hairpin-measure.md` (the live runbook).
 
 ## I want to…
 
@@ -35,7 +35,7 @@ flake.nix  →  modules/*.nix  →  lib/python/* + lib/*.sh  →  bin/*  →  te
 | Change the tunnel | `modules/phone-link.nix` (`phone-tun`, `phone-tun-toggle`, generated config) | `nix build .#checks.x86_64-linux.module` and `bash tests/phone-tun-toggle.test.sh` |
 | Change the AP profile | `modules/phone-link.nix` (`networking.networkmanager.ensureProfiles`); the imperative path is `lib/python/phone_link/commands/network.py` | `nix build .#checks.x86_64-linux.module` and `bash tests/phone-ap-create.test.sh` |
 | Change the hairpin or fail-open | `modules/phone-link.nix` (`ap.uplink`, the `ap.*Rules` values); `modules/phone-link-failopen.nix` + `lib/phone-ap-failopen.sh` for the watchdog | `nix build .#checks.x86_64-linux.module` and `bash tests/phone-ap-failopen.test.sh` |
-| Change or add a command | `lib/python/phone_link/commands/<group>.py`, then its entry in `commands/__init__.py` and `actions.py`; the matching `bin/<name>` is only the shim | `bash tests/<name>.test.sh`, plus `nix build .#checks.x86_64-linux.registry` |
+| Change or add a command | `lib/python/phone_link/commands/<group>.py`, then its entry in `commands/__init__.py` and `actions.py`; the matching `bin/<name>` is only the shim. Full recipe in [commands](commands.md) | `bash tests/<name>.test.sh`, plus `nix build .#checks.x86_64-linux.registry` |
 | Change a module option | `modules/phone-link.nix`; document it in the [options table](options.md) | `nix build .#checks.x86_64-linux.module` |
 | Add or change a test | `tests/<name>.test.sh` | `bash tests/<name>.test.sh`; all suites: `nix build .#checks.x86_64-linux.script` |
 | Change the GUI | `lib/python/phone_link_gui/app.py` (pages beside it); argv still comes from `lib/python/phone_link/actions.py` | `nix build .#checks.x86_64-linux.gui` and `.#checks.x86_64-linux.gui-registry` |
@@ -84,6 +84,8 @@ All option defaults and descriptions are in the [options table](options.md).
   module is authoritative.
 - [docs/scripts.md](scripts.md) — every command, the GUI and the screenshots
   runbook.
+- [docs/commands.md](commands.md) — the shell/Python split, the action table and
+  the exact files a new command touches.
 - [docs/checks.md](checks.md) — what each target proves, how to run one and the
   timing history.
 - [docs/operations.md](operations.md) — install detail, the two modes, one-time
