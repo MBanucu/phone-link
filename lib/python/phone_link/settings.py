@@ -50,6 +50,13 @@ PHONE_AP_DECLARATIVE = _env("PHONE_AP_DECLARATIVE", "/etc/phone-link/ap-profile"
 PHONE_AP_ENSURE_UNIT = _env(
     "PHONE_AP_ENSURE_UNIT", "NetworkManager-ensure-profiles.service"
 )
+# The rejoin watchdog's throttle file and unit: phone-ap-up clears the file and
+# starts the unit so a deliberate switch-on asks for the association at once
+# instead of waiting out the five-minute window.
+PHONE_AP_REJOIN_STATE = _env(
+    "PHONE_AP_REJOIN_STATE", "/run/phone-link/ap-rejoin.last"
+)
+PHONE_AP_REJOIN_UNIT = "phone-link-ap-rejoin.service"
 PHONE_HOTSPOT_CON = _env("PHONE_HOTSPOT_CON", "XPLORE 2")
 PHONE_HOTSPOT_SSID = _env("PHONE_HOTSPOT_SSID", PHONE_HOTSPOT_CON)
 PHONE_PROXY_PORT = int(_env("PHONE_PROXY_PORT", "1080"))

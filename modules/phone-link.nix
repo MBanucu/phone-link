@@ -51,6 +51,9 @@ let
     PHONE_AP_CHANNEL=${lib.escapeShellArg (toString cfg.ap.channel)}
     PHONE_AP_CHANNEL_WIDTH=${lib.escapeShellArg (toString cfg.ap.channelWidth)}
     PHONE_AP_DECLARATIVE=${lib.escapeShellArg "/etc/phone-link/ap-profile"}
+    # phone-ap-up clears this file before asking the watchdog to run, so the
+    # command and the timer share one throttle state.
+    PHONE_AP_REJOIN_STATE=${lib.escapeShellArg "${runtimeDir}/ap-rejoin.last"}
     # The AP's no-forward unit runs this binary; the doctor reads the same path
     # because nft is not on PATH for an ordinary user.
     PHONE_NFT=${lib.escapeShellArg "${pkgs.nftables}/bin/nft"}
