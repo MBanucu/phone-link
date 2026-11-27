@@ -9,11 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `phoneLink.ap.role = "local" | "external"` (#37). `local` keeps the current
+  laptop access point. `external` is an always-on AP on another box: the module
+  creates no AP profile, DHCP server, nftables rules or DHCP firewall hole, and
+  a missing laptop AP interface is not a failure. `phone-ap-up` and
+  `phone-ap-down` say the AP is external and change nothing (up still asks the
+  rejoin watchdog to nudge the phone back over USB), while `phone-doctor`
+  reports the role, the laptop's client link and whether the phone holds
+  `proxyHost` instead of "AP is down". The external AP must stay link-only — no
+  NAT, no DHCP router/DNS option, no uplink or forwarding — with a DHCP
+  reservation for the phone.
 - `docs/phone-network.md` records the measurement behind the idle link's
   100–200 ms tail: it is the phone's Wi-Fi power save, not loss or AP queueing.
   With `wifi_power_save=120` the median is ~5–7 ms with 1–4 packets per 200 at
   76–202 ms; with `0`, no packet of 600 exceeded 13 ms. The default is left
   alone because the steadier RTT costs battery (#29).
+- `docs/ap-topology.md` compares the laptop-local AP, the external always-on AP
+  and the phone hotspot (#38). The external AP is the only option that removes
+  the laptop-reboot failure; #38 stays open because it still needs an app-side
+  hotspot allowance, keep-hotspot-on and a battery decision.
+
+### Changed
+
+- `phone-ap-create` and `phone-ap-delete` are no-ops in the external role: there
+  is no local profile for this host to create or remove.
 
 ## [0.17.0] - 2026-11-27
 

@@ -43,6 +43,7 @@ let
   # file, then their built-in defaults, so a one-off PHONE_* override still
   # works and a non-default phoneLink deployment needs no repeated exports.
   moduleEnv = ''
+    PHONE_AP_ROLE=${lib.escapeShellArg cfg.ap.role}
     PHONE_AP_IF=${lib.escapeShellArg cfg.apInterface}
     PHONE_AP_CON=${lib.escapeShellArg cfg.ap.name}
     PHONE_AP_SSID=${lib.escapeShellArg cfg.ap.ssid}
@@ -173,9 +174,13 @@ let
   # stub iw/adb/sleep commands; the throttle state lives under /run and is
   # therefore reset by a reboot, where the AP profile is fresh anyway.
   rejoin = pkgs.writeShellScript "phone-link-ap-rejoin" ''
+    export PHONE_AP_ROLE=${lib.escapeShellArg cfg.ap.role}
     export PHONE_AP_IF=${lib.escapeShellArg cfg.apInterface}
     export PHONE_AP_SSID=${lib.escapeShellArg cfg.ap.ssid}
     export PHONE_AP_SECURITY=wpa2
+    # The external role checks the phone over USB instead of a local station
+    # dump, so it needs the address the phone holds on the foreign AP.
+    export PHONE_PROXY_HOST=${lib.escapeShellArg cfg.proxyHost}
     export PHONE_AP_REJOIN_STATE=${lib.escapeShellArg "${runtimeDir}/ap-rejoin.last"}
     export PATH=${
       lib.makeBinPath [
@@ -275,10 +280,35 @@ in
     apInterface = lib.mkOption {
       type = lib.types.str;
       default = "wlp110s0";
-      description = "Wireless interface used for the laptop access point.";
+      description = ''
+        Wireless interface used for the laptop access point, or as the client
+        interface when `phoneLink.ap.role = "external"`.
+      '';
     };
 
     ap = {
+      role = lib.mkOption {
+        type = lib.types.enum [
+          "local"
+          "external"
+        ];
+        default = "local";
+        description = ''
+          Who owns the access point.  `"local"` is the laptop AP this module
+          declares, with its DHCP server, forward drop and firewall hole.
+          `"external"` means an always-on AP outside this host (OpenWrt, a
+          travel router, a Pi): the module creates no profile, DHCP unit,
+          nftables rules or AP firewall hole, and `phone-ap-up` / `phone-ap-down`
+          do not touch the radio.  The laptop joins the external AP as a
+          client; `apInterface` is that client interface, `ap.ssid` is the
+          external SSID the rejoin watchdog nudges the phone back to, and
+          `proxyHost` must be the DHCP reservation for the phone.  The AP must
+          stay link-only: no NAT, no DHCP router or DNS option, no uplink and
+          no forwarding.  `ap.uplink` may not be `"tunnel"` in this role.
+          See docs/ap-topology.md.
+        '';
+      };
+
       enable = lib.mkEnableOption "the declarative PhoneLink access-point profile";
 
       name = lib.mkOption {
@@ -290,7 +320,10 @@ in
       ssid = lib.mkOption {
         type = lib.types.str;
         default = "PhoneLink";
-        description = "SSID of the laptop access point.";
+        description = ''
+          SSID of the laptop access point.  With `role = "external"` it is the
+          external AP's SSID the rejoin watchdog nudges the phone back to.
+        '';
       };
 
       autoconnect = lib.mkOption {
@@ -300,7 +333,7 @@ in
           Let NetworkManager activate the AP at boot.  Off by default, so the
           profile stays down until `phone-ap-up` runs.  Turning it on reserves
           the radio for the AP; a 5 GHz activation that fails then leaves no
-          link at all (see #7).
+          link at all (see #7).  Ignored with `role = "external"`.
         '';
       };
 
@@ -315,9 +348,11 @@ in
           (about 10 minutes) and then rejoins on its own (issues #33 and #36).
           The watchdog runs over USB adb only, is throttled to one attempt
           every five minutes, and does nothing while any station is
-          associated.  Requires `phoneLink.ap.enable`.  With no USB the
-          watchdog does nothing; the phone returns when the temporary disable
-          expires or when someone re-selects the network on the phone.
+          associated.  Requires `phoneLink.ap.enable` in the local role; with
+          `role = "external"` it runs on its own and checks the phone over USB
+          instead of a station dump.  With no USB the watchdog does nothing;
+          the phone returns when the temporary disable expires or when someone
+          re-selects the network on the phone.
         '';
       };
 
@@ -617,6 +652,10 @@ in
           message = "phoneLink.ap.channelWidth must be 0, 20 or 40 when phoneLink.ap.band is bg";
         }
         {
+          assertion = cfg.ap.role == "local" || cfg.ap.uplink == "none";
+          message = "phoneLink.ap.role = \"external\" requires phoneLink.ap.uplink = \"none\"";
+        }
+        {
           assertion = cfg.ap.uplink == "none" || cfg.ap.enable;
           message = "phoneLink.ap.uplink = \"tunnel\" requires phoneLink.ap.enable = true";
         }
@@ -680,7 +719,7 @@ in
           environment.etc."phone-link/env".text = moduleEnv;
         }
 
-        (lib.mkIf cfg.ap.enable {
+        (lib.mkIf (cfg.ap.enable && cfg.ap.role == "local") {
           # NetworkManager writes the profile to /run at activation.  The PSK is
           # a placeholder in the store and comes from the root-only secrets file
           # through envsubst, so the password is never in a Nix path.
@@ -783,11 +822,22 @@ in
             rm -f -- ${lib.escapeShellArg "/etc/NetworkManager/system-connections/${cfg.ap.name}.nmconnection"}
           '';
 
-          # The phone's own auto-join is off for this network (Android saw no
-          # internet), so a 30 s tick re-asserts the association over USB adb.
-          # The service exits non-zero when the phone is away; that is normal
-          # and must not fail the boot, hence no Restart and no boot ordering.
-          systemd.services.phone-link-ap-rejoin = lib.mkIf cfg.ap.rejoin {
+          # Lets the scripts tell a declarative profile from a hand-made one.
+          # The external role has no profile here, and the role in
+          # /etc/phone-link/env is what commands and the doctor read instead.
+          environment.etc."phone-link/ap-profile".text = cfg.ap.name;
+        })
+
+        # The phone's own auto-join is off for a link-only AP (Android saw no
+        # internet), so a 30 s tick re-asserts the association over USB adb.
+        # The service exits non-zero when the phone is away; that is normal
+        # and must not fail the boot, hence no Restart and no boot ordering.
+        # With role = "external" the laptop cannot see a station dump, so the
+        # same watchdog asks the phone over USB whether it holds proxyHost and
+        # nudges it onto ap.ssid when it does not.  It runs without ap.enable
+        # there because that option only describes the profile this host owns.
+        (lib.mkIf (cfg.ap.rejoin && (cfg.ap.enable || cfg.ap.role == "external")) {
+          systemd.services.phone-link-ap-rejoin = {
             description = "Re-assert the phone's association with the PhoneLink AP";
             serviceConfig = {
               Type = "oneshot";
@@ -796,7 +846,7 @@ in
             };
           };
 
-          systemd.timers.phone-link-ap-rejoin = lib.mkIf cfg.ap.rejoin {
+          systemd.timers.phone-link-ap-rejoin = {
             wantedBy = [ "timers.target" ];
             timerConfig = {
               OnBootSec = "45s";
@@ -804,9 +854,6 @@ in
               AccuracySec = "1s";
             };
           };
-
-          # Lets the scripts tell a declarative profile from a hand-made one.
-          environment.etc."phone-link/ap-profile".text = cfg.ap.name;
         })
 
         (lib.mkIf cfg.cacheProxyApk {
@@ -831,7 +878,7 @@ in
           '';
         })
 
-        (lib.mkIf cfg.openApFirewall {
+        (lib.mkIf (cfg.openApFirewall && cfg.ap.role == "local") {
           networking.firewall.interfaces.${cfg.apInterface} = {
             allowedUDPPorts = [ 67 ];
           };

@@ -230,7 +230,21 @@ grep -q 'declared by phoneLink.ap' "$LOG/out" \
 [ -s "$LOG/actions" ] && bad "declarative --check changes nothing" \
   || ok "declarative --check changes nothing"
 
-# 9. --help.
+# 9. External role: there is no local profile to create or refresh.
+rm -f "$PHONE_AP_DECLARATIVE"
+: >"$LOG/names"
+rm -f "$LOG/actions"
+if PHONE_AP_ROLE=external run --check; then ok "external --check exits 0"; else
+  bad "external --check exits 0" "$(cat "$LOG/out")"
+fi
+grep -q 'AP is external (phoneLink.ap.role = "external")' "$LOG/out" \
+  && ok "explains that the AP is external" || bad "explains that the AP is external"
+grep -q 'no local profile to create or refresh' "$LOG/out" \
+  && ok "says there is no profile to create" || bad "says there is no profile to create"
+[ -s "$LOG/actions" ] && bad "external role changes nothing" \
+  || ok "external role changes nothing"
+
+# 10. --help.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"

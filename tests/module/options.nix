@@ -12,6 +12,8 @@ let
     apNoFirewall
     apHairpin
     apHairpinNoFailOpen
+    apExternal
+    apExternalNoEnable
     ;
 in
 assert lib.assertMsg (
@@ -314,4 +316,53 @@ assert lib.assertMsg
 assert lib.assertMsg (
   !(on.networking.networkmanager.ensureProfiles.profiles ? phonelink)
 ) "the AP profile must be opt-in";
+assert lib.assertMsg (apOn.phoneLink.ap.role == "local") "the AP role must default to local";
+assert lib.assertMsg (lib.hasInfix "PHONE_AP_ROLE=local"
+  apOn.environment.etc."phone-link/env".text
+) "the local role must reach the module configuration";
+assert lib.assertMsg (lib.hasInfix "PHONE_AP_ROLE=external"
+  apExternal.environment.etc."phone-link/env".text
+) "the external role must reach the module configuration";
+assert lib.assertMsg (
+  apExternal.phoneLink.effectiveProxyHosts == [ "192.168.50.20" ]
+) "the external role must keep proxyHost as the reservation";
+assert lib.assertMsg (
+  !(apExternal.networking.networkmanager.ensureProfiles.profiles ? phonelink)
+) "the external role must not declare a local AP profile";
+assert lib.assertMsg (
+  !(apExternal.systemd.services ? phone-link-ap-dhcp)
+) "the external role must not run a local DHCP server";
+assert lib.assertMsg (
+  !(apExternal.systemd.services ? phone-link-ap-noforward)
+) "the external role must not install local forward rules";
+assert lib.assertMsg (
+  !(apExternal.networking.firewall.interfaces ? wlp110s0)
+) "the external role must not open the local AP's DHCP port";
+assert lib.assertMsg (
+  !(apExternal.environment.etc ? "phone-link/ap-profile")
+) "the external role must not claim a local declarative profile";
+assert lib.assertMsg (
+  apExternal.systemd.services ? phone-link-ap-rejoin
+) "the external role must keep the USB rejoin nudge";
+assert lib.assertMsg (
+  apExternalNoEnable.systemd.services ? phone-link-ap-rejoin
+) "role = external must keep the rejoin nudge without ap.enable";
+assert lib.assertMsg (
+  apExternalNoEnable.systemd.timers ? phone-link-ap-rejoin
+) "role = external must keep the rejoin timer without ap.enable";
+assert lib.assertMsg (
+  !(apExternalNoEnable.networking.networkmanager.ensureProfiles.profiles ? phonelink)
+) "role = external without ap.enable must still declare no profile";
+assert lib.assertMsg (
+  !(apExternalNoEnable.systemd.services ? phone-link-ap-dhcp)
+) "role = external without ap.enable must still define no DHCP unit";
+assert lib.assertMsg (lib.hasInfix "PHONE_AP_ROLE=external" (
+  builtins.readFile apExternal.systemd.services.phone-link-ap-rejoin.serviceConfig.ExecStart
+)) "the rejoin watchdog must know the role";
+assert lib.assertMsg (lib.hasInfix "PHONE_PROXY_HOST=192.168.50.20" (
+  builtins.readFile apExternal.systemd.services.phone-link-ap-rejoin.serviceConfig.ExecStart
+)) "the external rejoin watchdog must know the phone's reservation";
+assert lib.assertMsg (lib.hasInfix "PHONE_AP_SSID=BoatLink" (
+  builtins.readFile apExternal.systemd.services.phone-link-ap-rejoin.serviceConfig.ExecStart
+)) "the external rejoin watchdog must nudge to the external SSID";
 true

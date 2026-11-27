@@ -106,7 +106,23 @@ grep -q 'declared by phoneLink.ap' "$LOG/out" \
 [ -s "$LOG/actions" ] && bad "declarative --check changes nothing" \
   || ok "declarative --check changes nothing"
 
-# 7. --help.
+# 7. External role: there is no local profile this host owns, so nothing is
+#    stopped or deleted.
+rm -f "$PHONE_AP_DECLARATIVE"
+printf 'phonelink\n' >"$LOG/names"
+printf 'phonelink:wlp110s0\n' >"$LOG/active"
+rm -f "$LOG/actions"
+if PHONE_AP_ROLE=external run --yes; then ok "external delete exits 0"; else
+  bad "external delete exits 0" "$(cat "$LOG/out")"
+fi
+grep -q 'AP is external (phoneLink.ap.role = "external")' "$LOG/out" \
+  && ok "explains that the AP is external" || bad "explains that the AP is external"
+grep -q 'nothing is deleted' "$LOG/out" \
+  && ok "says nothing is deleted" || bad "says nothing is deleted"
+[ -s "$LOG/actions" ] && bad "external role deletes nothing" \
+  || ok "external role deletes nothing"
+
+# 8. --help.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"

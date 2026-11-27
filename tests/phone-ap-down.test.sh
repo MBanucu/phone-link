@@ -86,7 +86,28 @@ else
   ok "a failed AP stop still joins nothing"
 fi
 
-# 4. --help prints the flag without touching the radio.
+# 4b. External role: the AP belongs to another host, so no profile is stopped
+#     and nothing is joined; the default and --client are both no-ops.
+rm -f "$LOG/nmcli"
+if PHONE_AP_ROLE=external run; then ok "external role exits 0"; else
+  bad "external role exits 0" "$(cat "$LOG/out")"
+fi
+grep -q 'AP is external (phoneLink.ap.role = "external")' "$LOG/out" \
+  && ok "explains that the AP is external" \
+  || bad "explains that the AP is external" "$(cat "$LOG/out")"
+grep -q 'phone-ap-down does not stop it' "$LOG/out" \
+  && ok "says the local command leaves it alone" \
+  || bad "says the local command leaves it alone" "$(cat "$LOG/out")"
+[ -e "$LOG/nmcli" ] && bad "external role never calls nmcli" \
+  || ok "external role never calls nmcli"
+rm -f "$LOG/nmcli"
+if PHONE_AP_ROLE=external run --client; then ok "external --client exits 0"; else
+  bad "external --client exits 0" "$(cat "$LOG/out")"
+fi
+[ -e "$LOG/nmcli" ] && bad "external --client never calls nmcli" \
+  || ok "external --client never calls nmcli"
+
+# 5. --help prints the flag without touching the radio.
 rm -f "$LOG/nmcli"
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 grep -q -- '--client' "$LOG/out" && ok "--help documents --client" \

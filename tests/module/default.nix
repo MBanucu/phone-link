@@ -166,6 +166,37 @@ let
       };
     }
   ];
+  # The external AP is another host: the module must define no profile, DHCP,
+  # forward drop or firewall hole, while the USB rejoin nudge still applies.
+  # proxyHost is the DHCP reservation on that AP.
+  apExternal = evalModule [
+    {
+      networking.networkmanager.enable = true;
+      phoneLink = {
+        enable = true;
+        proxyHost = "192.168.50.20";
+        ap = {
+          enable = true;
+          role = "external";
+          ssid = "BoatLink";
+        };
+      };
+    }
+  ];
+  # Role external is complete on its own: the user need not set ap.enable,
+  # which only describes the local profile this host does not own.
+  apExternalNoEnable = evalModule [
+    {
+      phoneLink = {
+        enable = true;
+        proxyHost = "192.168.50.20";
+        ap = {
+          role = "external";
+          ssid = "BoatLink";
+        };
+      };
+    }
+  ];
   relayOn = evalModule [
     {
       phoneLink = {
@@ -187,6 +218,8 @@ let
       apNoFirewall
       apHairpin
       apHairpinNoFailOpen
+      apExternal
+      apExternalNoEnable
       relayOn
       ;
     # A path with context, so the check builds the generated config.

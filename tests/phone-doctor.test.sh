@@ -131,6 +131,7 @@ cat >"$STUBS/iw" <<'EOF'
 case "$*" in
   "dev wlp110s0 station dump") cat "$LOG/iw_station" 2>/dev/null ;;
   "dev wlp110s0 info") cat "$LOG/iw_info" 2>/dev/null ;;
+  "dev wlp110s0 link") cat "$LOG/iw_link" 2>/dev/null ;;
 esac
 EOF
 sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/iw"
@@ -201,6 +202,7 @@ fresh_state() {
     >"$LOG/nft"
   printf 'Station aa:bb:cc:dd:ee:ff (on wlp110s0)\n' >"$LOG/iw_station"
   printf 'ssid PhoneLink\n' >"$LOG/iw_info"
+  printf 'Connected to aa:bb:cc:dd:ee:ff (on wlp110s0)\n\tSSID: PhoneLink\n' >"$LOG/iw_link"
   printf '0\n' >"$LOG/avoid"
   printf '1\n' >"$LOG/always"
   printf '1\n' >"$LOG/forward"
@@ -248,6 +250,8 @@ grep -q 'ok    proxy port.*laptop 1080, phone 1080' "$LOG/out" \
 grep -q 'network transport' "$LOG/out" && ok "reports adb over Wi-Fi" || bad "reports adb over Wi-Fi"
 grep -q 'ok    wifi reconnect.*network_avoid_bad_wifi=0, wifi_always_requested=1 (recommended)' "$LOG/out" \
   && ok "reports the Wi-Fi reconnect globals" || bad "reports the Wi-Fi reconnect globals" "$(cat "$LOG/out")"
+grep -q 'ok    ap role.*local (this laptop owns the AP)' "$LOG/out" \
+  && ok "reports the local AP role" || bad "reports the local AP role" "$(cat "$LOG/out")"
 grep -q 'ok    ap dhcp' "$LOG/out" && ok "checks the AP DHCP unit" || bad "checks the AP DHCP unit"
 grep -q 'ok    ap noforward' "$LOG/out" && ok "checks the AP no-forward unit" \
   || bad "checks the AP no-forward unit" "$(cat "$LOG/out")"
@@ -445,6 +449,82 @@ grep -q 'phone-wifi-connect PhoneLink' "$LOG/out" \
   && bad "does not print the hint when the AP is down" \
   || ok "does not print the hint when the AP is down"
 
+# 10d3. External role: no local profile or units are required, the laptop's
+#       client link is reported, and the phone association is read over adb.
+fresh_state
+rm -f "$LOG/ap-profile"
+: >"$LOG/nmcli_cons"
+printf 'wlp110s0 UP 192.168.50.20/24\n' >"$LOG/ap_addr"
+printf 'Connected to aa:bb:cc:dd:ee:ff (on wlp110s0)\n\tSSID: PhoneLink\n' >"$LOG/iw_link"
+printf '2: wlan0    inet 192.168.50.20/24 brd 192.168.50.255 scope global wlan0\n' >"$LOG/ips"
+if PHONE_AP_ROLE=external PHONE_PROXY_HOST=192.168.50.20 run; then
+  ok "external role exits 0 without a local AP profile"
+else
+  bad "external role exits 0 without a local AP profile" "$(cat "$LOG/out")"
+fi
+grep -q 'ok    ap role.*external (another host owns the AP; the laptop is a client)' "$LOG/out" \
+  && ok "reports the external role" || bad "reports the external role" "$(cat "$LOG/out")"
+grep -q 'ok    external ap link.*client of PhoneLink on wlp110s0' "$LOG/out" \
+  && ok "reports the laptop's external AP link" \
+  || bad "reports the laptop's external AP link" "$(cat "$LOG/out")"
+grep -q 'ok    ap station.*phone 192.168.50.20 on PhoneLink' "$LOG/out" \
+  && ok "reports the phone on the external AP" \
+  || bad "reports the phone on the external AP" "$(cat "$LOG/out")"
+grep -q 'FAIL  ap address\|FAIL  ap profile\|phoneLink.ap is off' "$LOG/out" \
+  && bad "does not require the local AP in external role" \
+  || ok "does not require the local AP in external role"
+grep -q 'proxy request.*192.168.50.20:1080 -> 200' "$LOG/out" \
+  && ok "probes the reservation instead of the hotspot" \
+  || bad "probes the reservation instead of the hotspot" "$(cat "$LOG/out")"
+
+# 10d4. External role with the phone away is a warning with the recovery
+#       command, not a dead-AP failure.
+fresh_state
+rm -f "$LOG/ap-profile"
+: >"$LOG/nmcli_cons"
+printf 'wlp110s0 UP 192.168.50.20/24\n' >"$LOG/ap_addr"
+printf 'Connected to aa:bb:cc:dd:ee:ff (on wlp110s0)\n\tSSID: PhoneLink\n' >"$LOG/iw_link"
+printf '3: rndis0    inet 10.9.9.9/24 brd 10.9.9.255 scope global rndis0\n' >"$LOG/ips"
+if PHONE_AP_ROLE=external PHONE_PROXY_HOST=192.168.50.20 run; then
+  bad "a missing external association is a required failure"
+else
+  ok "a missing external association is a required failure"
+fi
+grep -q 'warn  ap station.*phone 192.168.50.20 is not on PhoneLink.*phone-wifi-connect PhoneLink' "$LOG/out" \
+  && ok "names the missing external association and the command" \
+  || bad "names the missing external association and the command" "$(cat "$LOG/out")"
+grep -q 'FAIL  phone address.*192.168.50.20 not on the phone' "$LOG/out" \
+  && ok "the phone address check agrees the reservation is absent" \
+  || bad "the phone address check agrees the reservation is absent" "$(cat "$LOG/out")"
+grep -q 'FAIL  ap station\|AP down' "$LOG/out" \
+  && bad "does not blame the external AP" \
+  || ok "does not blame the external AP"
+
+# 10d5. External role with no client link/address still reports the role and
+#       warns; a missing interface is not "AP is down".
+fresh_state
+rm -f "$LOG/ap-profile"
+: >"$LOG/nmcli_cons"
+: >"$LOG/ap_addr"
+printf 'Not connected.\n' >"$LOG/iw_link"
+printf '2: wlan0    inet 192.168.50.20/24 brd 192.168.50.255 scope global wlan0\n' >"$LOG/ips"
+if PHONE_AP_ROLE=external PHONE_PROXY_HOST=192.168.50.20 run; then
+  ok "a missing external AP link is not a required failure"
+else
+  bad "a missing external AP link is not a required failure" "$(cat "$LOG/out")"
+fi
+grep -q 'ok    ap role.*external' "$LOG/out" \
+  && ok "still reports the external role" || bad "still reports the external role" "$(cat "$LOG/out")"
+grep -q 'warn  ap address.*no IPv4 (not joined to the external AP)' "$LOG/out" \
+  && ok "warns about the missing client address" \
+  || bad "warns about the missing client address" "$(cat "$LOG/out")"
+grep -q 'warn  external ap link.*not a client of PhoneLink' "$LOG/out" \
+  && ok "warns about the missing client link" \
+  || bad "warns about the missing client link" "$(cat "$LOG/out")"
+grep -q 'FAIL  ap address\|AP down' "$LOG/out" \
+  && bad "does not call the external AP down" \
+  || ok "does not call the external AP down"
+
 # 10e. Missing tools are skips, not crashes: the checks run with no PATH.
 marker=$LOG/ap-profile
 printf 'phonelink\n' >"$marker"
@@ -462,8 +542,9 @@ ctx = Context(
     }
 )
 results = ap.check(ctx)
-assert len(results) == 4, results
-assert all(r.status.value == "skip" for r in results), results
+assert len(results) == 5, results
+assert results[0].cid == "ap_role" and results[0].status.value == "ok", results
+assert all(r.status.value == "skip" for r in results[1:]), results
 forward = next(r for r in results if r.cid == "ap_noforward_rules")
 assert forward.detail == "nft not installed", forward
 assert ctx.nft is None, ctx.nft

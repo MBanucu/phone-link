@@ -65,6 +65,10 @@ own hotspot (PHONE_HOTSPOT_CON), as before. --client stops the AP and does not
 join the hotspot, leaving the radio free for NetworkManager to scan for and
 join a normal network. Nothing is persisted: a reboot returns to the configured
 boot state. Needs root.
+
+With phoneLink.ap.role = "external" the AP is another host: this command
+explains that and changes nothing, because neither the AP nor the laptop's
+client link belongs to phoneLink.
 """
 
 USAGE_AP_DELETE = """usage: phone-ap-delete [--yes] [--check]
@@ -354,9 +358,27 @@ def _request_ap_rejoin() -> None:
     status(["systemctl", "start", "--no-block", settings.PHONE_AP_REJOIN_UNIT])
 
 
+def _ap_is_external() -> bool:
+    """Whether the AP belongs to another host (`phoneLink.ap.role`)."""
+    return settings.PHONE_AP_ROLE == "external"
+
+
 def phone_ap_up(args: list[str]) -> int:
     """Bring up the laptop access point the phone joins as a Wi-Fi client."""
     phone.as_root("phone-ap-up", args)
+
+    if _ap_is_external():
+        # Nothing on this host is the AP.  The one part that still applies is
+        # the USB nudge: the external AP may be link-only too, so the phone can
+        # be sitting beside it with auto-join disabled.  Asking the watchdog now
+        # is safe when it is throttled, absent or there is no USB device.
+        _request_ap_rejoin()
+        log(
+            "AP is external (phoneLink.ap.role = \"external\"); this host does "
+            "not own it and has nothing to activate. The laptop joins it as a "
+            "client; the phone is nudged back over USB if it is away."
+        )
+        return 0
 
     if "* AP" not in capture(["iw", "list"]):
         die("driver reports no AP mode")
@@ -401,6 +423,15 @@ def phone_ap_down(args: list[str]) -> int:
             print(USAGE_AP_DOWN, end="", file=sys.stderr)
             die(f"unknown argument: {value}")
 
+    if _ap_is_external():
+        log(
+            "AP is external (phoneLink.ap.role = \"external\"); this host does "
+            "not own it and phone-ap-down does not stop it. The laptop's "
+            "client link is unchanged; leave the external AP on so the phone "
+            "stays associated."
+        )
+        return 0
+
     phone.as_root("phone-ap-down", args)
 
     if status(["nmcli", "connection", "down", settings.PHONE_AP_CON]) != 0:
@@ -430,6 +461,14 @@ def phone_ap_create(args: list[str]) -> int:
     _only_help(usage_args, USAGE_AP_CREATE)
     refresh = "--refresh" in args
     check_only = "--check" in args
+
+    if _ap_is_external():
+        log(
+            "AP is external (phoneLink.ap.role = \"external\"); there is no "
+            "local profile to create or refresh. Configure the external AP "
+            "itself as link-only and reserve proxyHost for the phone."
+        )
+        return 0
 
     if check_only:
         exists = _profile_exists()
@@ -595,6 +634,13 @@ def phone_ap_delete(args: list[str]) -> int:
         else:
             print(USAGE_AP_DELETE, end="", file=sys.stderr)
             die(f"unknown argument: {value}")
+
+    if _ap_is_external():
+        log(
+            "AP is external (phoneLink.ap.role = \"external\"); there is no "
+            "local profile this host owns, so nothing is deleted."
+        )
+        return 0
 
     if not _profile_exists():
         log(f"{settings.PHONE_AP_CON} is not configured; nothing to delete")

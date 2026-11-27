@@ -18,6 +18,7 @@ printf '0\n'
 EOF
 
 stub_cmd iw "$STUBS" <<'EOF'
+printf '%s\n' "$*" >>"$LOG/iw"
 case "$*" in
   list) printf '\t* AP\n\t* managed\n' ;;
   "dev wlp110s0 station dump") : ;;
@@ -111,7 +112,37 @@ if run; then bad "a driver without AP mode exits 1"; else ok "a driver without A
 grep -q 'no AP mode' "$LOG/out" && ok "names the missing AP mode" \
   || bad "names the missing AP mode" "$(cat "$LOG/out")"
 
-# 4. --help.
+# 4. External role: nothing on this host is the AP, so the command explains
+#    that and only asks for the USB rejoin; it never touches iw/nmcli.
+stub_cmd iw "$STUBS" <<'EOF'
+printf '%s\n' "$*" >>"$LOG/iw"
+printf '\t* AP\n'
+EOF
+stub_cmd systemctl "$STUBS" <<'EOF'
+printf '%s\n' "$*" >>"$LOG/systemctl"
+EOF
+rm -f "$LOG/actions" "$LOG/iw" "$LOG/systemctl"
+printf '1700000000\n' >"$PHONE_AP_REJOIN_STATE"
+if PHONE_AP_ROLE=external run; then ok "external role exits 0"; else
+  bad "external role exits 0" "$(cat "$LOG/out")"
+fi
+grep -q 'AP is external (phoneLink.ap.role = "external")' "$LOG/out" \
+  && ok "explains that the AP is external" \
+  || bad "explains that the AP is external" "$(cat "$LOG/out")"
+grep -q 'nothing to activate' "$LOG/out" \
+  && ok "says there is nothing to activate" \
+  || bad "says there is nothing to activate" "$(cat "$LOG/out")"
+[ -e "$LOG/actions" ] && bad "external role does not run nmcli" \
+  || ok "external role does not run nmcli"
+[ -e "$LOG/iw" ] && bad "external role does not preflight the radio" \
+  || ok "external role does not preflight the radio"
+grep -qx 'start --no-block phone-link-ap-rejoin.service' "$LOG/systemctl" \
+  && ok "external role still nudges the phone back" \
+  || bad "external role still nudges the phone back" "$(cat "$LOG/systemctl" 2>/dev/null)"
+[ -e "$PHONE_AP_REJOIN_STATE" ] && bad "external role clears the rejoin throttle" \
+  || ok "external role clears the rejoin throttle"
+
+# 5. --help.
 stub_cmd iw "$STUBS" <<'EOF'
 printf '\t* AP\n'
 EOF
