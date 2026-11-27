@@ -425,3 +425,23 @@ locked, wait, and check that the listener answers.
 `tests/live/hairpin-measure.sh --bootstrap` records that path; until it runs on
 a given install, "will come back after a reboot" means the inputs are present,
 not that the service was seen up before the first unlock.
+
+## The idle link's 100–200 ms tail is power save
+
+Measured on the idle AP link (2026-11-27, #29): with the phone asleep and
+`wifi_power_save=120`, 200 pings to the AP address gave a ~5–7 ms median and
+1–4 packets per run at 76–202 ms; with `wifi_power_save=0`, none of 600 pings
+exceeded 13 ms. The tail is the station's power-save wake, not loss or AP
+queueing: `tx failed` stayed 0 and throughput was unaffected.
+
+The tool leaves the phone's default alone. A steadier RTT costs battery, so it
+is an explicit choice rather than a module setting:
+
+```sh
+adb shell settings put global wifi_power_save 0   # steadier RTT, more drain
+adb shell settings put global wifi_power_save 120 # back to the default
+```
+
+The global survives reboots until it is changed again. This is not part of the
+boot path: the tunnel and the proxy work the same either way, only the latency
+distribution changes.
