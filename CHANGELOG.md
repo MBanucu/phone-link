@@ -10,12 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `phone-link-ap-rejoin` re-asserts the phone's association with the link-only
-  AP after the AP restarts. Android validates the AP as "no internet" and turns
-  auto-join off for the saved network, so the phone used to stay away until
-  someone forced it by hand. The 30 s timer acts only when the AP is up with no
-  station and a USB adb device is present, throttles attempts to one per five
-  minutes, and falls back to a Wi-Fi disable/enable. `phoneLink.ap.rejoin =
-  false` turns it off.
+  AP after the AP restarts. Android validates the AP as "no internet" and
+  temporarily disables auto-join for the saved network; with no USB the phone
+  returns on its own when that window expires (measured about 120 s after an AP
+  restart, with Android's documented maximum of 10 minutes, #36). The 30 s
+  timer shortens that to seconds when USB adb is present: it acts only when the
+  AP is up with no station, throttles attempts to one per five minutes, and
+  falls back to a Wi-Fi disable/enable. `phoneLink.ap.rejoin = false` turns it
+  off.
 
 ## [0.14.0] - 2026-11-26
 
@@ -1302,7 +1304,6 @@ with it.
 - `phone-doctor` installs under `lib/python`, where its wrapper looks for it.
 - The proxy APK cache is found when `HOME` is unset during activation.
 
-[Unreleased]: https://github.com/MBanucu/phone-link/compare/v0.14.0...HEAD
 [Unreleased]: https://github.com/MBanucu/phone-link/compare/v0.14.0...HEAD
 [0.14.0]: https://github.com/MBanucu/phone-link/compare/v0.13.3...v0.14.0
 [0.13.3]: https://github.com/MBanucu/phone-link/compare/v0.13.2...v0.13.3

@@ -124,9 +124,12 @@ associated — that is the phone-side cause in #11 — and it does not add the
 ### Rejoining the AP after a restart
 
 Android validates this link-only AP as "no internet" and, after a few reports,
-turns auto-join off for the saved network (`NETWORK_SELECTION_TEMPORARY_DISABLED`,
-reason `NETWORK_SELECTION_DISABLED_NO_INTERNET_TEMPORARY`). The AP can then be up
-with no station and the phone will not return on its own (#33).
+temporarily disables auto-join for the saved network
+(`NETWORK_SELECTION_TEMPORARY_DISABLED`, reason
+`NETWORK_SELECTION_DISABLED_NO_INTERNET_TEMPORARY`). That disable is temporary:
+with no USB the phone rejoined by itself about 120 s after an AP restart once
+the window had passed, and Android documents the window as up to 10 minutes
+(#36). With USB the watchdog shortens the wait to seconds (#33).
 
 With `ap.enable = true`, `phone-link-ap-rejoin.timer` checks every 30 s. It acts
 only when the AP interface is up, `iw dev <iface> station dump` has no station,
@@ -143,9 +146,10 @@ unvalidated so the phone keeps using cellular; the watchdog re-asserts the
 association from the laptop instead.
 
 The watchdog needs USB adb, because the Wi-Fi adb transport is gone exactly when
-this is needed. Without USB the phone must be rejoined by hand
-(`phone-wifi-connect PhoneLink`). Set `phoneLink.ap.rejoin = false` to disable
-the timer.
+this is needed. Without USB it does nothing and the phone returns when Android's
+temporary disable expires (up to ~10 minutes), or immediately if someone
+toggles Wi-Fi or re-selects the network on the phone (`phone-wifi-connect
+PhoneLink`). Set `phoneLink.ap.rejoin = false` to disable the timer.
 
 The port is the one setting that is not a rebuild: `phoneLink.proxyPort` is
 the default, and `phone-proxy-switch` (or the panel's **Proxy port** page)

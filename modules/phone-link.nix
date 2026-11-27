@@ -263,11 +263,13 @@ in
           Re-assert the phone's association with the AP when the AP comes back
           with no station.  Android validates the link-only AP as "no
           internet" and temporarily disables auto-join for the saved network,
-          so after any AP restart the phone stays away until something forces
-          it (issue #33).  The watchdog runs over USB adb only, is throttled to
-          one attempt every five minutes, and does nothing while any station is
-          associated.  Requires `phoneLink.ap.enable`; set it to false when the
-          phone is not on USB, in which case it must be rejoined by hand.
+          so after an AP restart the phone stays away for up to that window
+          (about 10 minutes) and then rejoins on its own (issues #33 and #36).
+          The watchdog runs over USB adb only, is throttled to one attempt
+          every five minutes, and does nothing while any station is
+          associated.  Requires `phoneLink.ap.enable`.  With no USB the
+          watchdog does nothing; the phone returns when the temporary disable
+          expires or when someone re-selects the network on the phone.
         '';
       };
 

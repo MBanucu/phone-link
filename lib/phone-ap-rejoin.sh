@@ -4,11 +4,14 @@
 # Android validates the AP as "no internet" (it is deliberately DHCP-only,
 # without a router or DNS option, and forwarded traffic is dropped), and after
 # a few reports it sets the saved network to NETWORK_SELECTION_TEMPORARY_DISABLED
-# with reason NETWORK_SELECTION_DISABLED_NO_INTERNET_TEMPORARY.  A disabled
-# network is not auto-joined, so after any AP restart the phone stays away even
-# though it is sitting on the desk.  The fix must not make the AP answer the
-# connectivity probe: it has to stay unvalidated so the phone keeps using
-# cellular.  Instead this watchdog re-asserts the association from the laptop.
+# with reason NETWORK_SELECTION_DISABLED_NO_INTERNET_TEMPORARY.  That disable is
+# temporary (Android documents up to 10 minutes), so after an AP restart the
+# phone stays away for up to that window even though it is sitting on the desk,
+# then rejoins on its own.  This watchdog makes the recovery immediate when USB
+# is available, in seconds instead of minutes; it does not make recovery
+# possible at all (issues #33 and #36).  It must not make the AP answer the
+# connectivity probe: the AP has to stay unvalidated so the phone keeps using
+# cellular.  Instead the association is re-asserted from the laptop.
 #
 # The timer runs it every 30 s.  It is quiet and bounded: it does nothing at
 # all unless the AP is up with no station, does nothing without a USB adb
@@ -116,10 +119,11 @@ wait_for_station() {
   done
 }
 
-# `cmd wifi connect-network` sets the network user-selected, which clears the
-# temporary no-internet disable, and it does not drop the radio.  The PSK goes
-# on the adb command line but every byte of adb's output is discarded, and no
-# variable is ever expanded into a message.
+# `cmd wifi connect-network` connects despite the temporary no-internet
+# disable and marks the network user-selected, and it does not drop the radio.
+# Android may still print TEMPORARY_DISABLED in `dumpsys wifi`; the associated
+# station is what matters.  The PSK goes on the adb command line but every byte
+# of adb's output is discarded, and no variable is ever expanded into a message.
 if [ -n "$psk" ]; then
   "$adb_cmd" -d shell cmd wifi connect-network "$ssid" "$security" "$psk" \
     >/dev/null 2>&1 || true
