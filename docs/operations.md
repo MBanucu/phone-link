@@ -204,6 +204,12 @@ and `adb -d` sees the USB device; then it runs
 hammered. The service exits non-zero when the phone is away; that is normal and
 does not fail the boot.
 
+A deliberate switch-on does not wait out that window: `phone-ap-up` clears the
+throttle file and starts `phone-link-ap-rejoin.service` as soon as the AP is
+back, so the association is asked for immediately. A missing unit
+(`phoneLink.ap.rejoin = false`) or no USB adb is a no-op and never fails the
+switch.
+
 Do not make the AP answer Android's connectivity probe. It has to stay
 unvalidated so the phone keeps using cellular; the watchdog re-asserts the
 association from the laptop instead.

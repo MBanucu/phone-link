@@ -334,6 +334,26 @@ def phone_tunnel_run(args: list[str]) -> int:
     return 0
 
 
+def _request_ap_rejoin() -> None:
+    """Ask the rejoin watchdog for the association now, without the throttle.
+
+    The state file records the last attempt; it is what keeps the timer quiet
+    for five minutes. A switch-on is a deliberate new AP, so the window starts
+    over. The unit does not exist with phoneLink.ap.rejoin = false, and it
+    no-ops without a station or USB adb, so every failure here is ignored: the
+    AP is up either way and the watchdog will still catch up on its own.
+
+    `--no-block` matters: the unit waits up to 30 s for the station, and a
+    switch-on with the phone away must not hold the command for that long. The
+    watchdog does the waiting, and the panel's own probe shows the join.
+    """
+    try:
+        os.unlink(settings.PHONE_AP_REJOIN_STATE)
+    except OSError:
+        pass
+    status(["systemctl", "start", "--no-block", settings.PHONE_AP_REJOIN_UNIT])
+
+
 def phone_ap_up(args: list[str]) -> int:
     """Bring up the laptop access point the phone joins as a Wi-Fi client."""
     phone.as_root("phone-ap-up", args)
@@ -362,6 +382,7 @@ def phone_ap_up(args: list[str]) -> int:
                 )
 
     must(["nmcli", "connection", "up", settings.PHONE_AP_CON])
+    _request_ap_rejoin()
     must(["ip", "-4", "-br", "addr", "show", settings.PHONE_AP_IF])
     log("AP up. The phone must have Wi-Fi (client) on, not the hotspot.")
     return 0

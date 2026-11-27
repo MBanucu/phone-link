@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declared-but-denied permission; a manifest fact fails with "reinstall the
   release" instead of passing as "restarts at boot: ok" (#73).
 
+### Fixed
+
+- `phone-ap-up` clears the rejoin watchdog's throttle state and starts
+  `phone-link-ap-rejoin.service`, so switching the AP back on asks for the
+  association immediately instead of leaving the phone away for the 300 s
+  window. A missing unit (`phoneLink.ap.rejoin = false`) or no USB adb does
+  not fail the switch (#76).
+
 ## [0.16.0] - 2026-11-27
 
 ### Added
