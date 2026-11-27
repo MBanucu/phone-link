@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `phone-doctor` no longer reports a tag-pinned system flake lock as stale when
+  the tag still resolves to the locked commit. It compares the lock with the
+  ref the input tracks (`original.ref`), prefers an annotated tag's peeled
+  commit, and ignores newer commits on the checkout's `main`; a moved tag is
+  reported as a disagreement, and a branch input still gets the existing
+  update warning when the branch has moved (#90).
+
 ## [0.18.0] - 2026-11-27
 
 ### Added

@@ -154,9 +154,17 @@ while [ "${1:-}" = "-C" ]; do shift 2; done
 case "$*" in
   "rev-parse HEAD") cat "$LOG/local_head" ;;
   "log -1 --format=%ct") cat "$LOG/head_time" ;;
+  "merge-base --is-ancestor "*) [ "$(cat "$LOG/ancestor")" = yes ] ;;
   "ls-remote "*)
-    head=$(cat "$LOG/remote_head")
-    if [ -n "$head" ]; then printf '%s\tHEAD\n' "$head"; else exit 128; fi
+    # A queued ref list stands in for the network; the older single-HEAD file
+    # is enough for the path-input cases.
+    if [ -s "$LOG/remote_refs" ]; then
+      cat "$LOG/remote_refs"
+    elif [ -n "$(cat "$LOG/remote_head")" ]; then
+      printf '%s\tHEAD\n' "$(cat "$LOG/remote_head")"
+    else
+      exit 128
+    fi
     ;;
 esac
 EOF
@@ -228,6 +236,8 @@ fresh_state() {
   printf '192.168.77.232:5555\n10.244.108.165:5555\n' >"$LOG/deny"
   printf 'abc\n' >"$LOG/local_head"
   printf 'abc\n' >"$LOG/remote_head"
+  printf 'no\n' >"$LOG/ancestor"
+  rm -f "$LOG/remote_refs"
   printf '200\n' >"$LOG/head_time"
 }
 
@@ -763,20 +773,132 @@ grep -q 'warn  flake update.*older' "$LOG/out" && ok "warns about the stale lock
   || bad "warns about the stale lock" "$(cat "$LOG/out")"
 unset PHONE_FLAKE_SRC PHONE_NIXOS_DIR
 
-# 14b. A GitHub input has no checkout; the lock is compared with the remote.
+# A GitHub input names the ref it tracks; the doctor compares the lock with
+# that ref, not with whatever the local checkout happens to contain.
+flake_lock() {
+  local ref=$1 rev=$2 original
+  if [ -n "$ref" ]; then
+    original="\"original\": {\"owner\": \"MBanucu\", \"repo\": \"phone-link\", \"type\": \"github\", \"ref\": \"$ref\"},"
+  else
+    original="\"original\": {\"owner\": \"MBanucu\", \"repo\": \"phone-link\", \"type\": \"github\"},"
+  fi
+  printf '{ "nodes": { "phone-link": { %s "locked": {"lastModified": 100, "rev": "%s", "type": "github"} } } }\n' \
+    "$original" "$rev" >"$TMP/nixos/flake.lock"
+}
+
+# 14b. A tag-pinned lock that matches the tag is up to date even though the
+# checkout has newer commits on main: a docs-only merge after the tag changes
+# nothing the lock resolves to.
+fresh_state
+mkdir -p "$TMP/src/.git" "$TMP/nixos"
+export PHONE_FLAKE_SRC=$TMP/src PHONE_NIXOS_DIR=$TMP/nixos
+printf '111111111111\n' >"$LOG/local_head"
+printf '300\n' >"$LOG/head_time"
+flake_lock v0.18.0 c1cc38100000
+printf 'c1cc38100000\trefs/tags/v0.18.0\nc1cc38100000\trefs/tags/v0.18.0^{}\n' >"$LOG/remote_refs"
+if run; then ok "a matching tag pin still exits 0"; else bad "a matching tag pin still exits 0"; fi
+grep -q 'ok    flake update.*up to date (c1cc38100000)' "$LOG/out" \
+  && ok "accepts a lock that matches its tag" \
+  || bad "accepts a lock that matches its tag" "$(cat "$LOG/out")"
+grep -q 'warn  flake update' "$LOG/out" \
+  && bad "ignores a newer checkout HEAD" || ok "ignores a newer checkout HEAD"
+
+# 14c. A tag that moved is a disagreement: re-resolving the same tag cannot
+# refresh the lock, so the doctor says the tag should not move.
+fresh_state
+mkdir -p "$TMP/src/.git" "$TMP/nixos"
+export PHONE_FLAKE_SRC=$TMP/src PHONE_NIXOS_DIR=$TMP/nixos
+flake_lock v0.18.0 aaaaaaaaaaaa
+printf 'bbbbbbbbbbbb\trefs/tags/v0.18.0\nbbbbbbbbbbbb\trefs/tags/v0.18.0^{}\n' >"$LOG/remote_refs"
+if run; then ok "a moved tag still exits 0"; else bad "a moved tag still exits 0"; fi
+grep -q 'warn  flake update.*the lock has aaaaaaaaaaaa, tag v0.18.0 is at bbbbbbbbbbbb' "$LOG/out" \
+  && ok "warns when the lock and the tag disagree" \
+  || bad "warns when the lock and the tag disagree" "$(cat "$LOG/out")"
+grep -q 'a tag should not move' "$LOG/out" \
+  && ok "says the tag should not move" || bad "says the tag should not move" "$(cat "$LOG/out")"
+
+# 14d. A branch-tracking input follows a moving branch: a checkout behind
+# origin keeps the actionable warning.
+fresh_state
+mkdir -p "$TMP/src/.git" "$TMP/nixos"
+export PHONE_FLAKE_SRC=$TMP/src PHONE_NIXOS_DIR=$TMP/nixos
+flake_lock main aaaaaaaaaaaa
+printf 'aaaaaaaaaaaa\n' >"$LOG/local_head"
+printf 'bbbbbbbbbbbb\tHEAD\nbbbbbbbbbbbb\trefs/heads/main\n' >"$LOG/remote_refs"
+if run; then ok "a branch pin ahead of the lock still exits 0"; else bad "a branch pin ahead of the lock still exits 0"; fi
+grep -q 'warn  flake update.*origin has newer commits (git pull, then rebuild)' "$LOG/out" \
+  && ok "warns when the branch is ahead" \
+  || bad "warns when the branch is ahead" "$(cat "$LOG/out")"
+
+# 14e. A current checkout with a lock behind the branch is a stale system
+# lock, refreshed by updating the input.
+fresh_state
+mkdir -p "$TMP/src/.git" "$TMP/nixos"
+export PHONE_FLAKE_SRC=$TMP/src PHONE_NIXOS_DIR=$TMP/nixos
+flake_lock main aaaaaaaaaaaa
+printf 'bbbbbbbbbbbb\n' >"$LOG/local_head"
+printf 'bbbbbbbbbbbb\tHEAD\nbbbbbbbbbbbb\trefs/heads/main\n' >"$LOG/remote_refs"
+if run; then ok "a lock behind the branch still exits 0"; else bad "a lock behind the branch still exits 0"; fi
+grep -q 'warn  flake update.*system lock is older than .* HEAD' "$LOG/out" \
+  && ok "warns that the lock is behind the branch" \
+  || bad "warns that the lock is behind the branch" "$(cat "$LOG/out")"
+
+# 14f. A lock that matches the branch is up to date; a checkout behind origin
+# is still reported.
+fresh_state
+mkdir -p "$TMP/src/.git" "$TMP/nixos"
+export PHONE_FLAKE_SRC=$TMP/src PHONE_NIXOS_DIR=$TMP/nixos
+flake_lock main bbbbbbbbbbbb
+printf 'aaaaaaaaaaaa\n' >"$LOG/local_head"
+printf 'bbbbbbbbbbbb\tHEAD\nbbbbbbbbbbbb\trefs/heads/main\n' >"$LOG/remote_refs"
+if run; then ok "a lock matching the branch still exits 0"; else bad "a lock matching the branch still exits 0"; fi
+grep -q 'warn  flake update.*origin has newer commits' "$LOG/out" \
+  && ok "reports a checkout behind origin" \
+  || bad "reports a checkout behind origin" "$(cat "$LOG/out")"
+
+# 14g. A checkout ahead of origin keeps the branch lock valid: origin has no
+# newer commit, only the checkout has commits the remote has not seen.
+fresh_state
+mkdir -p "$TMP/src/.git" "$TMP/nixos"
+export PHONE_FLAKE_SRC=$TMP/src PHONE_NIXOS_DIR=$TMP/nixos
+flake_lock main bbbbbbbbbbbb
+printf 'cccccccccccc\n' >"$LOG/local_head"
+printf 'yes\n' >"$LOG/ancestor"
+printf 'bbbbbbbbbbbb\tHEAD\nbbbbbbbbbbbb\trefs/heads/main\n' >"$LOG/remote_refs"
+if run; then ok "a checkout ahead of the branch still exits 0"; else bad "a checkout ahead of the branch still exits 0"; fi
+grep -q 'ok    flake update.*up to date (bbbbbbbbbbbb)' "$LOG/out" \
+  && ok "does not call an ahead checkout stale" \
+  || bad "does not call an ahead checkout stale" "$(cat "$LOG/out")"
+grep -q 'warn  flake update' "$LOG/out" \
+  && bad "keeps a branch lock matching origin quiet" \
+  || ok "keeps a branch lock matching origin quiet"
+
+# 14h. An annotated tag prints its tag object first and the commit as the
+# peeled ^{} line: the lock's rev is compared with the commit.
 fresh_state
 mkdir -p "$TMP/nixos"
-printf '{\n  "nodes": {\n    "phone-link": {\n      "original": {"owner": "MBanucu", "repo": "phone-link", "type": "github", "ref": "v0.3.6"},\n      "locked": {"lastModified": 100, "rev": "aaaaaaaaaaaa", "type": "github"}\n    }\n  }\n}\n' >"$TMP/nixos/flake.lock"
-export PHONE_NIXOS_DIR=$TMP/nixos PHONE_FLAKE_SRC=$TMP/no-src
-printf 'bbbbbbbbbbbb\n' >"$LOG/remote_head"
+export PHONE_FLAKE_SRC=$TMP/no-src PHONE_NIXOS_DIR=$TMP/nixos
+flake_lock v0.19.0 bbbbbbbbbbbb
+printf 'aaaaaaaaaaaa\trefs/tags/v0.19.0\nbbbbbbbbbbbb\trefs/tags/v0.19.0^{}\n' >"$LOG/remote_refs"
+if run; then ok "a peeled tag still exits 0"; else bad "a peeled tag still exits 0"; fi
+grep -q 'ok    flake update.*up to date (bbbbbbbbbbbb)' "$LOG/out" \
+  && ok "prefers the peeled commit" || bad "prefers the peeled commit" "$(cat "$LOG/out")"
+
+# 14i. Without a checkout the branch head on the remote is still what counts.
+fresh_state
+mkdir -p "$TMP/nixos"
+export PHONE_FLAKE_SRC=$TMP/no-src PHONE_NIXOS_DIR=$TMP/nixos
+flake_lock main aaaaaaaaaaaa
+printf 'bbbbbbbbbbbb\tHEAD\nbbbbbbbbbbbb\trefs/heads/main\n' >"$LOG/remote_refs"
 if run; then ok "an outdated remote lock still exits 0"; else bad "an outdated remote lock still exits 0"; fi
 grep -q 'warn  flake update.*origin is at bbbbbbbbbbbb, the lock has aaaaaaaaaaaa' "$LOG/out" \
   && ok "warns when the lock is behind the remote" \
   || bad "warns when the lock is behind the remote" "$(cat "$LOG/out")"
-printf 'aaaaaaaaaaaa\n' >"$LOG/remote_head"
+flake_lock main bbbbbbbbbbbb
 if run; then ok "a matching remote still exits 0"; else bad "a matching remote still exits 0"; fi
-grep -q 'ok    flake update.*up to date (aaaaaaaaaaaa)' "$LOG/out" \
+grep -q 'ok    flake update.*up to date (bbbbbbbbbbbb)' "$LOG/out" \
   && ok "accepts a matching remote" || bad "accepts a matching remote" "$(cat "$LOG/out")"
+: >"$LOG/remote_refs"
 : >"$LOG/remote_head"
 if run; then ok "an unreachable remote still exits 0"; else bad "an unreachable remote still exits 0"; fi
 grep -q 'skip  flake update.*unreachable' "$LOG/out" \
