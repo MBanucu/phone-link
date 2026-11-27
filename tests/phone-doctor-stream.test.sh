@@ -20,6 +20,7 @@ bad() {
 }
 
 cat >"$TMP/stub.py" <<'PY'
+import os
 import sys
 import time
 
@@ -49,6 +50,10 @@ MODULES = [
 def fake_collect(_ctx, *, jobs, modules=None, on_section=None, on_result=None):
     # The real engine is tested in phone-doctor-parallel.test.sh. Here the
     # stub only has to keep the contract: section, then its results, in order.
+    target = os.environ.get("STUB_JOBS_FILE")
+    if target:
+        with open(target, "w") as handle:
+            handle.write(str(jobs))
     sections = []
     for module in MODULES:
         if on_section is not None:
@@ -163,6 +168,12 @@ print("flushed")
 PY
 [ "$?" -eq 0 ] && ok "flushes each event before the run ends" \
   || bad "flushes each event before the run ends"
+
+# 4. --json-stream shares --jobs with the report, so a parallel run streams in
+#    completion order instead of forcing a sequential collect.
+STUB_JOBS_FILE="$TMP/jobs" run --json-stream --jobs 3 >/dev/null 2>&1
+[ "$(cat "$TMP/jobs" 2>/dev/null)" = 3 ] && ok "--json-stream forwards --jobs" \
+  || bad "--json-stream forwards --jobs" "$(cat "$TMP/jobs" 2>/dev/null)"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
