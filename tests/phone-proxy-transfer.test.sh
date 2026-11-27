@@ -188,6 +188,7 @@ fresh() {
     "$WORK/nothing" "$WORK/token" "$WORK/mode" "$WORK/imported.json" \
     "$WORK/backup.json" "$WORK/export.json" "$WORK/none.json"
   : >"$WORK/actions"
+  : >"$WORK/adb.log"
 }
 
 passed() {
@@ -241,6 +242,48 @@ case $out in
   *dummy-pass*) failed "the import prints no password" "$out" ;;
   *) passed "the import prints no password" ;;
 esac
+
+# 2b. The backup must not become a git object. A path outside a work tree is
+#     fine; inside one it has to be ignored, or the command refuses before it
+#     writes or even asks the phone.
+fresh
+mkdir -p "$WORK/plain"
+out=$(run phone-proxy-export --out "$WORK/plain/export.json")
+rc=$?
+[ "$rc" = 0 ] && passed "a non-git destination is written" \
+  || failed "a non-git destination is written" "exit $rc: $out"
+
+repo="$WORK/repo"
+rm -rf "$repo"
+mkdir -p "$repo/backups"
+git -C "$repo" init -q
+printf 'backups/*.json\n' >"$repo/.gitignore"
+fresh
+rm -f "$repo/backups/export.json"
+out=$(run phone-proxy-export --out "$repo/backups/export.json")
+rc=$?
+if [ "$rc" = 0 ] && [ -s "$repo/backups/export.json" ]; then
+  passed "an ignored path in a git work tree is written"
+else
+  failed "an ignored path in a git work tree is written" "exit $rc: $out"
+fi
+
+fresh
+rm -f "$repo/proxies.json"
+out=$(run phone-proxy-export --out "$repo/proxies.json")
+rc=$?
+[ "$rc" = 1 ] && passed "an unignored path in a git work tree exits 1" \
+  || failed "an unignored path in a git work tree exits 1" "exit $rc: $out"
+[ -e "$repo/proxies.json" ] && failed "an unignored backup is not written" \
+  || passed "an unignored backup is not written"
+case $out in
+  *"git work tree"*".gitignore"*PHONE_PROXY_BACKUP*) \
+    passed "an unignored backup names the fix" ;;
+  *) failed "an unignored backup names the fix" "$out" ;;
+esac
+grep -q 'action.EXPORT' "$WORK/adb.log" \
+  && failed "an unignored backup asks the phone nothing" \
+  || passed "an unignored backup asks the phone nothing"
 
 # 3. A phone that answers nothing fails as a locked (or too old) phone, writes
 #    no backup and says to unlock it.

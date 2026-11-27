@@ -91,7 +91,8 @@ holds every proxy's password in clear text, so it is written mode 0600 beside
 the secrets (PHONE_PROXY_BACKUP, default
 /etc/nixos/phone-link-proxies.json) unless --out names another path.
 
-The app exports only while the screen is unlocked; a locked phone binds nothing
+The app exports only while the screen is on and the keyguard is not locked; a
+locked or sleeping phone binds nothing
 and this says so instead of waiting. The file is written after the whole
 document has arrived, so a refused or interrupted transfer leaves no backup.
 """
@@ -780,6 +781,33 @@ def backup_writable(path: str | None = None) -> bool:
     return os.path.isdir(directory) and os.access(directory, os.W_OK)
 
 
+def check_backup_path(path: str) -> None:
+    """Refuse a backup the repository would stage: a password file in git.
+
+    `/etc/nixos` is a git work tree on this machine, and the default backup
+    sits beside the secrets there. The file is not ignored by that repository,
+    so writing it would make every proxy password a `git add -A` away. A path
+    outside a work tree, or one the repository ignores, is fine; no `git` means
+    no repository to protect and is also fine.
+    """
+    target = os.path.abspath(path)
+    directory = os.path.dirname(target)
+    if not os.path.isdir(directory):
+        return
+    inside = capture(
+        ["git", "-C", directory, "rev-parse", "--is-inside-work-tree"], timeout=10
+    ).strip()
+    if inside != "true":
+        return
+    if status(["git", "-C", directory, "check-ignore", "-q", "--", target], timeout=10) == 0:
+        return
+    die(
+        "refusing to write the saved-proxy backup inside a git work tree: "
+        f"{target} is not ignored. Add it to .gitignore, or set "
+        "PHONE_PROXY_BACKUP/--out to a path outside the repository."
+    )
+
+
 def _read_line(sock: socket.socket, *, eof_ok: bool = False) -> str | None:
     """One protocol line, without its LF.
 
@@ -838,8 +866,9 @@ def _connect(serial: str, local: int, deadline: float) -> socket.socket:
             if time.time() >= deadline:
                 die(
                     "the phone did not open the export/import socket: unlock the "
-                    "screen and run the command again (an app older than this "
-                    "command has no EXPORT/IMPORT and must be updated first)"
+                    "phone and turn the screen on, then run the command again (an "
+                    "app older than this command has no EXPORT/IMPORT and must be "
+                    "updated first)"
                 )
             time.sleep(0.05)
 
@@ -880,8 +909,9 @@ def _exchange(serial: str, action: str, body: bytes | None) -> tuple[int, bytes]
             if time.time() >= deadline:
                 die(
                     "the phone did not open the export/import socket: unlock the "
-                    "screen and run the command again (an app older than this "
-                    "command has no EXPORT/IMPORT and must be updated first)"
+                    "phone and turn the screen on, then run the command again (an "
+                    "app older than this command has no EXPORT/IMPORT and must be "
+                    "updated first)"
                 )
             time.sleep(0.1)
         if header.startswith("ERR "):
@@ -948,6 +978,7 @@ def _write_private(path: str, body: bytes) -> None:
 
 def export_to(serial: str, path: str) -> dict:
     """Pull the app's saved proxies into `path`; return the parsed document."""
+    check_backup_path(path)
     if not _installed(serial):
         die(f"{settings.PHONE_PROXY_PKG} is not installed; nothing to export")
     _, body = _exchange(serial, EXPORT, None)
@@ -1087,6 +1118,7 @@ def _export_args(args: list[str]) -> str:
 def phone_proxy_export(args: list[str]) -> int:
     """Pull every saved proxy off the phone into a root-only backup."""
     out = _export_args(args)
+    check_backup_path(out)
     if _needs_root_to_write(out):
         phone.as_root("phone-proxy-export", args)
     serial = phone.phone_serial()

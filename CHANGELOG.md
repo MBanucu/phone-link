@@ -35,7 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer loses them. `phone-proxy-install --replace-signer` exports first,
   uninstalls and installs, imports back, then starts and verifies the proxy that
   was in use on the port it had; if the installed app cannot export, nothing is
-  uninstalled. The backup is mode 0600 beside the secrets; the app only binds
+  uninstalled. The backup is mode 0600 beside the secrets and refuses a path
+  inside a git work tree unless the repository ignores it; the app only binds
   while the screen is on and the keyguard is not locked, and no password reaches
   `am`, `dumpsys`, `state.txt` or a laptop log (#66).
 - `docs/phone-network.md` records the measurement behind the idle link's

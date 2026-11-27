@@ -508,8 +508,12 @@ and verifies it answers on the port it had. If the installed app is too old to
 export, nothing is uninstalled: update it in place first, or accept the loss by
 uninstalling it yourself. The backup is
 `$PHONE_PROXY_BACKUP` (default `/etc/nixos/phone-link-proxies.json`, beside the
-secrets), mode 0600, and holds every proxy's password in clear text. Both
-actions need the phone unlocked; the laptop never prints a password.
+secrets), mode 0600, and holds every proxy's password in clear text. The export
+refuses a path inside a git work tree unless that repository ignores it: add
+`phone-link-proxies.json` to `/etc/nixos/.gitignore`, or set
+`PHONE_PROXY_BACKUP`/`--out` to a path outside the repository. Both
+actions need the screen on and the phone unlocked; the laptop never prints a
+password.
 For a phone that still runs the vendored F-Droid app, that app is on F-Droid and
 the script can use it as an update channel:
 

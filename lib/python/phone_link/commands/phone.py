@@ -1010,6 +1010,7 @@ def phone_proxy_install(args: list[str]) -> int:
                 log("aborted")
                 return 1
         if package.startswith(settings.PHONE_APP_NAMESPACE):
+            proxy_commands.check_backup_path(settings.PHONE_PROXY_BACKUP)
             if not proxy_commands.backup_writable():
                 # The backup belongs beside the root-only secrets; the export
                 # writes it there, so run the whole replacement as root.
