@@ -558,9 +558,11 @@ ctx = Context(
     }
 )
 results = ap.check(ctx)
-assert len(results) == 5, results
+assert len(results) == 6, results
 assert results[0].cid == "ap_role" and results[0].status.value == "ok", results
 assert all(r.status.value == "skip" for r in results[1:]), results
+channel = next(r for r in results if r.cid == "ap_channel")
+assert channel.detail == "iw not installed", channel
 forward = next(r for r in results if r.cid == "ap_noforward_rules")
 assert forward.detail == "nft not installed", forward
 assert ctx.nft is None, ctx.nft

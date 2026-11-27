@@ -12,7 +12,7 @@ Run every target with `nix flake check`; run one with
 | `shellcheck` | `bin/`, `lib/*.sh` and every tracked `*.sh` under `tests/` — the suites, the shared harness, `check-timings.sh` and the live scripts — are clean at shellcheck warning level |
 | `python` | every module under `lib/python/` compiles without being imported; GTK is not loaded |
 | `format` | `flake.nix`, every `modules/*.nix` discovered from the directory and `tests/module/*.nix` are nixfmt-clean |
-| `module` | the module generates the expected sing-box config and units (5 s probe, 20 s first run, AP DHCP hole, a DHCP-only AP with no router/DNS option, an nftables forward drop that also works with the firewall off, an opt-in hairpin with one accepted client, a scoped masquerade and DHCP router/DNS, a default-on fail-open watchdog with that hairpin and an explicit off switch, an opt-in AP autoconnect that leaves the profile link-only, an opt-in rejoin watchdog, pinned resolver, never started at boot) and defines nothing when disabled |
+| `module` | the module generates the expected sing-box config and units (5 s probe, 20 s first run, AP DHCP hole, a DHCP-only AP with no router/DNS option, an nftables forward drop that also works with the firewall off, an opt-in hairpin with one accepted client, a scoped masquerade and DHCP router/DNS, a default-on fail-open watchdog with that hairpin and an explicit off switch, an opt-in AP autoconnect that leaves the profile link-only, an opt-in rejoin watchdog, an optional `cfg80211.ieee80211_regdom` kernel parameter that merges with existing ones, pinned resolver, never started at boot) and defines nothing when disabled |
 | `script` | every `tests/*.test.sh` suite runs hermetically with stub `adb`/`curl`/`avahi-browse`; [architecture](architecture.md#i-want-to) shows how to run one suite |
 
 The `script` check also covers `phone-doctor --analyze` (problem ids, AP down and
@@ -20,7 +20,10 @@ a missing APK, warnings-only, no headers or `ok` lines),
 `phone-doctor-fix` (dry run, ordered application, an install from the cached
 APK, the manual APK step, manual-only and failed-fix paths) and the fix scripts (ambulance APK, AP
 profile creation from the secret, forwarding, mobile data, tunnel: apply,
-no-op and read-only `--check`).
+no-op and read-only `--check`). The AP regulatory domain has its own suite:
+captured `iw reg get`/`iw phy` output for `country 00` and `DE`, the shared
+parser, the doctor's `ap_channel` ok/warn/skip cases, and `phone-ap-up` failing
+before any activation when the channel is passive-only.
 
 ### One entry point
 

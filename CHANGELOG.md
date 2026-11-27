@@ -7,8 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `phoneLink.ap.country` (#91): an uppercase ISO 3166-1 alpha-2 code added to
+  `boot.kernelParams` as `cfg80211.ieee80211_regdom=<cc>`, merged with any
+  existing kernel parameters. It applies on the next boot, so the AP no longer
+  depends on a prior Wi-Fi client association to learn the country; `null`
+  leaves the domain alone.
+- `phone-doctor` reports `ap channel` against the current regulatory domain: ok
+  when the configured channel is usable, warn when it is passive-only or
+  disabled (naming the country and the `phoneLink.ap.country` / `iw reg set` /
+  2.4 GHz fixes), skipped when the AP is off or external. It reads the domain
+  with `iw`, not the AP's activation state.
+
 ### Fixed
 
+- `phone-ap-up` checks the configured channel before `nmcli connection up`
+  (#91). In `country 00` channel 149 is passive-scan only, which used to end in
+  NetworkManager's "Hotspot network creation took too long" and a misleading
+  "802.1X supplicant took too long to authenticate" after ~25 s; the command
+  now exits immediately with the country, channel and the fixes. If activation
+  still fails while the domain allows the channel, it says a stale
+  wpa_supplicant can be the cause and names `systemctl restart NetworkManager`.
 - `phone-doctor` no longer reports a tag-pinned system flake lock as stale when
   the tag still resolves to the locked commit. It compares the lock with the
   ref the input tracks (`original.ref`), prefers an annotated tag's peeled

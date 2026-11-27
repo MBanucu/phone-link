@@ -391,6 +391,27 @@ in
         '';
       };
 
+      country = lib.mkOption {
+        type = lib.types.nullOr (lib.types.strMatching "[A-Z]{2}");
+        default = null;
+        example = "DE";
+        description = ''
+          Regulatory country for the AP, as an uppercase ISO 3166-1 alpha-2
+          code (e.g. `"DE"`).  `null` leaves the regulatory domain alone.
+
+          When set, the module adds
+          `cfg80211.ieee80211_regdom=<country>` to `boot.kernelParams`, so the
+          domain is right before NetworkManager activates the AP at boot —
+          even on a fresh boot with no Wi-Fi client association to learn a
+          country from.  The kernel parameter takes effect on the next boot;
+          to change it now, run `iw reg set <country>`.
+
+          Without it, a boot in the world domain (`country 00`) cannot use
+          5 GHz channel 149 for AP mode: the channel is passive-scan only and
+          wpa_supplicant fails with a misleading 802.1X timeout.
+        '';
+      };
+
       address = lib.mkOption {
         type = lib.types.str;
         default = "192.168.77.1/24";
@@ -638,6 +659,13 @@ in
 
   config = lib.mkMerge [
     {
+      # The earliest place to set the domain: before the wiphy is registered and
+      # before NetworkManager can activate the AP, and it survives NM restarts.
+      # It only applies on the next boot; `iw reg set` is the runtime fix.
+      boot.kernelParams = lib.optional (
+        cfg.ap.country != null
+      ) "cfg80211.ieee80211_regdom=${cfg.ap.country}";
+
       assertions = [
         {
           assertion = !cfg.ap.enable || cfg.enable;

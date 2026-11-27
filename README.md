@@ -67,6 +67,15 @@ DHCP, nftables rules or firewall hole, and the laptop joins the AP as a client.
 The requirements, the laptop-as-client setup and the comparison with the phone
 hotspot are in [ap-topology](docs/ap-topology.md).
 
+A 5 GHz AP needs a regulatory country even when the laptop has not joined a
+Wi-Fi network as a client: a fresh boot stays in `country 00`, where channel 149
+is passive-scan only and wpa_supplicant cannot start AP mode. Set
+`phoneLink.ap.country = "DE"` (your country) to add
+`cfg80211.ieee80211_regdom=DE` to the kernel command line; it applies on the
+next boot, and `iw reg set DE` changes the running domain now. Without it,
+`phone-ap-up` refuses a channel the domain does not allow instead of waiting
+for the supplicant timeout, and `phone-doctor` reports `ap channel`.
+
 ## Three commands
 
 ```sh

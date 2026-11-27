@@ -106,6 +106,21 @@ let
       };
     }
   ];
+  # The country option must reach the kernel command line and merge with an
+  # existing boot.kernelParams; unset must add nothing.
+  apCountry = evalModule [
+    {
+      boot.kernelParams = [ "quiet" ];
+      networking.networkmanager.enable = true;
+      phoneLink = {
+        enable = true;
+        ap = {
+          enable = true;
+          country = "DE";
+        };
+      };
+    }
+  ];
   # The rejoin watchdog is on by default with ap.enable, and off when
   # ap.rejoin = false.
   apNoRejoin = evalModule [
@@ -214,6 +229,7 @@ let
       apOn
       apNamed
       apAutoconnect
+      apCountry
       apNoRejoin
       apNoFirewall
       apHairpin

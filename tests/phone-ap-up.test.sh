@@ -22,6 +22,9 @@ printf '%s\n' "$*" >>"$LOG/iw"
 case "$*" in
   list) printf '\t* AP\n\t* managed\n' ;;
   "dev wlp110s0 station dump") : ;;
+  "reg get") cat "$LOG/iw_reg" 2>/dev/null ;;
+  "dev wlp110s0 info") cat "$LOG/iw_info" 2>/dev/null ;;
+  "phy "*) cat "$LOG/iw_phy" 2>/dev/null ;;
 esac
 EOF
 
@@ -29,7 +32,17 @@ stub_cmd nmcli "$STUBS" <<'EOF'
 case "$*" in
   "-g wifi.backend") printf 'wpa_supplicant\n' ;;
   "-t -f NAME con show") printf 'phonelink\n' ;;
-  "connection up "*) printf '%s\n' "$*" >>"$LOG/actions" ;;
+  "connection up "*)
+    printf '%s\n' "$*" >>"$LOG/actions"
+    if [ -f "$LOG/nmcli_fail" ]; then
+      if [ "$(cat "$LOG/nmcli_fail")" = start-ap ]; then
+        printf 'Error: Connection activation failed: Failed to start AP functionality\n' >&2
+      else
+        printf 'Error: Connection activation failed: 802.1X supplicant took too long to authenticate\n' >&2
+      fi
+      exit 4
+    fi
+    ;;
 esac
 EOF
 
@@ -142,7 +155,80 @@ grep -qx 'start --no-block phone-link-ap-rejoin.service' "$LOG/systemctl" \
 [ -e "$PHONE_AP_REJOIN_STATE" ] && bad "external role clears the rejoin throttle" \
   || ok "external role clears the rejoin throttle"
 
-# 5. --help.
+# 5. The regulatory preflight: channel 149 in country 00 is passive-only, so
+#    the command fails before NetworkManager tries and before the ~25 s
+#    supplicant timeout, naming the country, channel and the fixes.
+stub_cmd iw "$STUBS" <<'EOF'
+printf '%s\n' "$*" >>"$LOG/iw"
+case "$*" in
+  list) printf '\t* AP\n\t* managed\n' ;;
+  "dev wlp110s0 station dump") : ;;
+  "reg get") cat "$LOG/iw_reg" 2>/dev/null ;;
+  "dev wlp110s0 info") cat "$LOG/iw_info" 2>/dev/null ;;
+  "phy "*) cat "$LOG/iw_phy" 2>/dev/null ;;
+esac
+EOF
+rm -f "$LOG/iw_reg"
+cp "$ROOT/tests/fixtures/iw-reg-country-00.txt" "$LOG/iw_reg"
+rm -f "$LOG/iw_info" "$LOG/iw_phy"
+rm -f "$LOG/actions"
+if run; then bad "a passive-only channel exits non-zero"; else
+  ok "a passive-only channel exits non-zero"
+fi
+[ -e "$LOG/actions" ] && bad "passive-only never activates the profile" \
+  || ok "passive-only never activates the profile"
+grep -q 'channel 149 (5 GHz, band a) is passive-only' "$LOG/out" \
+  && ok "names the channel, band and state" \
+  || bad "names the channel, band and state" "$(cat "$LOG/out")"
+grep -q 'regulatory domain 00' "$LOG/out" \
+  && ok "names the country" || bad "names the country" "$(cat "$LOG/out")"
+grep -q 'phoneLink.ap.country = "DE"' "$LOG/out" \
+  && ok "names the declarative fix" \
+  || bad "names the declarative fix" "$(cat "$LOG/out")"
+grep -q 'iw reg set DE' "$LOG/out" \
+  && ok "names the runtime fix" || bad "names the runtime fix" "$(cat "$LOG/out")"
+grep -q '2.4 GHz' "$LOG/out" \
+  && ok "names the 2.4 GHz alternative" \
+  || bad "names the 2.4 GHz alternative" "$(cat "$LOG/out")"
+grep -q 'Not waiting for the supplicant timeout' "$LOG/out" \
+  && ok "says it did not wait for the timeout" \
+  || bad "says it did not wait for the timeout" "$(cat "$LOG/out")"
+
+# 6. A country that allows 149 proceeds; a failing activation with the
+#    observed supplicant message then hints at the stale supplicant and the
+#    NetworkManager restart, and preserves the non-zero exit.
+rm -f "$LOG/iw_reg"
+cp "$ROOT/tests/fixtures/iw-reg-country-de.txt" "$LOG/iw_reg"
+rm -f "$LOG/actions" "$LOG/nmcli_fail"
+if run; then ok "an allowed channel activates the profile"; else
+  bad "an allowed channel activates the profile" "$(cat "$LOG/out")"
+fi
+grep -qx 'connection up phonelink' "$LOG/actions" \
+  && ok "the allowed channel reaches nmcli" \
+  || bad "the allowed channel reaches nmcli" "$(cat "$LOG/actions" 2>/dev/null)"
+printf '802.1x\n' >"$LOG/nmcli_fail"
+if run; then bad "a failing activation stays non-zero"; else
+  ok "a failing activation stays non-zero"
+fi
+grep -q 'hint:.*channel 149.*allowed.*regulatory domain DE' "$LOG/out" \
+  && ok "the hint says the domain allows the channel" \
+  || bad "the hint says the domain allows the channel" "$(cat "$LOG/out")"
+grep -q 'wpa_supplicant' "$LOG/out" \
+  && ok "the hint names the stale supplicant" \
+  || bad "the hint names the stale supplicant" "$(cat "$LOG/out")"
+grep -q 'systemctl restart NetworkManager' "$LOG/out" \
+  && ok "the hint names the recovery" \
+  || bad "the hint names the recovery" "$(cat "$LOG/out")"
+printf 'start-ap\n' >"$LOG/nmcli_fail"
+if run; then bad "Failed to start AP functionality stays non-zero"; else
+  ok "Failed to start AP functionality stays non-zero"
+fi
+grep -q 'hint:' "$LOG/out" \
+  && ok "the second observed message gets the hint" \
+  || bad "the second observed message gets the hint" "$(cat "$LOG/out")"
+rm -f "$LOG/nmcli_fail"
+
+# 7. --help.
 stub_cmd iw "$STUBS" <<'EOF'
 printf '\t* AP\n'
 EOF
