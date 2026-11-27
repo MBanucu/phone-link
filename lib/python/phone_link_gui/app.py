@@ -393,12 +393,16 @@ class Window(Adw.ApplicationWindow):
         else:
             self._spinner.stop()
 
-    def report_status(self, data: dict) -> None:
+    def report_status(self, data: dict, *, partial: bool = False) -> None:
+        """Update the header. A partial streamed report moves the badge only:
+        the verdict in the title stays until the done event settles it."""
         counts = data.get("counts", {})
-        self._ready = bool(data.get("ready"))
+        if not partial:
+            self._ready = bool(data.get("ready"))
         self._fails = counts.get("fail", 0)
         self._set_badge(self._fails, counts.get("warn", 0))
-        self._update_subtitle()
+        if not partial:
+            self._update_subtitle()
 
     def _update_subtitle(self) -> None:
         """Name the verdict, shortened when the panes collapse into one."""
@@ -650,7 +654,7 @@ def selftest() -> int:
             status.ap_action_finished()
             calls = []
             status.refresh_ap = lambda: calls.append("ap")
-            status._probe = lambda escalate: None
+            status._probe_stream = lambda escalate: None
             status._busy = False
             status.refresh()
             if "ap" not in calls:
@@ -698,6 +702,45 @@ def selftest() -> int:
                 raise RuntimeError("a later probe drops the escalation")
             if status._escalation_for(False) is not False:
                 raise RuntimeError("an explicit user-level probe escalates")
+            # A refresh after a report keeps the page and every row; only the
+            # states change. This is the regression the streaming page fixes.
+            status._render_skeleton()
+            status._on_event({"event": "section", "name": "[host]"})
+            status._on_event(
+                {
+                    "event": "result",
+                    "section": "[host]",
+                    "result": {
+                        "status": "fail",
+                        "id": "ip_forward",
+                        "label": "ip_forward",
+                        "detail": "0",
+                    },
+                }
+            )
+            status._on_event(
+                {
+                    "event": "done",
+                    "ready": False,
+                    "counts": {"ok": 0, "warn": 0, "fail": 1, "skip": 0},
+                }
+            )
+            if status._view.get_visible_child_name() != "page":
+                raise RuntimeError("the first report left the page placeholder")
+            if status._fix_button({"id": "ip_forward", "status": "fail"}) is None:
+                raise RuntimeError("the test row has no Fix button to disable")
+            status._begin_run()
+            if status._view.get_visible_child_name() != "page":
+                raise RuntimeError("a refresh replaced the page with the placeholder")
+            view = status._rows.get(("[host]", "ip_forward"))
+            if view is None or not isinstance(view.prefix, Gtk.Spinner):
+                raise RuntimeError("a pending row has no spinner")
+            if view.row.get_subtitle() != "Checking…":
+                raise RuntimeError("a pending row does not say Checking…")
+            if view.button is None or view.button.get_sensitive():
+                raise RuntimeError("a pending row kept its Fix button usable")
+            status._busy = False
+            status._window.set_status_busy(False)
             probe_window = RunWindow(window, "selftest", ["true"], autostart=False)
             probe_window.destroy()
             window.close()

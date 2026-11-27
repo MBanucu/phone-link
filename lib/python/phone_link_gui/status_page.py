@@ -1,17 +1,21 @@
-"""The status page: phone-doctor's findings, rendered from its JSON report."""
+"""The status page: phone-doctor's findings, streamed from its JSON report."""
 
 from __future__ import annotations
 
-import json
 import os
 import threading
+from dataclasses import dataclass
 
 from gi.repository import Adw, GLib, Gtk
+
+from phone_doctor.status import section_names
 
 from phone_link import actions as registry
 from phone_link import settings
 from phone_link.ap_state import ap_is_on
 from phone_link.runner import stream
+
+from .status_model import StatusStream, parse_line
 
 AP_ON_SUBTITLE = (
     "On — the phone joins PhoneLink; this radio cannot scan for other networks."
@@ -26,6 +30,7 @@ SECTION_TITLES = {
     "[phone]": "Phone",
     "[secrets]": "Secrets",
     "[proxy]": "Proxy",
+    "[app]": "App",
     "[tunnel]": "Tunnel",
     "[usb tether]": "USB tether",
     "[internet]": "Internet",
@@ -88,28 +93,32 @@ def probe_ap() -> bool:
     )
 
 
-def probe(*, escalate: bool = False) -> dict:
-    """Run `phone-doctor --json`, as the user or through pkexec."""
-    exe = registry.doctor_bin()
-    if not exe:
-        raise ProbeError("phone-doctor not found on PATH")
-    argv = [exe, "--json"]
-    if escalate and os.geteuid() != 0:
-        prefix = registry.escalation_prefix()
-        if not prefix:
-            raise ProbeError("neither sudo nor pkexec is available")
-        argv = [*prefix, *argv]
+def _counts_text(counts: dict) -> str:
+    warns = counts.get("warn", 0)
+    return (
+        f"{counts.get('ok', 0)} ok · {counts.get('fail', 0)} failed · "
+        f"{warns} warning" + ("" if warns == 1 else "s")
+    ) + f" · {counts.get('skip', 0)} skipped"
 
-    outcome = stream(argv, timeout=180)
-    if outcome.error:
-        raise ProbeError(outcome.error)
-    body = outcome.text().strip()
-    if not body:
-        raise ProbeError(f"phone-doctor printed nothing (exit {outcome.exit_code})")
-    try:
-        return json.loads(body)
-    except ValueError as exc:
-        raise ProbeError(f"phone-doctor did not return JSON: {exc}") from exc
+
+def _spinner() -> Gtk.Spinner:
+    spinner = Gtk.Spinner()
+    spinner.set_size_request(16, 16)
+    spinner.set_valign(Gtk.Align.CENTER)
+    spinner.start()
+    return spinner
+
+
+@dataclass
+class _RowView:
+    """The widgets of one check row, kept across a refresh."""
+
+    row: Adw.ActionRow
+    section: str
+    cid: str
+    prefix: Gtk.Widget | None = None
+    button: Gtk.Button | None = None
+    lock: Gtk.Image | None = None
 
 
 class StatusPage(Gtk.Box):
@@ -117,7 +126,6 @@ class StatusPage(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._window = window
         self._busy = False
-        self._groups: list[Adw.PreferencesGroup] = []
         # Once the user has authenticated, later probes keep going through
         # sudo. A plain re-probe would see the root-only checks failing again
         # and put the Authenticate banner back after every action.
@@ -128,6 +136,17 @@ class StatusPage(Gtk.Box):
         self._ap_acting = False
         self._ap_updating = False
         self._ap_shut = False
+
+        self._sections = list(section_names())
+        self._model = StatusStream(self._sections)
+        self._has_report = False
+        self._rows: dict[tuple[str, str], _RowView] = {}
+        self._section_groups: dict[str, Adw.PreferencesGroup] = {}
+        self._section_bases: dict[str, str] = {}
+        self._placeholders: dict[str, Adw.ActionRow] = {}
+        self._summary_group: Adw.PreferencesGroup | None = None
+        self._summary_row: Adw.ActionRow | None = None
+        self._summary_prefix: Gtk.Widget | None = None
 
         self._banner = Adw.Banner(
             title="Secrets are root-only; some checks need authentication.",
@@ -152,17 +171,17 @@ class StatusPage(Gtk.Box):
         self._page.add(self._ap_group)
         self.connect("destroy", self._on_ap_destroy)
 
-        # A blank page while the first probe runs reads as "broken"; a failed
-        # probe used to leave the page empty with only a toast behind it.
+        # Only the first run, before any report exists, may use the full-page
+        # placeholder: once there are rows they stay in place for every
+        # refresh, with each row showing its own progress.
         self._placeholder = Adw.StatusPage(
             icon_name="utilities-system-monitor-symbolic",
             title="Checking the setup",
         )
-        self._spinner = Gtk.Spinner()
         self._retry = Gtk.Button(label="Try again", halign=Gtk.Align.CENTER)
         self._retry.add_css_class("pill")
         self._retry.connect("clicked", lambda _b: self.refresh())
-        self._placeholder.set_child(self._spinner)
+        self._placeholder.set_child(self._retry)
 
         self._view = Gtk.Stack(
             transition_type=Gtk.StackTransitionType.CROSSFADE, vexpand=True
@@ -183,20 +202,74 @@ class StatusPage(Gtk.Box):
         self._busy = True
         self._pending_escalation = escalate
         self._banner.set_revealed(False)
-        self._show_progress()
+        self._begin_run()
         self._window.set_status_busy(True)
-        threading.Thread(target=self._probe, args=(escalate,), daemon=True).start()
+        threading.Thread(
+            target=self._probe_stream, args=(escalate,), daemon=True
+        ).start()
 
-    def _show_progress(self) -> None:
-        self._placeholder.set_title("Checking the setup")
-        self._placeholder.set_description(
-            "phone-doctor is looking at the flake, the host and the phone."
-        )
-        self._placeholder.set_icon_name("utilities-system-monitor-symbolic")
-        if self._placeholder.get_child() is not self._spinner:
-            self._placeholder.set_child(self._spinner)
-        self._spinner.start()
-        self._view.set_visible_child_name("placeholder")
+    def _begin_run(self) -> None:
+        """Paint the starting state without ever blanking an existing report."""
+        if not self._has_report:
+            # A first run that failed left partial rows in the old model; the
+            # retry starts from the same section skeleton, not from them.
+            self._model = StatusStream(self._sections)
+        self._model.begin()
+        if self._has_report:
+            self._mark_pending()
+        else:
+            self._render_skeleton()
+        self._window.report_status(self._model.payload(), partial=True)
+
+    def _probe_argv(self, escalate: bool) -> list[str]:
+        exe = registry.doctor_bin()
+        if not exe:
+            raise ProbeError("phone-doctor not found on PATH")
+        argv = [exe, "--json-stream"]
+        if escalate and os.geteuid() != 0:
+            prefix = registry.escalation_prefix()
+            if not prefix:
+                raise ProbeError("neither sudo nor pkexec is available")
+            argv = [*prefix, *argv]
+        return argv
+
+    def _probe_stream(self, escalate: bool) -> None:
+        try:
+            argv = self._probe_argv(escalate)
+        except Exception as exc:
+            GLib.idle_add(self._apply_error, str(exc))
+            return
+
+        saw_done = False
+        diagnostic = ""
+
+        def on_line(line: str) -> None:
+            nonlocal saw_done, diagnostic
+            event = parse_line(line)
+            if event is None:
+                if line.strip():
+                    # stderr is merged into stdout; keep the last line so a
+                    # crash has a message instead of a bare exit status.
+                    diagnostic = line.strip()
+                return
+            if event.get("event") == "done":
+                saw_done = True
+            GLib.idle_add(self._on_event, event)
+
+        try:
+            outcome = stream(argv, on_line=on_line, timeout=180)
+        except Exception as exc:  # a runner failure is a failed run, not a crash
+            GLib.idle_add(self._apply_error, str(exc))
+            return
+
+        if saw_done:
+            # A non-zero exit is the normal "not ready" verdict; the done event
+            # has already been queued and settles the page.
+            return
+        message = outcome.error or f"phone-doctor exited {outcome.exit_code}"
+        if diagnostic:
+            message = f"{message}: {diagnostic}"
+        GLib.idle_add(self._apply_error, message)
 
     def refresh_if_idle(self) -> None:
         if not self._busy:
@@ -271,115 +344,304 @@ class StatusPage(Gtk.Box):
     def _on_ap_destroy(self, _widget) -> None:
         self._ap_shut = True
 
-    def _probe(self, escalate: bool) -> None:
-        data = None
-        error = ""
-        try:
-            data = probe(escalate=escalate)
-        except Exception as exc:  # the page reports any failure as a toast
-            error = str(exc)
-        GLib.idle_add(self._apply, data, error)
+    def _on_authenticate(self, _banner) -> None:
+        self.refresh(escalate=True)
 
-    def _apply(self, data, error) -> bool:
+    # -- streaming events ----------------------------------------------
+    def _on_event(self, event: dict) -> bool:
+        change = self._model.apply(event)
+        if not change.accepted:
+            return False
+        if change.kind == "done":
+            self._finish()
+            return False
+        if change.kind == "section":
+            if change.new_section:
+                self._add_section(change.section)
+                self._add_placeholder(change.section)
+            return False
+        if change.kind == "result":
+            self._add_section(change.section)
+            self._remove_placeholder(change.section)
+            key = (change.section, change.row.cid)
+            view = self._rows.get(key)
+            if view is None:
+                self._add_row(change.row)
+            else:
+                self._set_row_result(view, change.row)
+            self._update_heading(change.section)
+            self._update_summary(partial=True)
+            self._window.report_status(self._model.payload(), partial=True)
+        return False
+
+    def _finish(self) -> None:
         self._busy = False
-        escalated = self._pending_escalation
+        self._has_report = True
+        self._escalated = self._pending_escalation
         self._window.set_status_busy(False)
-        self._spinner.stop()
-        if error:
+        for (section, cid), view in self._rows.items():
+            row = self._model.rows.get(section, {}).get(cid)
+            if row is not None:
+                self._set_row_result(view, row)
+        for name in list(self._placeholders):
+            self._remove_placeholder(name)
+        for section in list(self._section_groups):
+            self._update_heading(section)
+        self._update_summary(partial=False)
+        data = self._model.payload()
+        self._window.report_status(data)
+        self._show_auth_banner(data)
+        self._view.set_visible_child_name("page")
+
+    def _apply_error(self, error: str) -> bool:
+        self._busy = False
+        self._model.fail(error)
+        escalated = self._pending_escalation
+        if escalated and not self._is_root:
+            # sudo's timestamp is gone or the prompt was declined: drop the
+            # stickiness before the banner is drawn so it can offer
+            # authentication again.
+            self._escalated = False
+        self._window.set_status_busy(False)
+        if self._has_report:
+            # Keep the report that is already on screen. Put the rows back the
+            # way they were and say that this run did not finish.
+            for (section, cid), view in self._rows.items():
+                row = self._model.rows.get(section, {}).get(cid)
+                if row is not None:
+                    self._set_row_result(view, row)
+            for section in list(self._section_groups):
+                self._update_heading(section)
+            if self._summary_row is not None:
+                self._summary_row.set_title("Could not check the setup")
+                self._summary_row.set_subtitle(
+                    GLib.markup_escape_text(
+                        f"{error} — showing the last result "
+                        f"({_counts_text(self._model.counts())})"
+                    )
+                )
+                self._set_summary_prefix("dialog-error-symbolic", "error")
+            self._window.report_error("Status probe failed", error)
+            self._show_auth_banner(self._model.payload())
+            self._view.set_visible_child_name("page")
+        else:
             # sudo's timestamp is gone or the prompt was declined: drop the
             # stickiness so the banner can offer authentication again.
-            if escalated and not self._is_root:
-                self._escalated = False
             self._placeholder.set_title("Could not check the setup")
             self._placeholder.set_description(error)
             self._placeholder.set_icon_name("dialog-error-symbolic")
             self._placeholder.set_child(self._retry)
             self._view.set_visible_child_name("placeholder")
             self._window.report_error("Status probe failed", error)
-            return False
-        self._escalated = escalated
-        self._render(data)
-        self._view.set_visible_child_name("page")
-        self._window.report_status(data)
-        self._show_auth_banner(data)
         return False
 
-    def _on_authenticate(self, _banner) -> None:
-        self.refresh(escalate=True)
-
     # -- rendering -----------------------------------------------------
-    def _render(self, data: dict) -> None:
-        for group in self._groups:
-            self._page.remove(group)
-        self._groups.clear()
+    def _clear_findings(self) -> None:
+        for group in [self._summary_group, *self._section_groups.values()]:
+            if group is not None:
+                self._page.remove(group)
+        self._summary_group = None
+        self._summary_row = None
+        self._summary_prefix = None
+        self._section_groups.clear()
+        self._section_bases.clear()
+        self._placeholders.clear()
+        self._rows.clear()
 
-        counts = data.get("counts", {})
-        ready = bool(data.get("ready"))
-        warns = counts.get("warn", 0)
-        summary = Adw.PreferencesGroup(title="Verdict")
+    def _render_skeleton(self) -> None:
+        self._clear_findings()
+        self._build_summary()
+        for name in self._sections:
+            self._add_section(name)
+            self._add_placeholder(name)
+        self._update_summary(partial=True)
+        self._view.set_visible_child_name("page")
+
+    def _build_summary(self) -> None:
+        group = Adw.PreferencesGroup(title="Verdict")
         row = Adw.ActionRow(
-            title="ready" if ready else "not ready",
-            subtitle=(
-                f"{counts.get('ok', 0)} ok · {counts.get('fail', 0)} failed · "
-                f"{warns} warning" + ("" if warns == 1 else "s")
-            )
-            + f" · {counts.get('skip', 0)} skipped",
+            title="Checking the setup",
+            subtitle="phone-doctor is looking at the flake, the host and the phone.",
         )
-        icon = Gtk.Image.new_from_icon_name(
-            "object-select-symbolic" if ready else "dialog-error-symbolic"
-        )
-        icon.add_css_class("success" if ready else "error")
-        row.add_prefix(icon)
+        prefix = _spinner()
+        row.add_prefix(prefix)
         button = Gtk.Button(label="Run status", valign=Gtk.Align.CENTER)
         button.connect(
             "clicked",
             lambda _b: self._window.start_action(registry.BY_ID["phone-net-status"]),
         )
         row.add_suffix(button)
-        summary.add(row)
-        self._page.add(summary)
-        self._groups.append(summary)
+        group.add(row)
+        self._page.add(group)
+        self._summary_group = group
+        self._summary_row = row
+        self._summary_prefix = prefix
 
-        for section in data.get("sections", []):
-            name = section.get("name", "")
-            results = section.get("results", [])
-            title = SECTION_TITLES.get(name) or name.strip("[]").title()
-            # Say in the heading itself which sections need attention, so a
-            # long report can be skimmed without reading every row.
-            fails = sum(1 for result in results if result.get("status") == "fail")
-            warns = sum(1 for result in results if result.get("status") == "warn")
-            if fails:
-                title = f"{title} · {fails} failing"
-            elif warns:
-                title = f"{title} · {warns} warning" + ("" if warns == 1 else "s")
-            group = Adw.PreferencesGroup(title=title)
-            for result in results:
-                group.add(self._row(result))
-            self._page.add(group)
-            self._groups.append(group)
-
-    def _row(self, result: dict) -> Adw.ActionRow:
-        status = result.get("status", "skip")
-        icon_name, css = STATUS_ICONS.get(status, STATUS_ICONS["skip"])
-        # AdwActionRow renders title and subtitle as Pango markup, and the
-        # doctor's details contain "<" ("minSdk 26 <= phone SDK 35"), which
-        # would make Pango drop the whole string and log a warning.
-        row = Adw.ActionRow(
-            title=GLib.markup_escape_text(result.get("label", "")),
-            subtitle=GLib.markup_escape_text(result.get("detail", "")),
-        )
-        row.set_subtitle_selectable(True)
+    def _set_summary_prefix(self, icon_name: str, css: str) -> None:
+        if self._summary_row is None:
+            return
+        if self._summary_prefix is not None:
+            if isinstance(self._summary_prefix, Gtk.Spinner):
+                self._summary_prefix.stop()
+            self._summary_row.remove(self._summary_prefix)
         icon = Gtk.Image.new_from_icon_name(icon_name)
         icon.add_css_class(css)
-        row.add_prefix(icon)
-        button = self._fix_button(result)
+        self._summary_row.add_prefix(icon)
+        self._summary_prefix = icon
+
+    def _set_summary_spinner(self) -> None:
+        if self._summary_row is None or isinstance(self._summary_prefix, Gtk.Spinner):
+            return
+        if self._summary_prefix is not None:
+            self._summary_row.remove(self._summary_prefix)
+        spinner = _spinner()
+        self._summary_row.add_prefix(spinner)
+        self._summary_prefix = spinner
+
+    def _update_summary(self, *, partial: bool) -> None:
+        if self._summary_row is None:
+            return
+        counts = self._model.counts()
+        if partial and not self._model.done:
+            reported = self._model.reported_rows()
+            total = self._model.total_rows()
+            progress = (
+                f"{reported} of {total} checks reported"
+                if total
+                else "starting phone-doctor"
+            )
+            self._summary_row.set_title("Checking the setup")
+            self._summary_row.set_subtitle(
+                f"{progress} · {_counts_text(counts)}"
+            )
+            self._set_summary_spinner()
+            return
+        ready = bool(self._model.ready)
+        self._summary_row.set_title("ready" if ready else "not ready")
+        self._summary_row.set_subtitle(_counts_text(counts))
+        self._set_summary_prefix(
+            "object-select-symbolic" if ready else "dialog-error-symbolic",
+            "success" if ready else "error",
+        )
+
+    def _add_section(self, name: str) -> Adw.PreferencesGroup:
+        group = self._section_groups.get(name)
+        if group is not None:
+            return group
+        title = SECTION_TITLES.get(name) or name.strip("[]").title()
+        group = Adw.PreferencesGroup(title=f"{title} · checking…")
+        self._page.add(group)
+        self._section_groups[name] = group
+        self._section_bases[name] = title
+        return group
+
+    def _add_placeholder(self, name: str) -> None:
+        group = self._section_groups.get(name)
+        if group is None or name in self._placeholders:
+            return
+        row = Adw.ActionRow(
+            title="Checking…",
+            subtitle="Waiting for phone-doctor.",
+        )
+        row.add_prefix(_spinner())
+        group.add(row)
+        self._placeholders[name] = row
+
+    def _remove_placeholder(self, name: str) -> None:
+        row = self._placeholders.pop(name, None)
+        group = self._section_groups.get(name)
+        if row is not None and group is not None:
+            group.remove(row)
+
+    def _add_row(self, result) -> None:
+        group = self._add_section(result.section)
+        row = Adw.ActionRow()
+        row.set_subtitle_selectable(True)
+        view = _RowView(row, result.section, result.cid)
+        group.add(row)
+        self._rows[(result.section, result.cid)] = view
+        self._set_row_result(view, result)
+
+    def _set_prefix(self, view: _RowView, widget: Gtk.Widget) -> None:
+        if view.prefix is not None:
+            if isinstance(view.prefix, Gtk.Spinner):
+                view.prefix.stop()
+            view.row.remove(view.prefix)
+        view.prefix = widget
+        view.row.add_prefix(widget)
+
+    def _set_row_pending(self, view: _RowView) -> None:
+        view.row.set_subtitle("Checking…")
+        self._set_prefix(view, _spinner())
+        if view.button is not None:
+            view.button.set_sensitive(False)
+
+    def _mark_pending(self) -> None:
+        for view in self._rows.values():
+            if view.cid in self._model.rows.get(view.section, {}):
+                self._set_row_pending(view)
+        for section in list(self._section_groups):
+            self._update_heading(section)
+        self._update_summary(partial=True)
+
+    def _set_row_result(self, view: _RowView, result) -> None:
+        focused = view.button is not None and view.button.has_focus()
+        view.row.set_title(GLib.markup_escape_text(result.label))
+        view.row.set_subtitle(GLib.markup_escape_text(result.detail))
+        icon_name, css = STATUS_ICONS.get(result.status, STATUS_ICONS["skip"])
+        icon = Gtk.Image.new_from_icon_name(icon_name)
+        icon.add_css_class(css)
+        self._set_prefix(view, icon)
+
+        for suffix in (view.lock, view.button):
+            if suffix is not None:
+                view.row.remove(suffix)
+        view.lock = None
+        view.button = None
+        data = {
+            "status": result.status,
+            "id": result.cid,
+            "label": result.label,
+            "detail": result.detail,
+        }
+        button = self._fix_button(data)
         if button is not None:
             # A repair that escalates carries the same lock as on the action
             # pages, so "this asks for a password" is visible before the click.
-            if self._needs_root(result):
-                row.add_suffix(_root_lock())
-            row.add_suffix(button)
-        return row
+            if self._needs_root(data):
+                lock = _root_lock()
+                view.row.add_suffix(lock)
+                view.lock = lock
+            view.row.add_suffix(button)
+            view.button = button
+            if focused:
+                button.grab_focus()
+        elif focused:
+            # The repair disappeared (the check now passes): keep keyboard
+            # users on the row instead of dropping focus somewhere else.
+            view.row.grab_focus()
+
+    def _update_heading(self, section: str) -> None:
+        group = self._section_groups.get(section)
+        if group is None:
+            return
+        base = self._section_bases.get(section, section.strip("[]").title())
+        rows = self._model.rows.get(section, {})
+        if not rows:
+            group.set_title(base)
+            return
+        fails = sum(1 for row in rows.values() if row.status == "fail")
+        warns = sum(1 for row in rows.values() if row.status == "warn")
+        pending = any(row.pending for row in rows.values())
+        if pending:
+            title = f"{base} · checking…"
+        elif fails:
+            title = f"{base} · {fails} failing"
+        elif warns:
+            title = f"{base} · {warns} warning" + ("" if warns == 1 else "s")
+        else:
+            title = base
+        group.set_title(title)
 
     def _fix_button(self, result: dict) -> Gtk.Button | None:
         """A button that repairs a failing or warning row, when one exists."""
