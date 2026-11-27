@@ -171,7 +171,8 @@
                     ]
                   } \
                   --prefix GI_TYPELIB_PATH : ${typelibs} \
-                  --prefix XDG_DATA_DIRS : "$schema_dirs:${dataDirs}"
+                  --prefix XDG_DATA_DIRS : "$schema_dirs:${dataDirs}" \
+                  --set PHONE_LINK_VERSION ${version}
                 # sudo's askpass: the graphical password prompt for a root
                 # action, wrapped like the app so GTK and the package resolve.
                 install -Dm755 ${./gui}/askpass "$out/libexec/phone-link-gui-askpass"
