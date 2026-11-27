@@ -174,6 +174,9 @@ class StatusPage(Gtk.Box):
 
     # -- probing -------------------------------------------------------
     def refresh(self, *, escalate: bool | None = None) -> None:
+        # The doctor probe and the AP state change independently: a page
+        # refresh must not leave the switch on a stale answer.
+        self.refresh_ap()
         if self._busy:
             return
         escalate = self._escalation_for(escalate)
