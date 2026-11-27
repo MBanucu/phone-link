@@ -74,11 +74,41 @@ def auto_start_state(service_dump: str, state_text: str = "") -> str:
     match = re.search(r"auto-start\s+(true|false)", service_dump)
     if match:
         return match.group(1)
+    return _state_value(state_text, "auto_start")
+
+
+def _state_value(state_text: str, key: str) -> str:
+    """The value of one `key value` line in the app's state file, or ""."""
     for line in state_text.splitlines():
-        key, _, value = line.partition(" ")
-        if key.strip() == "auto_start":
+        name, _, value = line.partition(" ")
+        if name.strip() == key:
             return value.strip()
     return ""
+
+
+def oem_autostart_state(state_text: str = "") -> str:
+    """`unreadable` when the app says it cannot read the DokeOS list, or "".
+
+    The vendor list is behind a signature permission, so `unreadable` is the
+    only positive fact a current app can report about it. An older app that
+    does not write the line at all is a different unknown, and neither is
+    "open": the caller must never turn this into a pass.
+    """
+    return _state_value(state_text, "oem_autostart")
+
+
+def last_boot_blocked(state_text: str = "") -> str:
+    """The app's dated suspicion of a blocked boot, or "".
+
+    The line is `last_boot blocked <epoch seconds>` and only exists when the
+    app's boot receiver did not run in the current boot while auto-start was
+    on. The timestamp is when the app noticed, not the boot's own clock; the
+    caller should say "likely blocked", because the vendor list cannot be read.
+    """
+    parts = _state_value(state_text, "last_boot").split()
+    if len(parts) < 2 or parts[0] != "blocked":
+        return ""
+    return parts[1]
 
 
 def notifications_required(dumpsys: str, device_sdk: str = "") -> bool:

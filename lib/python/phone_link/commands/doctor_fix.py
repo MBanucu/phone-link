@@ -78,6 +78,11 @@ MANUAL_HINTS = {
     "app_installed": (
         "install the app: phone-proxy-install, or name a release APK to install"
     ),
+    "app_oem_autostart": (
+        'enable "Phone link proxy" in System Manager → App Management → '
+        "Auto Start Management, or run wireless-adb-keeper/autostart-allow.sh "
+        '"Phone link proxy" / phone-link-tools/autotoggle'
+    ),
     "flake_update": "update the source and rebuild: nix flake update phone-link",
     "https": "retry after the proxy/tether fixes; net-check shows which fetch fails",
 }

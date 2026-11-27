@@ -64,7 +64,10 @@ case "$line" in
     [ -f "$LOG/service_silent" ] || printf '      auto-start  %s\n' "$(cat "$LOG/auto_start")"
     ;;
   "cat /sdcard/Android/data/"*)
-    [ -f "$LOG/state_silent" ] || printf 'auto_start %s\n' "$(cat "$LOG/auto_start")"
+    if [ ! -f "$LOG/state_silent" ]; then
+      printf 'auto_start %s\n' "$(cat "$LOG/auto_start")"
+      cat "$LOG/state_extra" 2>/dev/null
+    fi
     ;;
   "am start-foreground-service "*)
     printf 'true\n' >"$LOG/auto_start"
@@ -82,7 +85,7 @@ export PATH="$STUBS:$PATH"
 reset() {
   : >"$LOG/installed"
   : >"$LOG/whitelisted"
-  rm -f "$LOG/actions" "$LOG/service_silent" "$LOG/state_silent"
+  rm -f "$LOG/actions" "$LOG/service_silent" "$LOG/state_silent" "$LOG/state_extra"
   printf '35\n' >"$LOG/target"
   printf 'PARTIALLY_DIRECT_BOOT_AWARE\n' >"$LOG/direct"
   printf 'yes\n' >"$LOG/receiver"
@@ -102,10 +105,12 @@ run() {
 #    proven: only a reboot without unlocking.
 reset
 if run --check; then ok "--check passes with the full boot set"; else bad "--check passes with the full boot set" "$(cat "$LOG/out")"; fi
-grep -q 'already comes back after a reboot' "$LOG/out" \
-  && ok "says the app already comes back" || bad "says the app already comes back" "$(cat "$LOG/out")"
-grep -q 'a reboot without unlocking is the only proof' "$LOG/out" \
-  && ok "points at the live proof" || bad "points at the live proof" "$(cat "$LOG/out")"
+grep -q 'every boot input adb can check is present' "$LOG/out" \
+  && ok "says every adb input is present" || bad "says every adb input is present" "$(cat "$LOG/out")"
+grep -q 'DokeOS Auto Start Management is not readable from adb' "$LOG/out" \
+  && ok "names the gate adb cannot read" || bad "names the gate adb cannot read" "$(cat "$LOG/out")"
+grep -q 'does not promise a restart' "$LOG/out" \
+  && ok "does not promise the restart" || bad "does not promise the restart" "$(cat "$LOG/out")"
 [ ! -f "$LOG/actions" ] && ok "--check changes nothing" || bad "--check changes nothing" "$(cat "$LOG/actions")"
 
 # 2. A declared-but-denied grant is a check failure and names the permission.
@@ -165,6 +170,16 @@ if run --check; then bad "unreadable auto_start exits 1"; else ok "unreadable au
 grep -q 'auto_start could not be read' "$LOG/out" \
   && ok "names the unreadable switch" || bad "names the unreadable switch" "$(cat "$LOG/out")"
 
+# 5b. The app's dated suspicion is repeated, with the screen, and does not
+#     turn into an adb failure: the fixer cannot make the vendor list readable.
+reset
+printf 'oem_autostart unreadable\nlast_boot blocked 1700000000\n' >"$LOG/state_extra"
+if run --check; then ok "a likely-blocked boot still exits 0"; else bad "a likely-blocked boot still exits 0" "$(cat "$LOG/out")"; fi
+grep -q 'the app reports the last boot as likely blocked' "$LOG/out" \
+  && ok "repeats the app's likely-blocked fact" || bad "repeats the app's likely-blocked fact" "$(cat "$LOG/out")"
+grep -q 'Auto Start Management' "$LOG/out" \
+  && ok "points at the DokeOS screen" || bad "points at the DokeOS screen" "$(cat "$LOG/out")"
+
 # 6. Not installed points at the installer and touches nothing.
 reset
 rm -f "$LOG/installed"
@@ -199,8 +214,8 @@ if [ "$expected" = "$actual" ]; then
 else
   bad "grants, whitelist and service start in order" "$actual"
 fi
-grep -q 'will come back after a reboot' "$LOG/out" \
-  && ok "says the app will come back" || bad "says the app will come back" "$(cat "$LOG/out")"
+grep -q 'every boot input adb can change is set' "$LOG/out" \
+  && ok "says the adb-side inputs are set" || bad "says the adb-side inputs are set" "$(cat "$LOG/out")"
 if run --check; then ok "the fixed phone passes --check"; else bad "the fixed phone passes --check" "$(cat "$LOG/out")"; fi
 
 # 8. A manifest fact still fails after the fixable part is repaired.

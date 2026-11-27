@@ -28,7 +28,7 @@ Or straight from the checkout: `./bin/phone-net-status`.
 | `phone-proxy-uninstall` | remove the proxy app (`--check` previews, `--keep-data` keeps app data, `--yes` skips the prompt) |
 | `phone-proxy-data-clear` | wipe the proxy app's data, back to port 1080 with no auth (`--check` previews, `--yes` skips the prompt) |
 | `phone-proxy-battery-whitelist` | add the proxy app to the device-idle (Doze) whitelist so the proxy is not killed with the screen off (`--check` only reports) |
-| `phone-proxy-boot` | make the proxy app come back after a reboot: add it to the device-idle allowlist, grant the location and notification permissions the SSID read and boot start need, turn `auto_start` on, and check that the installed build can start before the first unlock (direct-boot flag and a `LOCKED_BOOT_COMPLETED` receiver); the service itself is `specialUse`, not a `location` one (`--check` names every missing input and says which one needs a reinstall) |
+| `phone-proxy-boot` | make the proxy app come back after a reboot: add it to the device-idle allowlist, grant the location and notification permissions the SSID read and boot start need, turn `auto_start` on, and check that the installed build can start before the first unlock (direct-boot flag and a `LOCKED_BOOT_COMPLETED` receiver); the service itself is `specialUse`, not a `location` one (`--check` names every missing input and says which one needs a reinstall). DokeOS Auto Start Management is a separate gate behind a signature permission: it names the screen and the app's dated "likely blocked" fact, and never claims the gate is open |
 | `phone-proxy-setup` | the first-run path: start the proxy through the app's own intent with the port, credentials and auto-start as extras, then verify a request through the listener; `--max-connections N` also sends the SOCKS connection ceiling (16..1024, left out the app keeps its saved value — 256 on a fresh install), and `--check` reports the settings, including the ceiling when the app prints it, and checks the request |
 | `phone-proxy-switch` | make the laptop use a port the phone listens on: `--profile NAME` starts that saved proxy when it is not running and `--port N` requires the phone to be listening there, a request through the new port has to answer 200 before the laptop changes, then the port is written to `/run/phone-link/proxy-port`, `phone-tun` and the relay are restarted if they were running, and the phone's listener on the old port is stopped last (`--check` compares the two ports, `--list` prints the phone's saved proxies and listeners as JSON for the panel) |
 | `phone-proxy-start` | start the proxy through the app's own intent and wait until the service says it is listening (`--check` only reports; a fresh install with no saved proxy says to run `phone-proxy-setup` instead of sending a bare START) |
@@ -69,7 +69,10 @@ module per symptom group (`flake`, `host`, `phone`, `secrets`, `proxy`,
 The app checks read the service's `dumpsys` while it runs, and the app's own
 `files/state.txt` when it does not: a stopped service prints nothing, which is
 exactly the state a broken phone is in, and `auto_start` is the fact the boot
-check needs.
+check needs. The file also carries `oem_autostart unreadable` because the
+DokeOS list is signature-protected, and `last_boot blocked <epoch>` only when
+the app's boot receiver missed the current boot with auto-start on; the doctor
+reports that as a dated suspicion, not as a read of the vendor list.
 `lib/phone-net.sh` remains for the live harness in `tests/live`.
 
 `lib/python/phone_link/commands` holds the CLI half: one function per `bin/`

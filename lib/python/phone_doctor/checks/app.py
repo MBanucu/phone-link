@@ -10,12 +10,20 @@ the reinstall they need.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from phone_link import boot
 
 from ..context import Context
 from ..model import Result, fail, ok, warn
 
 SECTION = "[app]"
+
+# The one screen and the two drivers that can reach the DokeOS list. The app
+# and adb can only name it: the list is behind a signature permission.
+AUTOSTART_SCREEN = "System Manager → App Management → Auto Start Management"
+ADB_DRIVER = 'wireless-adb-keeper/autostart-allow.sh "Phone link proxy"'
+TOGGLE_DRIVER = "phone-link-tools/autotoggle"
 
 
 def _app(ctx: Context) -> str:
@@ -38,15 +46,62 @@ def _installed(ctx: Context) -> bool:
     return any(line.startswith("package:") for line in text.splitlines())
 
 
-def _auto_start(ctx: Context) -> str:
-    """The app's stored auto_start: from the service, or from its state file."""
-    text = ctx.adb("shell", "dumpsys", "activity", "service", _service(ctx))
-    state = ctx.adb(
+def _state_text(ctx: Context) -> str:
+    """The app's own facts, written for a phone whose service is not running."""
+    return ctx.adb(
         "shell",
         "cat",
         f"/sdcard/Android/data/{_app(ctx)}/files/state.txt",
     )
-    return boot.auto_start_state(text, state)
+
+
+def _auto_start(ctx: Context, state_text: str) -> str:
+    """The app's stored auto_start: from the service, or from its state file."""
+    text = ctx.adb("shell", "dumpsys", "activity", "service", _service(ctx))
+    return boot.auto_start_state(text, state_text)
+
+
+def _noticed(epoch: str) -> str:
+    """The app's epoch-second timestamp as a readable UTC instant."""
+    try:
+        when = datetime.fromtimestamp(int(epoch), tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return epoch
+    return when.strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _oem_autostart(state_text: str) -> Result:
+    """The vendor gate is never a pass: unreadable is the best fact there is.
+
+    A dated `last_boot blocked` from the app is the only evidence that a boot
+    went by without the receiver, and even that is phrased as a suspicion: the
+    list itself cannot be read. A missing line is an older app or a missing
+    file, which is a different unknown, not "open".
+    """
+    blocked = boot.last_boot_blocked(state_text)
+    if blocked:
+        return warn(
+            "app_oem_autostart",
+            "OEM autostart",
+            f"likely blocked this boot (noticed {_noticed(blocked)}); no boot "
+            f"broadcast reached the app. Open {AUTOSTART_SCREEN}, or run "
+            f"{ADB_DRIVER} / {TOGGLE_DRIVER}",
+        )
+    if boot.oem_autostart_state(state_text) == "unreadable":
+        return warn(
+            "app_oem_autostart",
+            "OEM autostart",
+            "unknown: the DokeOS list is unreadable "
+            "(com.freeme.freemanager.permission.ACCESS_INTERFACE); the battery "
+            f"exemption is a separate gate. Check {AUTOSTART_SCREEN}, or run "
+            f"{ADB_DRIVER} / {TOGGLE_DRIVER}",
+        )
+    return warn(
+        "app_oem_autostart",
+        "OEM autostart",
+        "unknown: this app does not report the DokeOS gate; update it, then "
+        f"check {AUTOSTART_SCREEN}",
+    )
 
 
 def _whitelisted(ctx: Context) -> bool:
@@ -83,7 +138,8 @@ def check(ctx: Context) -> list[Result]:
 
     dump = ctx.adb("shell", "dumpsys", "package", _app(ctx))
     sdk = ctx.adb("shell", "getprop", "ro.build.version.sdk")
-    auto_start = _auto_start(ctx)
+    state_text = _state_text(ctx)
+    auto_start = _auto_start(ctx, state_text)
     fixable, reinstall, unknown = boot.inspect(
         dump,
         sdk,
@@ -104,4 +160,7 @@ def check(ctx: Context) -> list[Result]:
         )
     else:
         results.append(ok("app_boot", "restarts at boot", _ok_detail(dump, sdk)))
+    # Always present when the app is installed: a battery-clear phone still has
+    # an unreadable vendor gate, and that must not look like an all-clear.
+    results.append(_oem_autostart(state_text))
     return results

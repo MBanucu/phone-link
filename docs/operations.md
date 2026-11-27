@@ -443,9 +443,12 @@ permissions the boot start and the SSID read need, and checks the manifest
 facts the app cannot change from adb: the direct-boot flag and a receiver for
 `LOCKED_BOOT_COMPLETED`. A missing manifest fact is reported as
 "reinstall the release"; the check never claims more than that, because only a
-reboot without unlocking proves the listener comes up. The app's foreground
-service is `specialUse`, not `location`: a `location` service type cannot start
-before the first unlock and is not needed for the SSID read.
+reboot without unlocking proves the listener comes up. DokeOS Auto Start
+Management is the gate adb cannot read or write: the command names the screen
+and repeats the app's dated "likely blocked" fact, without promising a restart.
+The app's foreground service is `specialUse`, not `location`: a `location`
+service type cannot start before the first unlock and is not needed for the
+SSID read.
 
 ## Uninstall
 
