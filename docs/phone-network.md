@@ -428,6 +428,21 @@ package, and a receiver for `LOCKED_BOOT_COMPLETED`. A missing grant is fixed
 by `phone-proxy-boot`; a missing manifest fact is reported as "reinstall the
 release", because adb cannot add it.
 
+The second boot gate is DokeOS Auto Start Management, and it is not in that
+list: the vendor screen is behind
+`com.freeme.freemanager.permission.ACCESS_INTERFACE`, so neither the app nor
+adb can read or write it. The doctor reports it as a separate
+`app_oem_autostart` warning — `unknown: the DokeOS list is unreadable` — even
+when the battery allowlist is clear, because a battery-clear phone is not an
+OEM all-clear. A current app also writes `oem_autostart unreadable` to
+`state.txt`; `last_boot no_broadcast <epoch>` appears only when its boot
+receiver did not run in the current boot with auto-start on. That persisted
+line is the observation — no cause, no credential — and the doctor turns it
+into the conservative "likely blocked this boot (noticed …)", naming System
+Manager → App Management → Auto Start Management and the two drivers. An old
+`last_boot blocked` line is ignored rather than treated as proof. It stays a
+suspicion: `stopped=true` is what a clean install shows too.
+
 None of that proves the boot. A reboot is the only test: leave the phone
 locked, wait, and check that the listener answers.
 `tests/live/hairpin-measure.sh --bootstrap` records that path; until it runs on

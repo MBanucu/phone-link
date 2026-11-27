@@ -213,7 +213,7 @@ fresh_state() {
   printf 'nameserver 1.1.1.1\nnameserver 9.9.9.9\n' >"$LOG/resolv.conf"
   printf '    versionCode=1 minSdk=26 targetSdk=34\n    versionName=0.1.0\n    flags=[ HAS_CODE ]\n    privateFlags=[ PARTIALLY_DIRECT_BOOT_AWARE ]\n    android.permission.ACCESS_FINE_LOCATION: granted=true\n    android.permission.ACCESS_COARSE_LOCATION: granted=true\n    android.permission.ACCESS_BACKGROUND_LOCATION: granted=true\n    android.permission.POST_NOTIFICATIONS: granted=true\n    android.permission.RECEIVE_BOOT_COMPLETED: granted=true\nReceiver Resolver Table:\n  Non-Data Actions:\n      android.intent.action.LOCKED_BOOT_COMPLETED:\n        38b0d9 org.phonelink.proxy/.BootReceiver filter edb9a9e\n' >"$LOG/dumpsys"
   printf '      running     port 1080 · 0 clients\n      auto-start  true\n' >"$LOG/service_dump"
-  printf 'auto_start true\nadb_wifi true\nport 1080\nssid PhoneLink\nany_network false\nin_use \n' \
+  printf 'auto_start true\nadb_wifi true\nport 1080\nssid PhoneLink\nany_network false\nin_use \noem_autostart unreadable\n' \
     >"$LOG/app_state"
   printf 'user,org.phonelink.proxy,10332\n' >"$LOG/whitelist"
   printf '35\n' >"$LOG/sdk"
@@ -235,11 +235,17 @@ run() {
   "$BASH_BIN" "$SCRIPT" "$@" >"$LOG/out" 2>&1
 }
 
-# 1. Everything in place.
+# 1. Everything adb can check is in place. The DokeOS gate still cannot be
+# read, so the verdict is "required conditions met, one open", not the whole
+# setup ready — a battery-clear phone is not an OEM all-clear.
 fresh_state
 if run; then ok "ready setup exits 0"; else bad "ready setup exits 0" "$(cat "$LOG/out")"; fi
-grep -q 'verdict: the whole setup is ready' "$LOG/out" && ok "reports the whole setup ready" \
-  || bad "reports the whole setup ready" "$(cat "$LOG/out")"
+grep -q 'verdict: required conditions are met; 1 optional condition(s) open' "$LOG/out" \
+  && ok "reports the one open OEM gate" \
+  || bad "reports the one open OEM gate" "$(cat "$LOG/out")"
+grep -q 'warn  OEM autostart.*unknown: the DokeOS list is unreadable' "$LOG/out" \
+  && ok "says the OEM gate is unreadable" \
+  || bad "says the OEM gate is unreadable" "$(cat "$LOG/out")"
 grep -q '^FAIL' "$LOG/out" && bad "no failures" || ok "no failures"
 grep -q 'ok    adb device' "$LOG/out" && ok "reports the adb device" || bad "reports the adb device"
 grep -q 'proxy request.*192.168.77.232:1080 -> 200' "$LOG/out" && ok "reports the proxy request" \
@@ -595,6 +601,64 @@ grep -q 'ok    restarts at boot.*auto_start on, allowlisted, fine+coarse locatio
   && ok "names the whole pre-unlock boot set" \
   || bad "names the whole pre-unlock boot set" "$(cat "$LOG/out")"
 
+# 12c-2. Battery exempt and the vendor gate unknown are two different lines:
+# the first may be ok while the second is never ok.
+fresh_state
+if run; then ok "a battery-clear phone exits 0"; else bad "a battery-clear phone exits 0" "$(cat "$LOG/out")"; fi
+grep -q 'ok    restarts at boot.*allowlisted' "$LOG/out" \
+  && ok "still reports the battery gate clear" \
+  || bad "still reports the battery gate clear" "$(cat "$LOG/out")"
+grep -q 'warn  OEM autostart.*unknown: the DokeOS list is unreadable.*separate gate' "$LOG/out" \
+  && ok "does not turn the battery clear into an OEM clear" \
+  || bad "does not turn the battery clear into an OEM clear" "$(cat "$LOG/out")"
+grep -q '^ok *.*OEM autostart' "$LOG/out" \
+  && bad "the OEM gate is never reported ok" || ok "the OEM gate is never reported ok"
+
+# 12c-3. An app too old to write the fact is unknown, not clear.
+fresh_state
+printf 'auto_start true\nadb_wifi true\nport 1080\nssid PhoneLink\nany_network false\nin_use \n' \
+  >"$LOG/app_state"
+if run; then ok "an old app with no OEM fact exits 0"; else bad "an old app with no OEM fact exits 0" "$(cat "$LOG/out")"; fi
+grep -q 'warn  OEM autostart.*unknown: this app does not report the DokeOS gate' "$LOG/out" \
+  && ok "a missing fact is unknown" \
+  || bad "a missing fact is unknown" "$(cat "$LOG/out")"
+
+# 12c-4. The app's dated observation is turned into the conservative wording,
+# with the screen and both drivers, and never into a read of the vendor list.
+fresh_state
+printf 'auto_start true\nadb_wifi true\nport 1080\nssid PhoneLink\nany_network false\nin_use \noem_autostart unreadable\nlast_boot no_broadcast 1700000000\n' \
+  >"$LOG/app_state"
+if run; then ok "a likely-blocked boot still exits 0"; else bad "a likely-blocked boot still exits 0" "$(cat "$LOG/out")"; fi
+grep -q 'warn  OEM autostart.*likely blocked this boot (noticed 2023-11-14 22:13 UTC)' "$LOG/out" \
+  && ok "dates the likely-blocked boot" \
+  || bad "dates the likely-blocked boot" "$(cat "$LOG/out")"
+grep -q 'System Manager → App Management → Auto Start Management' "$LOG/out" \
+  && ok "names the DokeOS screen" \
+  || bad "names the DokeOS screen" "$(cat "$LOG/out")"
+grep -q 'wireless-adb-keeper/autostart-allow.sh' "$LOG/out" \
+  && ok "names the adb driver" \
+  || bad "names the adb driver" "$(cat "$LOG/out")"
+grep -q 'phone-link-tools/autotoggle' "$LOG/out" \
+  && ok "names the accessibility driver" \
+  || bad "names the accessibility driver" "$(cat "$LOG/out")"
+run --analyze || true
+grep -q '^warn app_oem_autostart .*likely blocked' "$LOG/out" \
+  && ok "--analyze names the OEM check" \
+  || bad "--analyze names the OEM check" "$(cat "$LOG/out")"
+
+# 12c-5. An old-style `last_boot blocked` line is the conclusion, not the
+# observation: it is not served as proof, and the check stays unknown.
+fresh_state
+printf 'auto_start true\nadb_wifi true\nport 1080\nssid PhoneLink\nany_network false\nin_use \noem_autostart unreadable\nlast_boot blocked 1700000000\n' \
+  >"$LOG/app_state"
+if run; then ok "an old-style blocked line still exits 0"; else bad "an old-style blocked line still exits 0" "$(cat "$LOG/out")"; fi
+grep -q 'warn  OEM autostart.*unknown: the DokeOS list is unreadable' "$LOG/out" \
+  && ok "an old blocked line is treated as unknown" \
+  || bad "an old blocked line is treated as unknown" "$(cat "$LOG/out")"
+grep -q 'likely blocked this boot' "$LOG/out" \
+  && bad "an old blocked line is not proof" \
+  || ok "an old blocked line is not proof"
+
 # 12d. A declared-but-denied grant is named on its own and points at the fixer.
 for entry in \
   'ACCESS_COARSE_LOCATION|coarse location is not granted' \
@@ -723,11 +787,15 @@ grep -q 'skip  flake update.*unreachable' "$LOG/out" \
 rm -f "$TMP/nixos/flake.lock"
 export PHONE_NIXOS_DIR=$TMP/nixos PHONE_FLAKE_SRC=$TMP/no-src
 
-# 15. --analyze prints only the problems, as stable ids.
+# 15. --analyze prints only the problems, as stable ids. A ready setup still
+# has the unreadable DokeOS gate as its one open fact.
 fresh_state
 if run --analyze; then ok "--analyze on a ready setup exits 0"; else bad "--analyze on a ready setup exits 0" "$(cat "$LOG/out")"; fi
-[ -s "$LOG/out" ] && bad "--analyze on a ready setup is empty" "$(cat "$LOG/out")" \
-  || ok "--analyze on a ready setup is empty"
+grep -q '^warn app_oem_autostart ' "$LOG/out" \
+  && ok "--analyze names the unreadable OEM gate" \
+  || bad "--analyze names the unreadable OEM gate" "$(cat "$LOG/out")"
+grep -q '^\(ok\|fail\|skip\) ' "$LOG/out" \
+  && bad "--analyze has only the OEM warning" || ok "--analyze has only the OEM warning"
 fresh_state
 unset PHONE_SERIAL
 printf 'List of devices attached\n' >"$LOG/devices"

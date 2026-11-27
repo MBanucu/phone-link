@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `proxyHost` instead of "AP is down". The external AP must stay link-only — no
   NAT, no DHCP router/DNS option, no uplink or forwarding — with a DHCP
   reservation for the phone.
+- `phone-doctor` reports the DokeOS Auto Start Management gate as its own
+  `app_oem_autostart` warning, separate from the battery allowlist: the vendor
+  list is behind `com.freeme.freemanager.permission.ACCESS_INTERFACE`, so a
+  battery-clear phone is reported as "unknown: the DokeOS list is unreadable",
+  never as ok. When the app writes the neutral observation
+  `last_boot no_broadcast <epoch>` — its boot receiver missed the current boot
+  with auto-start on — the doctor says "likely blocked this boot (noticed …)"
+  and names System Manager → App Management → Auto Start Management plus the
+  two drivers. A missing fact, or an old `last_boot blocked` conclusion, is a
+  different unknown, not a pass. `phone-proxy-boot` names the same screen and
+  no longer implies its adb-side checks prove a restart (phone-link-proxy#5).
 - `docs/phone-network.md` records the measurement behind the idle link's
   100–200 ms tail: it is the phone's Wi-Fi power save, not loss or AP queueing.
   With `wifi_power_save=120` the median is ~5–7 ms with 1–4 packets per 200 at
