@@ -340,6 +340,22 @@
               };
             }
           ];
+          # The hairpin enables fail-open by default, but an explicit false must
+          # win; that is the escape hatch for a deliberately unguarded link.
+          apHairpinNoFailOpen = evalModule [
+            {
+              networking.networkmanager.enable = true;
+              phoneLink = {
+                enable = true;
+                ap = {
+                  enable = true;
+                  uplink = "tunnel";
+                  forwardClient = "192.168.77.232";
+                };
+                apFailOpen.enable = false;
+              };
+            }
+          ];
           relayOn = evalModule [
             {
               phoneLink = {
@@ -423,7 +439,7 @@
           '';
 
           format = pkgs.runCommand "phone-link-format-check" { nativeBuildInputs = [ pkgs.nixfmt ]; } ''
-            nixfmt --check ${./flake.nix} ${./modules/phone-link.nix}
+            nixfmt --check ${./flake.nix} ${./modules/phone-link.nix} ${./modules/phone-link-failopen.nix}
             touch $out
           '';
 
@@ -678,6 +694,39 @@
               !(apNoRejoin.systemd.timers ? phone-link-ap-rejoin)
             ) "ap.rejoin = false must not define the rejoin timer";
             assert lib.assertMsg (
+              !(on.systemd.services ? phone-link-ap-failopen)
+            ) "the fail-open watchdog must stay off unless enabled";
+            assert lib.assertMsg (apHairpin.phoneLink.apFailOpen.enable
+            ) "uplink = tunnel must enable fail-open by default";
+            assert lib.assertMsg (
+              apHairpin.systemd.services ? phone-link-ap-failopen
+            ) "uplink = tunnel must define the fail-open watchdog";
+            assert lib.assertMsg (
+              apHairpin.phoneLink.apFailOpen.client == "192.168.77.232"
+            ) "fail-open must follow the hairpin's forwardClient";
+            assert lib.assertMsg (
+              apHairpinNoFailOpen.phoneLink.apFailOpen.enable == false
+            ) "an explicit apFailOpen.enable = false must win over the hairpin default";
+            assert lib.assertMsg (
+              !(apHairpinNoFailOpen.systemd.services ? phone-link-ap-failopen)
+              && !(apHairpinNoFailOpen.systemd.timers ? phone-link-ap-failopen)
+            ) "apFailOpen.enable = false must define neither unit nor timer";
+            assert lib.assertMsg (
+              apHairpin.systemd.timers.phone-link-ap-failopen.timerConfig.OnUnitActiveSec == "5s"
+            ) "the fail-open watchdog must tick every 5 s";
+            assert lib.assertMsg (
+              apHairpin.systemd.timers.phone-link-ap-failopen.timerConfig.OnBootSec == "30s"
+            ) "the fail-open watchdog must wait for the AP to come up";
+            assert lib.assertMsg (lib.hasInfix "PHONE_AP_CLIENT=192.168.77.232" (
+              builtins.readFile apHairpin.systemd.services.phone-link-ap-failopen.serviceConfig.ExecStart
+            )) "the fail-open watchdog must bind the configured client";
+            assert lib.assertMsg (lib.hasInfix "PHONE_AP_HAIRPIN_RULES=/nix/store/" (
+              builtins.readFile apHairpin.systemd.services.phone-link-ap-failopen.serviceConfig.ExecStart
+            )) "the fail-open watchdog must bind the merged ruleset";
+            assert lib.assertMsg (lib.hasInfix "PHONE_AP_NOFORWARD_RULES=/nix/store/" (
+              builtins.readFile apHairpin.systemd.services.phone-link-ap-failopen.serviceConfig.ExecStart
+            )) "the fail-open watchdog must bind the no-forward rules";
+            assert lib.assertMsg (
               apOn.networking.networkmanager.ensureProfiles.profiles.phonelink.wifi.band == "a"
             ) "the AP must default to 5 GHz";
             assert lib.assertMsg (
@@ -812,10 +861,26 @@
         };
       });
 
-      nixosModules = {
-        default = import ./modules/phone-link.nix;
-        phone-link = import ./modules/phone-link.nix;
-      };
+      nixosModules =
+        let
+          phoneLink = import ./modules/phone-link.nix;
+          failOpen = import ./modules/phone-link-failopen.nix;
+        in
+        {
+          default = {
+            imports = [
+              phoneLink
+              failOpen
+            ];
+          };
+          phone-link = {
+            imports = [
+              phoneLink
+              failOpen
+            ];
+          };
+          fail-open = failOpen;
+        };
 
       devShells = eachSystem (pkgs: {
         default = pkgs.mkShell {

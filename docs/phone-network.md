@@ -184,12 +184,57 @@ Failure semantics: the nft accept does not test `phone-tun`. When the tunnel is
 not running, sing-box's ip rules and the table-2022 route are gone as well, so
 the accepted packet is no longer sent into the tunnel: with no other default
 route the kernel fails it as unreachable, and with a second uplink such as a USB
-tether it can follow the laptop's main table. The fail-open watchdog that
-removes `ip phone_link_hairpin` and restores the plain `inet phone_link_ap`
-drop in that state is #46, a separate change. There are no NixOS firewall rules
-for the hairpin: the only forward drop in this setup is `inet phone_link_ap`,
-and the doctor keeps reporting its `iifname "wlp110s0" drop` as the AP forward
-drop.
+tether it can follow the laptop's main table. The fail-open watchdog below
+closes that window and is on by default with `uplink = "tunnel"`. There are no
+NixOS firewall rules for the hairpin: the only forward drop in this setup is
+`inet phone_link_ap`, and the doctor keeps reporting its
+`iifname "wlp110s0" drop` as the AP forward drop.
+
+## Failing open when the tunnel is down
+
+The hairpin is what lets the phone validate the AP, and a validated Wi-Fi takes
+the phone's default route. That is only safe while `phone-tun` is actually
+carrying traffic. If the tunnel stops while the hairpin stays, the phone can sit
+on a validated-but-dead Wi-Fi and blackhole its own internet until Android
+revalidates. The link-only AP has the opposite, safer failure: the phone keeps
+cellular.
+
+`phone-link-ap-failopen` closes that gap and is enabled by default whenever
+`phoneLink.ap.uplink = "tunnel"`; set `phoneLink.apFailOpen.enable = false` only
+to run the hairpin unguarded. Every 5 s it checks:
+
+- `phone-tun.service` is active and its `phone-tun` device exists;
+- `inet phone_link_ap` still carries the client accept (an `ip saddr … accept`
+  rule, not just the chain's `policy accept`);
+- when the hairpin uses NAT, `ip phone_link_hairpin` still carries the scoped
+  `masquerade` for that client.
+
+If any check fails, it deletes `ip phone_link_hairpin` and replaces
+`inet phone_link_ap` with `ap.noForwardRules`, in one nft transaction: every
+packet entering from the AP is dropped again, so the phone's next connectivity
+probe fails and Android falls back to cellular. It is idempotent — an already
+open state does not touch nft — and an externally flushed hairpin takes the same
+path as a dead tunnel.
+
+Restore is deliberately slower than fail-open. After a restore the tunnel must
+stay healthy for `PHONE_AP_FAILOPEN_GRACE` seconds (15 by default) and at least
+`PHONE_AP_FAILOPEN_THROTTLE` seconds (30 by default) must have passed since the
+last change; a 5 s toggle therefore cannot flap the hairpin. The healthy rules
+are `ap.ruleset` (client accept, drop and scoped masquerade), the same text the
+AP forward unit loads. The state file is
+`/run/phone-link/ap-failopen.state` and holds the mode plus the healthy and
+change timestamps. It is read, never sourced, and a malformed file is treated as
+unknown.
+
+The watchdog's own contribution to recovery is one 5 s tick. The 60 s
+acceptance budget is that tick plus Android's revalidation and switch to
+cellular; #47 is where the live number is recorded. No watchdog action is needed
+for suspend or reboot: the AP disappears with the laptop, so the phone falls
+back naturally.
+
+The unit lives in the additive `modules/phone-link-failopen.nix`; the default
+flake module imports it, but it defines nothing unless `ap.uplink = "tunnel"`
+(or `apFailOpen.enable` is set explicitly).
 
 ## How the proxy gets out over cellular
 
