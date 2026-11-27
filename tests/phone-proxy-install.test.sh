@@ -11,52 +11,26 @@
 set -uo pipefail
 
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+ROOT=$(cd -- "$here/.." && pwd)
 SCRIPT=${SCRIPT:-$here/../bin/phone-proxy-install}
 [ -f "$SCRIPT" ] || {
   echo "no script at $SCRIPT" >&2
   exit 2
 }
 
-WORK=$(mktemp -d)
-trap 'rm -rf "$WORK"' EXIT
+. "$ROOT/tests/lib/harness.sh"
+tmpdir WORK
 export LOG="$WORK"
 mkdir -p "$WORK/stub" "$WORK/cache" "$WORK/home"
 
-# adb stub: one device, a successful install, a version, and a pull that
-# writes something.  ADB_STUB_ABSENT simulates a phone without the app.
-cat > "$WORK/stub/adb" <<'ADB'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >> "$LOG/adb.log"
-[ "${1:-}" = "devices" ] && { printf 'List of devices attached\nTESTPHONE\tdevice\n\n'; exit 0; }
-[ "${1:-}" = "-s" ] && shift 2
-case "${1:-}" in
-  install | install-multiple)
-    if [ "${ADB_STUB_BAD_SIG:-0}" = 1 ]; then
-      printf 'Performing Streamed Install\nFailure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: Package org.phonelink.proxy signatures do not match previously installed version; ignoring!]\n'
-      exit 1
-    fi
-    printf 'Performing Streamed Install\nSuccess\n'
-    ;;
-  uninstall) printf 'Success\n' ;;
-  shell)
-    case "$*" in
-      *"pm path"*) [ "${ADB_STUB_ABSENT:-0}" = 1 ] || printf 'package:/data/app/x/base.apk\r\n' ;;
-      *dumpsys*) [ "${ADB_STUB_ABSENT:-0}" = 1 ] || printf '        versionName=1.7.4\r\n' ;;
-    esac
-    ;;
-  pull)
-    mkdir -p "${3:-.}"
-    printf 'apkbytes' > "${3:-.}/$(basename "${2:-base.apk}")"
-    ;;
-esac
-exit 0
-ADB
+# adb stub: the common device/install/shell/dumpsys shape. ADB_STUB_ABSENT
+# simulates a phone without the app; ADB_STUB_BAD_SIG a different signing key.
+stub_adb "$WORK/stub"
 
 # curl stub: the F-Droid v1 API answers with two versions, the GitHub release API
 # with one APK and its checksum, and every other call is a download into
 # whatever -o names. CURL_STUB_BAD_SUM serves a checksum for other bytes.
-cat > "$WORK/stub/curl" <<'CURL'
-#!/usr/bin/env bash
+stub_cmd curl "$WORK/stub" <<'CURL'
 printf '%s\n' "$*" >> "$LOG/curl.log"
 release=http://example.invalid/releases/download/v0.5.0
 case "$*" in
@@ -85,12 +59,6 @@ case "$*" in
 esac
 exit 0
 CURL
-chmod 755 "$WORK/stub/adb" "$WORK/stub/curl"
-
-# Build sandboxes have no /usr/bin/env, so point the stubs at this bash.
-for stub in "$WORK/stub/adb" "$WORK/stub/curl"; do
-  sed -i "1s|.*|#!${BASH}|" "$stub"
-done
 
 # --fdroid is for the vendored app, which is the one a store still has. The
 # default package is the app's own repository, whose releases a bare install
@@ -105,11 +73,6 @@ run_absent() {
     PHONE_PROXY_PKG=com.tokyoxpa3.androidproxy \
     ADB_STUB_ABSENT=1 bash "$SCRIPT" "$@" 2>&1
 }
-
-pass=0
-fail=0
-ok() { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf 'FAIL %s%s\n' "$1" "${2:+ — $2}"; }
 
 expect_exit() {
   local name=$1 want=$2 out rc
@@ -353,5 +316,4 @@ if run --build --check >/dev/null 2>&1; then bad "--build --check exits 1"; else
   ok "--build --check exits 1"
 fi
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

@@ -6,27 +6,16 @@ set -u
 BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/lib/phone-ap-rejoin.sh
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+
+. "$ROOT/tests/lib/harness.sh"
+tmpdir TMP
 export LOG=$TMP/log STUBS=$TMP/bin
 mkdir -p "$LOG" "$STUBS" "$TMP/run/phone-link"
-
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
 PSK=psk-do-not-leak-42
 SSID=PhoneLink
 
-cat >"$STUBS/iw" <<'EOF'
-#!/usr/bin/env bash
+stub_cmd iw "$STUBS" <<'EOF'
 printf '%s\n' "$*" >>"$LOG/iw_calls"
 case "$*" in
   "dev "*" station dump")
@@ -39,8 +28,7 @@ case "$*" in
 esac
 EOF
 
-cat >"$STUBS/adb" <<'EOF'
-#!/usr/bin/env bash
+stub_cmd adb "$STUBS" <<'EOF'
 printf '%s\n' "$*" >>"$LOG/adb_calls"
 case "$*" in
   "-d get-state")
@@ -63,13 +51,9 @@ case "$*" in
 esac
 EOF
 
-cat >"$STUBS/sleep" <<'EOF'
-#!/usr/bin/env bash
+stub_cmd sleep "$STUBS" <<'EOF'
 exit 0
 EOF
-
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS"/*
-chmod +x "$STUBS"/*
 
 STATE=$TMP/run/phone-link/ap-rejoin.last
 : >"$LOG/output"
@@ -191,5 +175,4 @@ else
   ok "the PSK never appears on stdout/stderr"
 fi
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

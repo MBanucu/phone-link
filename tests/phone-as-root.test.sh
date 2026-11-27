@@ -6,39 +6,24 @@ set -u
 
 BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+
+. "$ROOT/tests/lib/harness.sh"
+tmpdir TMP
 export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
 mkdir -p "$LOG" "$STUBS" "$TMP/checkout/bin"
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
-
-cat >"$STUBS/id" <<'EOF'
-#!/usr/bin/env bash
+stub_cmd id "$STUBS" <<'EOF'
 printf '1000\n'
 EOF
-cat >"$STUBS/sudo" <<'EOF'
-#!/usr/bin/env bash
+stub_cmd sudo "$STUBS" <<'EOF'
 printf '%s\n' "$*" >>"$LOG/sudo"
 exit 0
 EOF
 # A decoy installed copy that PATH would prefer over the checkout.
-cat >"$STUBS/phone-ap-up" <<'EOF'
-#!/usr/bin/env bash
+stub_cmd phone-ap-up "$STUBS" <<'EOF'
 printf 'installed copy\n' >>"$LOG/ran"
 exit 0
 EOF
-chmod +x "$STUBS/id" "$STUBS/sudo" "$STUBS/phone-ap-up"
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/id" "$STUBS/sudo" "$STUBS/phone-ap-up"
 export PATH="$STUBS:$PATH"
 
 shim=$TMP/checkout/bin/phone-ap-up
@@ -63,5 +48,4 @@ esac
 [ -s "$LOG/ran" ] && bad "the PATH copy is not chosen" "$(cat "$LOG/ran")" \
   || ok "the PATH copy is not chosen"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish
