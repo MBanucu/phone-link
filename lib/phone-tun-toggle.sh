@@ -8,6 +8,15 @@
 # `systemctl start` on a running unit is a no-op, so a changed host needs a
 # restart.
 #
+# Android picks a new USB tether subnet on every boot, so a declared USB
+# fallback goes stale. After every declared host has failed, one tick gathers
+# gateways: the next hop of each default route and the peer address of a
+# point-to-point link (rndis/tether shows `peer x.x.x.x/32`). Those are
+# deduplicated against the declared list and the AP host, then probed on the
+# proxy port exactly like a declared host. The AP is a link, not an uplink, so
+# it is never probed through the tunnel. A normal router simply refuses the
+# proxy port, which costs one connection attempt.
+#
 # A changed host is confirmed on the next tick before the tunnel is restarted.
 # That keeps one failed probe (a half-open socket, one dropped packet) from
 # costing a reconnect and keeps a flapping probe from restarting the tunnel in
@@ -18,6 +27,10 @@
 # Values come from the environment so the module can bind them to its own
 # paths and a test can run the same script against a temporary tree:
 #   PHONE_TUN_HOSTS          hosts in preference order, space separated
+#   PHONE_TUN_AP_HOST        the AP host, never a gateway candidate (optional)
+#   PHONE_TUN_GATEWAYS       explicit gateway candidates, space separated;
+#                            set (even empty) replaces the route/address probe
+#   PHONE_TUN_IP             ip binary used to find gateways (default ip)
 #   PHONE_TUN_PORT_FILE      runtime port file (default /run/phone-link/proxy-port)
 #   PHONE_TUN_FALLBACK_PORT  port when the file is missing or invalid (default 1080)
 #   PHONE_TUN_HOST_FILE      selected host (default /run/phone-link/proxy-host)
@@ -42,6 +55,8 @@ runtime_dir=${PHONE_TUN_RUNTIME_DIR:-/run/phone-link}
 systemctl=${PHONE_TUN_SYSTEMCTL:-systemctl}
 unit=${PHONE_TUN_UNIT:-phone-tun.service}
 probe_timeout=${PHONE_TUN_PROBE_TIMEOUT:-3}
+ap_host=${PHONE_TUN_AP_HOST:-}
+ip_cmd=${PHONE_TUN_IP:-ip}
 
 # The port the panel chose, with the module's default when the file is absent
 # or does not hold a usable port (same rule as phone-link-runtime-port).
@@ -62,6 +77,36 @@ probe() {
   fi
 }
 
+# The gateways worth trying after the declared hosts. The override exists so a
+# test (or a one-off run) can name them without an `ip` command; with it set to
+# the empty string discovery is off. Otherwise the default routes and the peer
+# of every point-to-point link are read once per tick.
+gateway_candidates() {
+  if [ -n "${PHONE_TUN_GATEWAYS+x}" ]; then
+    # Word splitting is the point: the override is a plain host list.
+    # shellcheck disable=SC2086
+    printf '%s\n' $PHONE_TUN_GATEWAYS
+    return 0
+  fi
+  "$ip_cmd" route show default 2>/dev/null | awk '
+    {
+      for (i = 1; i < NF; i++)
+        if ($i == "via")
+          print $(i + 1)
+    }
+  '
+  "$ip_cmd" -4 addr show 2>/dev/null | awk '
+    {
+      for (i = 1; i < NF; i++)
+        if ($i == "peer") {
+          peer = $(i + 1)
+          sub(/\/.*/, "", peer)
+          print peer
+        }
+    }
+  '
+}
+
 selected=
 # Word splitting is the point: the module passes the list space separated so a
 # host can never be interpreted as shell syntax.
@@ -72,6 +117,24 @@ for candidate in $PHONE_TUN_HOSTS; do
     break
   fi
 done
+
+# Declared hosts first, gateways after them. The AP host and every declared
+# host are in `tried`, so a gateway that repeats one of them is never probed
+# twice; the AP is a link and must not be reached through the tunnel.
+if [ -z "$selected" ]; then
+  tried=" $ap_host $PHONE_TUN_HOSTS "
+  while IFS= read -r candidate; do
+    [ -n "$candidate" ] || continue
+    case " $tried " in
+      *" $candidate "*) continue ;;
+    esac
+    tried="$tried$candidate "
+    if probe "$candidate"; then
+      selected=$candidate
+      break
+    fi
+  done < <(gateway_candidates)
+fi
 
 # No host answers: stop the tunnel so traffic cannot stay blackholed, and
 # forget an unconfirmed change so it does not trigger a restart next time.

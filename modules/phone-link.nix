@@ -142,6 +142,7 @@ let
   # only binds the paths, the declared host order and the binaries.
   toggle = pkgs.writeShellScript "phone-tun-toggle" ''
     export PHONE_TUN_HOSTS=${lib.escapeShellArg (lib.concatStringsSep " " effectiveHosts)}
+    export PHONE_TUN_AP_HOST=${lib.escapeShellArg cfg.proxyHost}
     export PHONE_TUN_PORT_FILE=${lib.escapeShellArg portFile}
     export PHONE_TUN_FALLBACK_PORT=${toString cfg.proxyPort}
     export PHONE_TUN_HOST_FILE=${lib.escapeShellArg hostFile}
@@ -154,6 +155,7 @@ let
       lib.makeBinPath [
         pkgs.bash
         pkgs.coreutils
+        pkgs.iproute2
         pkgs.python3
       ]
     }
@@ -187,8 +189,11 @@ let
   relay = pkgs.writeShellScript "phone-socks-relay" ''
     port=$(${runtimePort} ${portFile} ${toString cfg.proxyPort})
     host=$(${pkgs.coreutils}/bin/cat ${hostFile} 2>/dev/null || true)
+    # The toggle writes a declared host or a gateway it discovered on the
+    # tether; anything else falls back to the configured primary.
     case "$host" in
-      ${lib.concatMapStringsSep "|" (h: lib.escapeShellArg h) effectiveHosts}) ;;
+      ''' | *[!0-9.]* | .* | *. | *..*) host=${lib.escapeShellArg cfg.proxyHost} ;;
+      *.*.*.*) ;;
       *) host=${lib.escapeShellArg cfg.proxyHost} ;;
     esac
     exec ${pkgs.gost}/bin/gost \
@@ -468,7 +473,11 @@ in
       description = ''
         Additional addresses tried in order after `proxyHost`; e.g. the USB
         tether address `10.23.190.38`.  The first one that answers becomes the
-        runtime host until the next probe finds another.
+        runtime host until the next probe finds another.  When none of the
+        declared addresses answers, the toggle also probes that boot's default
+        route gateways and point-to-point peers on the proxy port, so a USB
+        tether whose subnet changed needs no edit here; this list still pins
+        the addresses tried before discovery.
       '';
     };
 

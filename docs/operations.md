@@ -261,7 +261,11 @@ different phones are up.
 The address is also runtime state. `phoneLink.proxyHost` is the primary address
 and `phoneLink.proxyHosts` lists fallbacks tried in order after it. Every 5 s,
 `phone-tun-toggle` opens a TCP connection to each effective host (`proxyHost`,
-then `proxyHosts`, with duplicates removed) and records the first that answers in
+then `proxyHosts`, with duplicates removed) and, only when none of them
+answers, to gateways gathered once for that tick: the `ip route show default`
+next hops and the peer addresses of point-to-point links. Gateways are
+deduplicated against the declared hosts and the AP host, which is never probed
+through the tunnel. The first address that answers is recorded in
 `/run/phone-link/proxy-host`; `phone-tun`'s generated config reads that file, so
 the tunnel follows the path that is actually up without a rebuild. When the host
 the running tunnel dials is not the one the probe chose, the toggle restarts
@@ -284,10 +288,12 @@ phoneLink = {
 ```
 
 Swap the two values to keep the AP primary and use USB only as a fallback. The
-tether address is assigned per connection, so put the address the phone
-currently shows in `proxyHost`/`proxyHosts`; the runtime host file is what
-saves a rebuild when only the reachable path changes. The relay reads the same
-file and falls back to `phoneLink.proxyHost` when it is absent.
+tether address is assigned per connection, so a stale USB entry no longer has
+to be edited by hand: after the declared hosts fail, the toggle probes that
+boot's default-route gateway and any point-to-point peer. The runtime host file
+is what saves a rebuild when only the reachable path changes. The relay reads
+the same file and falls back to `phoneLink.proxyHost` when it is absent or does
+not hold an address.
 
 `proxyHosts` only chooses among addresses the phone answers on. The app still
 gates its listener on the configured SSID, so a USB address does not help while

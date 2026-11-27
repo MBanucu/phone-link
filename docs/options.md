@@ -24,7 +24,7 @@ they disagree. The fail-open options are declared in
 | `phoneLink.apFailOpen.grace` / `throttle` | `15` / `30` | healthy seconds before a restore / minimum seconds between restores |
 | `phoneLink.ap.dhcpRange` | `.10–.254` of the AP /24, 3600 s | DHCP range and lease time; the AP sends no router or DNS option unless `uplink = "tunnel"` |
 | `phoneLink.proxyHost` | `192.168.77.232` | primary address of the phone's SOCKS proxy |
-| `phoneLink.proxyHosts` | `[]` | additional addresses tried in order after `proxyHost`, e.g. the USB tether |
+| `phoneLink.proxyHosts` | `[]` | additional addresses tried in order after `proxyHost`, e.g. the USB tether; when none answers, default-route gateways and point-to-point peers are probed last |
 | `phoneLink.proxyPort` | `1080` | default SOCKS port; the port in use is `/run/phone-link/proxy-port` |
 | `phoneLink.proxyUser` | `proxy` | SOCKS username |
 | `phoneLink.secretsFile` | `/etc/nixos/phone-socks-secrets` | file with `PHONE_SOCKS_PASS=…` (and `PHONE_AP_PASS=…` with `ap.enable`) |

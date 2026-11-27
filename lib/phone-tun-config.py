@@ -7,16 +7,32 @@ from the root-only secrets file. Reading the template as JSON keeps the
 password off the command line and any character in it intact; the result is
 root-only.
 
+The host file may name a declared host or an IPv4 address the toggle discovered
+on a default route or point-to-point peer, so a fresh USB tether subnet needs
+no reconfiguration. Anything that is neither stays on the fallback host.
+
     phone-tun-config.py TEMPLATE TARGET PORT_FILE HOST_FILE \
         FALLBACK_HOST FALLBACK_PORT HOST...
 
 PHONE_SOCKS_PASS must be in the environment (the unit's EnvironmentFile).
 """
 
+import ipaddress
 import json
 import os
 import sys
 import tempfile
+
+
+def usable_host(host, hosts):
+    """A declared host, or a discovered IPv4 literal written by the toggle."""
+    if host in hosts:
+        return True
+    try:
+        ipaddress.IPv4Address(host)
+    except ValueError:
+        return False
+    return True
 
 
 def main(argv):
@@ -41,7 +57,7 @@ def main(argv):
             host = f.read().strip()
     except OSError:
         host = fallback_host
-    if host not in hosts:
+    if not usable_host(host, hosts):
         host = fallback_host
 
     password = os.environ["PHONE_SOCKS_PASS"]
