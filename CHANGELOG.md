@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `docs/phone-network.md` records the measurement behind the idle link's
+  100–200 ms tail: it is the phone's Wi-Fi power save, not loss or AP queueing.
+  With `wifi_power_save=120` the median is ~5–7 ms with 1–4 packets per 200 at
+  76–202 ms; with `0`, no packet of 600 exceeded 13 ms. The default is left
+  alone because the steadier RTT costs battery (#29).
+
 ## [0.17.0] - 2026-11-27
 
 ### Added
