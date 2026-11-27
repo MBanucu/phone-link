@@ -31,7 +31,7 @@
 # issue that owns it.  Do not replace a missing number with a plausible one.
 #
 # Environment overrides (no secret is ever written to the repository):
-#   PHONE_MEASURE_OUT              evidence directory
+#   PHONE_MEASURE_OUT              evidence directory (--out wins over it)
 #   PHONE_MEASURE_HTTPS_HOST       HTTPS/TCP target (default speed.cloudflare.com)
 #   PHONE_MEASURE_BYTES_URL       8 MB source (default plain HTTP from Cloudflare)
 #   PHONE_MEASURE_BYTES            expected body size (default 8388608)
@@ -202,6 +202,9 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+# --out wins over the environment; the environment wins over the timestamped
+# default.  This is also the path --dry-run reports.
+OUT=${OUT:-${PHONE_MEASURE_OUT:-}}
 SHARED=${SHARED:-1}
 case $MODE in before|after|auto) ;; *) die "--mode must be before, after or auto" ;; esac
 case $VIA in tunnel|socks) ;; *) die "--via must be tunnel or socks" ;; esac
@@ -257,6 +260,16 @@ stats() {
         NR, v[1], med, v[p], v[NR], sum / NR
     }
   '
+}
+
+# The phone's clock gives nanoseconds.  Keep that raw value (no lossy ms
+# rounding) and convert to Mbit/s in one place, so the same arithmetic is used
+# for the standalone phone download and the shared pair.
+mbps_from_ns() { # bytes nanoseconds -> Mbit/s
+  awk -v b="${1:-0}" -v ns="${2:-0}" 'BEGIN {
+    if (ns > 0) printf "%.2f", (b * 8 * 1000) / ns
+    else print "0"
+  }'
 }
 
 # --- proxy state parsing ----------------------------------------------------
@@ -444,7 +457,7 @@ prepare_out() {
   printf 'phase,via,url,i,code,time\n' >>"$OUT/laptop-soak-seq.csv"
   printf 'phase,via,url,i,code,time\n' >>"$OUT/laptop-soak-par.csv"
   printf 'phase,via,url,i,code,time,bytes,expected\n' >>"$OUT/laptop-download.csv"
-  printf 'phase,phone_bytes,phone_ms,phone_mbps,laptop_code,laptop_time,laptop_bytes,laptop_mbps\n' \
+  printf 'phase,phone_bytes,phone_ns,phone_mbps,laptop_code,laptop_time,laptop_bytes,laptop_mbps\n' \
     >>"$OUT/shared.csv"
   printf 'phase,start_ms,end_ms,delta_ms,ap_validated_after,default_after,timer_was_active\n' \
     >>"$OUT/fallback.csv"
@@ -543,10 +556,11 @@ phone_https_series() { # host samples, only when the phone has curl
 
 # Fetch the 8 MB body with the phone's nc.  A host FIFO keeps the phone's stdin
 # open until the server closes, so nc does not send FIN before the response;
-# nothing is written to the phone.
-phone_fetch_bytes() { # host port path timeout_s -> "bytes ms"
+# nothing is written to the phone.  The second field is the phone's own
+# nanosecond delta; mbps_from_ns is the only place it becomes a rate.
+phone_fetch_bytes() { # host port path timeout_s -> "bytes ns"
   local host=$1 port=$2 path=$3 timeout_s=$4
-  local fifo=$WORK/phone-in.$$ out=$WORK/phone-out.$$ pid n ms
+  local fifo=$WORK/phone-in.$$ out=$WORK/phone-out.$$ pid n ns
   rm -f "$fifo"
   mkfifo "$fifo" || return 1
   : >"$out"
@@ -562,15 +576,15 @@ phone_fetch_bytes() { # host port path timeout_s -> "bytes ms"
   wait "$pid" 2>/dev/null
   exec 9>&-
   rm -f "$fifo"
-  read -r n ms <"$out" || true
+  read -r n ns <"$out" || true
   rm -f "$out"
   case ${n:-} in '' | *[!0-9]*) return 1 ;; esac
-  case ${ms:-} in '' | *[!0-9]*) return 1 ;; esac
-  printf '%s %s\n' "$n" "$ms"
+  case ${ns:-} in '' | *[!0-9]*) return 1 ;; esac
+  printf '%s %s\n' "$n" "$ns"
 }
 
 measure_phone() {
-  local path=$1 target=$2 samples=$3 i value n ms mbps ok=1 out
+  local path=$1 target=$2 samples=$3 i value n ns mbps ok=1 out
   set_phase phone
   detect_network
   printf '%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
@@ -631,12 +645,12 @@ measure_phone() {
     for i in $(seq 1 "$PHONE_DOWNLOADS"); do
       if out=$(phone_fetch_bytes "$URL_HOST" "$URL_PORT" "$URL_PATH" 60); then
         n=${out%% *}
-        ms=${out#* }
-        mbps=$(awk -v b="$n" -v m="$ms" 'BEGIN { if (m > 0) printf "%.2f", (b * 8) / (m / 1000) / 1000000; else print "0" }')
+        ns=${out#* }
+        mbps=$(mbps_from_ns "$n" "$ns")
         ok=0
         [ "$n" = "$BYTES_EXPECTED" ] && ok=1
         printf '%s,%s,%s,%s,%s,%s,%s,%s,%s\n' "$path" "$PHASE" "$BYTES_URL" "$i" \
-          "$ok" "$n" "$BYTES_EXPECTED" "$ms" "$mbps" >>"$OUT/phone-download.csv"
+          "$ok" "$n" "$BYTES_EXPECTED" "$ns" "$mbps" >>"$OUT/phone-download.csv"
         record "phone_8mb_mbps_$i" "$mbps" measured "phone-download.csv ($path, $n/$BYTES_EXPECTED bytes)"
       else
         printf '%s,%s,%s,%s,0,0,%s,0,0\n' "$path" "$PHASE" "$BYTES_URL" "$i" \
@@ -885,14 +899,14 @@ measure_shared() {
   (
     if phone_fetch_bytes "$URL_HOST" "$URL_PORT" "$URL_PATH" 90 >"$WORK/shared-phone"; then
       n=$(awk '{ print $1 }' "$WORK/shared-phone")
-      ms=$(awk '{ print $2 }' "$WORK/shared-phone")
-      mbps=$(awk -v b="$n" -v m="$ms" 'BEGIN { if (m > 0) printf "%.2f", (b * 8) / (m / 1000) / 1000000; else print "0" }')
-      printf '%s %s %s\n' "$n" "$ms" "$mbps" >"$WORK/shared-phone.result"
+      ns=$(awk '{ print $2 }' "$WORK/shared-phone")
+      mbps=$(mbps_from_ns "$n" "$ns")
+      printf '%s %s %s\n' "$n" "$ns" "$mbps" >"$WORK/shared-phone.result"
     else
       printf '0 0 0\n' >"$WORK/shared-phone.result"
     fi
   ) &
-  local ppid=$! res code time n mbps pn=0 pms=0 pmbps=0
+  local ppid=$! res code time n mbps pn=0 pns=0 pmbps=0
   if res=$(curl_request "$BYTES_URL" download); then
     code=${res%% *}
     time=${res#* }
@@ -907,9 +921,9 @@ measure_shared() {
   fi
   wait "$ppid" 2>/dev/null || true
   if [ -s "$WORK/shared-phone.result" ]; then
-    read -r pn pms pmbps <"$WORK/shared-phone.result" || true
+    read -r pn pns pmbps <"$WORK/shared-phone.result" || true
   fi
-  printf '%s,%s,%s,%s,%s,%s,%s,%s\n' "$PHASE" "${pn:-0}" "${pms:-0}" \
+  printf '%s,%s,%s,%s,%s,%s,%s,%s\n' "$PHASE" "${pn:-0}" "${pns:-0}" \
     "${pmbps:-0}" "$code" "$time" "${n:-0}" "${mbps:-0}" >>"$OUT/shared.csv"
   if [ "${pn:-0}" = "$BYTES_EXPECTED" ]; then
     record "shared_phone_mbps" "${pmbps:-0}" measured "shared.csv"
@@ -1262,6 +1276,16 @@ self_test() {
 EOF
 )
   case $out in *'n=5'*'median=3.000'*'p95=5.000'*) ok "stats median and p95" ;; *) bad "stats median and p95 ($out)" ;; esac
+
+  got=$(mbps_from_ns 8388608 600751000)
+  [ "$got" = 111.71 ] && ok "mbps_from_ns 600751000 ns = 111.71 Mbps" \
+    || bad "mbps_from_ns 600751000 ns (got $got)"
+  got=$(mbps_from_ns 8388608 1255250692)
+  [ "$got" = 53.46 ] && ok "mbps_from_ns 1255250692 ns = 53.46 Mbps" \
+    || bad "mbps_from_ns 1255250692 ns (got $got)"
+  got=$(mbps_from_ns 0 0)
+  [ "$got" = 0 ] && ok "mbps_from_ns zero duration is not a rate" \
+    || bad "mbps_from_ns zero duration (got $got)"
 
   got=$(printf '%s\n' \
     '  running     port 1081 · ↓ 1.0 MB · ↑ 1.0 MB · 32 clients' \
