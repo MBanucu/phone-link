@@ -5,6 +5,9 @@ rules the work here has settled into, not a style guide.
 
 ## Where things are
 
+- `docs/architecture.md` — the start-here code map: the layers, the first file
+  to open for each task, the units each module option group creates, and what
+  the repo-root `result*` entries mean.
 - `TODO.md` — the wishlist: ideas from the user, in the order they are being
   built, one `##` section per wish with a paragraph that says what is wrong
   today and what "done" means. Delete a section once it is implemented and
