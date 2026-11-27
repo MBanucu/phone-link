@@ -51,6 +51,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`phoneLink.apFailOpen.enable`) and loads the merged `ap.ruleset` and
   `ap.noForwardRules`; set it to `false` to run the hairpin unguarded.
 
+### Fixed
+
+- The hairpin measurement harness reported the phone's 8 MB throughput as
+  `0.00 Mbps`: the phone's `date +%s%N` clock returns nanoseconds, but both
+  phone call sites divided the value as milliseconds. The nanosecond delta is
+  now kept raw and converted once by `mbps_from_ns`; `phone-download.csv` and
+  `shared.csv` name that column `phone_ns`, and the self-test pins the known
+  nanosecond cases.
+- `PHONE_MEASURE_OUT` was documented but ignored. It now sets the default
+  evidence directory, with `--out` still winning; `--dry-run` reports the
+  chosen path.
+
 ## [0.14.0] - 2026-11-26
 
 ### Added

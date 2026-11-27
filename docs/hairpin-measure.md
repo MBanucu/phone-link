@@ -155,7 +155,7 @@ At minimum, from the two evidence directories:
 | row | where it comes from |
 |---|---|
 | phone ICMP / TCP :443 median and p95, direct vs hairpin | `phone-latency.csv` |
-| phone 8 MB seconds and Mbit/s, exact body bytes | `phone-download.csv` |
+| phone 8 MB duration and Mbit/s, exact body bytes | `phone-download.csv` (`phone_ns` is the phone-clock duration; `mbps_from_ns` makes the rate) |
 | laptop sequential failures and p95 | `laptop-soak-seq.csv` |
 | laptop concurrency-40 failures and p95 | `laptop-soak-par.csv` |
 | laptop 5 x 8 MB sizes and Mbit/s | `laptop-download.csv` |
@@ -187,9 +187,10 @@ Acceptance from #47:
 - To roll the **feature** back, set `phoneLink.ap.uplink = "none"` (the default)
   in the NixOS configuration and `nixos-rebuild switch`, or boot the previous
   generation. The harness itself has nothing to undo.
-- Evidence is under `result-live/hairpin-*` and is gitignored. It contains no
-  secret; the proxy password, if `--via socks` is used, is read from
-  `PHONE_SECRETS` at run time only.
+- Evidence goes to `--out DIR`, else `PHONE_MEASURE_OUT`, else
+  `result-live/hairpin-<UTC>`; it is gitignored. It contains no secret; the
+  proxy password, if `--via socks` is used, is read from `PHONE_SECRETS` at run
+  time only.
 
 ## Options and environment
 
@@ -198,6 +199,7 @@ Acceptance from #47:
 
 | variable | default |
 |---|---|
+| `PHONE_MEASURE_OUT` | `result-live/hairpin-<UTC>`; `--out` wins over it |
 | `PHONE_MEASURE_HTTPS_HOST` | `speed.cloudflare.com` |
 | `PHONE_MEASURE_BYTES_URL` | `http://speed.cloudflare.com/__down?bytes=8388608` |
 | `PHONE_MEASURE_BYTES` | `8388608` |
