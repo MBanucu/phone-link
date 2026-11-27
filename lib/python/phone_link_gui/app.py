@@ -27,7 +27,7 @@ from phone_link import actions as registry
 
 from .log_window import RunWindow
 from .port_page import PortPage
-from .status_page import PROBLEM_FIXES, StatusPage
+from .status_page import AP_OFF_SUBTITLE, PROBLEM_FIXES, StatusPage
 
 APP_ID = "org.phonelink.Gui"
 # The doctor's findings get their own page, separate from the "status" action
@@ -515,11 +515,20 @@ class Window(Adw.ApplicationWindow):
         """Run phone-proxy-switch with a chosen target, from the port page."""
         return self._launch(registry.BY_ID["phone-proxy-switch"], check=False, args=args)
 
+    def start_ap_switch(self, on: bool) -> bool:
+        """Run the AP action behind the status page's switch; False if it cannot."""
+        action = registry.BY_ID["phone-ap-up" if on else "phone-ap-down"]
+        args = () if on else ("--client",)
+        return self._launch(action, check=False, args=args) is not None
+
     def _after_run(self, action, outcome) -> None:
         if action.id == "phone-proxy-switch":
             # The switch reports the port it landed on; the page re-reads it,
             # and the doctor's port check may now disagree with nothing.
             self._port.refresh()
+        if action.id in ("phone-ap-up", "phone-ap-down"):
+            # The radio is the real state, not what the switch asked for.
+            self._status.ap_action_finished()
         if outcome.cancelled:
             self._toasts.add_toast(Adw.Toast(title=f"{action.title}: stopped"))
         elif outcome.ok:
@@ -600,6 +609,39 @@ def selftest() -> int:
             if root_badge(registry.BY_ID["phone-net-status"]) is not None:
                 raise RuntimeError("a user action is marked as root")
             status = window._status
+            if status._ap_switch.get_title() != "PhoneLink access point":
+                raise RuntimeError("the AP switch is missing from the status page")
+            if not any(
+                variant.args == ("--client",)
+                for variant in registry.BY_ID["phone-ap-down"].variants
+            ):
+                raise RuntimeError("phone-ap-down has no --client variant")
+            launched = []
+
+            def capture_launch(action, *, check, args):
+                launched.append((action.id, args))
+                return object()
+
+            window._launch = capture_launch
+            window.start_ap_switch(False)
+            window.start_ap_switch(True)
+            if launched != [
+                ("phone-ap-down", ("--client",)),
+                ("phone-ap-up", ()),
+            ]:
+                raise RuntimeError(f"the AP switch planned the wrong runs: {launched}")
+            status._apply_ap(False, "")
+            if status._ap_switch.get_subtitle() != AP_OFF_SUBTITLE:
+                raise RuntimeError("the AP switch does not explain client mode")
+            status._apply_ap(True, "")
+            if not status._ap_switch.get_active():
+                raise RuntimeError("the AP switch does not show AP mode")
+            status._ap_switch.set_active(False)
+            if launched[-1] != ("phone-ap-down", ("--client",)):
+                raise RuntimeError("turning the switch off does not free the radio")
+            if status._ap_switch.get_sensitive():
+                raise RuntimeError("the AP switch is usable while the action runs")
+            status.ap_action_finished()
             if status._fix_button({"id": "ip_forward", "status": "fail"}) is None:
                 raise RuntimeError("a fixable failure has no Fix button")
             if status._fix_button({"id": "flake_update", "status": "fail"}) is not None:

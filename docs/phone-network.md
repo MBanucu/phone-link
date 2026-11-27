@@ -83,6 +83,28 @@ and an AP on different channels. In AP mode that is exactly the intended case â€
 the phone is the client and the laptop's uplink is `phone-tun` â€” so the AP owns
 the radio and needs no client link of its own.
 
+That also means the AP hides every other SSID from the laptop.
+`nmcli device wifi list` shows only PhoneLink while the AP is active, and
+`iw dev wlp110s0 scan` returns `Operation not supported (-95)`. To use normal
+Wi-Fi, stop the AP without joining the phone's hotspot:
+
+```sh
+sudo phone-ap-down --client
+```
+
+The default `phone-ap-down` still stops the AP and joins `PHONE_HOTSPOT_CON`
+(the phone's own hotspot), which is a different topology and still leaves no
+client link to another network. `--client` stops the AP and does not join
+anything, so NetworkManager can scan and join a normal network; joining one is
+then the system settings' job. The Status page's **PhoneLink access point**
+switch does the same pair: on runs `phone-ap-up`, off runs
+`phone-ap-down --client`.
+
+Client mode is temporary and writes no state. A reboot returns to the configured
+boot default (`phoneLink.ap.autoconnect`; `true` activates the AP at boot), and
+switching the AP back on with the switch or `phone-ap-up` is the explicit way
+back without a reboot.
+
 The default band, channel and width are in
 [operations](operations.md#the-ap-band).
 
