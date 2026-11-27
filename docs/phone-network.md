@@ -409,3 +409,19 @@ adb -s 10.244.108.165:5555 shell echo -> OK
   is already trusted, so `adb connect` needs no pairing. `adb tcpip 5555`
   restarts adbd and leaves wireless debugging on with a new random port, so both
   listeners work at once.
+
+## What the boot check can and cannot prove
+
+`phone-proxy-boot --check` and the doctor's `app_boot` read the same list from
+`dumpsys package`: the device-idle allowlist, `auto_start`, the fine/coarse and
+background location grants, `POST_NOTIFICATIONS` (only when the app targets
+API 33+), `RECEIVE_BOOT_COMPLETED`, `PARTIALLY_DIRECT_BOOT_AWARE` on the
+package, and a receiver for `LOCKED_BOOT_COMPLETED`. A missing grant is fixed
+by `phone-proxy-boot`; a missing manifest fact is reported as "reinstall the
+release", because adb cannot add it.
+
+None of that proves the boot. A reboot is the only test: leave the phone
+locked, wait, and check that the listener answers.
+`tests/live/hairpin-measure.sh --bootstrap` records that path; until it runs on
+a given install, "will come back after a reboot" means the inputs are present,
+not that the service was seen up before the first unlock.

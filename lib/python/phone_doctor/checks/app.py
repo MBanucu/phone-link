@@ -1,19 +1,22 @@
 """The app of our own: installed, and will it come back at boot?
 
-The app is the one whose boot restart depends on things outside
-itself — the device-idle allowlist and background location — so a phone that
-serves `200` today can still come up with no listener tomorrow. The check names
-exactly which of those facts is missing; `phone-proxy-boot` fixes them.
+The app is the one whose boot restart depends on things outside itself — the
+device-idle allowlist, the location grants, notifications, and a manifest that
+can start before the first unlock. A phone that serves `200` today can still
+come up with no listener tomorrow. The check names exactly which of those facts
+is missing; `phone-proxy-boot` fixes the ones adb can change, and the rest name
+the reinstall they need.
 """
 
 from __future__ import annotations
 
-import re
+from phone_link import boot
 
 from ..context import Context
 from ..model import Result, fail, ok, warn
 
 SECTION = "[app]"
+
 
 def _app(ctx: Context) -> str:
     """The app under test: PHONE_PROXY_PKG names another one (the test build)."""
@@ -35,41 +38,32 @@ def _installed(ctx: Context) -> bool:
     return any(line.startswith("package:") for line in text.splitlines())
 
 
-def _state_file(ctx: Context) -> dict[str, str]:
-    """The few facts the app keeps for when its service is not running.
-
-    It writes them on every change to its store, under its own external
-    directory, because a stopped service prints nothing for `dumpsys activity
-    service` — and a stopped service is what a broken phone looks like. No
-    credentials are in the file; it is the switches and the port.
-    """
-    path = f"/sdcard/Android/data/{_app(ctx)}/files/state.txt"
-    text = ctx.adb("shell", "cat", path)
-    facts: dict[str, str] = {}
-    for line in text.splitlines():
-        key, _, value = line.partition(" ")
-        if key.strip():
-            facts[key.strip()] = value.strip()
-    return facts
-
-
 def _auto_start(ctx: Context) -> str:
     """The app's stored auto_start: from the service, or from its state file."""
     text = ctx.adb("shell", "dumpsys", "activity", "service", _service(ctx))
-    match = re.search(r"auto-start\s+(true|false)", text)
-    if match:
-        return match.group(1)
-    return _state_file(ctx).get("auto_start", "")
+    state = ctx.adb(
+        "shell",
+        "cat",
+        f"/sdcard/Android/data/{_app(ctx)}/files/state.txt",
+    )
+    return boot.auto_start_state(text, state)
 
 
 def _whitelisted(ctx: Context) -> bool:
     return f",{_app(ctx)}," in ctx.adb("shell", "dumpsys", "deviceidle", "whitelist")
 
 
-def _background_location(ctx: Context) -> str:
-    text = ctx.adb("shell", "dumpsys", "package", _app(ctx))
-    match = re.search(r"ACCESS_BACKGROUND_LOCATION: granted=(true|false)", text)
-    return match.group(1) if match else ""
+def _ok_detail(dump: str, sdk: str) -> str:
+    facts = [
+        "auto_start on",
+        "allowlisted",
+        "fine+coarse location granted",
+        "background location granted",
+    ]
+    if boot.notifications_required(dump, sdk):
+        facts.append("notifications granted")
+    facts += ["boot_completed granted", "direct boot aware"]
+    return ", ".join(facts)
 
 
 def check(ctx: Context) -> list[Result]:
@@ -87,44 +81,27 @@ def check(ctx: Context) -> list[Result]:
 
     results: list[Result] = [ok("app_installed", "phone-link app", _app(ctx))]
 
+    dump = ctx.adb("shell", "dumpsys", "package", _app(ctx))
+    sdk = ctx.adb("shell", "getprop", "ro.build.version.sdk")
     auto_start = _auto_start(ctx)
-    whitelisted = _whitelisted(ctx)
-    background = _background_location(ctx)
-    unknown = not auto_start or not background
+    fixable, reinstall, unknown = boot.inspect(
+        dump,
+        sdk,
+        auto_start,
+        _whitelisted(ctx),
+    )
 
-    missing: list[str] = []
-    if auto_start == "false":
-        missing.append("auto_start is off")
-    if not whitelisted:
-        missing.append("not on the battery allowlist")
-    if background == "false":
-        missing.append("background location is not granted")
-
-    if missing:
-        results.append(
-            fail(
-                "app_boot",
-                "restarts at boot",
-                "; ".join(missing) + " (run phone-proxy-boot)",
-            )
-        )
+    if fixable or reinstall:
+        detail = "; ".join(fixable + reinstall)
+        if reinstall:
+            detail += " (reinstall the release)"
+        else:
+            detail += " (run phone-proxy-boot)"
+        results.append(fail("app_boot", "restarts at boot", detail))
     elif unknown:
         results.append(
-            warn(
-                "app_boot",
-                "restarts at boot",
-                "allowlist yes, but "
-                + ("auto_start could not be read (neither the service nor its "
-                   "state file answered)"
-                   if not auto_start else "background location could not be read"),
-            )
+            warn("app_boot", "restarts at boot", "allowlisted, but " + "; ".join(unknown))
         )
     else:
-        results.append(
-            ok(
-                "app_boot",
-                "restarts at boot",
-                "auto_start on, allowlisted, background location granted",
-            )
-        )
+        results.append(ok("app_boot", "restarts at boot", _ok_detail(dump, sdk)))
     return results

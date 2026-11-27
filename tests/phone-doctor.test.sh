@@ -209,7 +209,7 @@ fresh_state() {
   printf '200' >"$LOG/proxy_code"
   printf '200' >"$LOG/internet_code"
   printf 'nameserver 1.1.1.1\nnameserver 9.9.9.9\n' >"$LOG/resolv.conf"
-  printf '    versionCode=1 minSdk=26 targetSdk=34\n    versionName=0.1.0\n    ACCESS_BACKGROUND_LOCATION: granted=true\n' >"$LOG/dumpsys"
+  printf '    versionCode=1 minSdk=26 targetSdk=34\n    versionName=0.1.0\n    flags=[ HAS_CODE ]\n    privateFlags=[ PARTIALLY_DIRECT_BOOT_AWARE ]\n    android.permission.ACCESS_FINE_LOCATION: granted=true\n    android.permission.ACCESS_COARSE_LOCATION: granted=true\n    android.permission.ACCESS_BACKGROUND_LOCATION: granted=true\n    android.permission.POST_NOTIFICATIONS: granted=true\n    android.permission.RECEIVE_BOOT_COMPLETED: granted=true\nReceiver Resolver Table:\n  Non-Data Actions:\n      android.intent.action.LOCKED_BOOT_COMPLETED:\n        38b0d9 org.phonelink.proxy/.BootReceiver filter edb9a9e\n' >"$LOG/dumpsys"
   printf '      running     port 1080 · 0 clients\n      auto-start  true\n' >"$LOG/service_dump"
   printf 'auto_start true\nadb_wifi true\nport 1080\nssid PhoneLink\nany_network false\nin_use \n' \
     >"$LOG/app_state"
@@ -507,6 +507,77 @@ if run; then ok "no answer still exits 0"; else bad "no answer still exits 0" "$
 grep -q 'warn  restarts at boot.*state file answered' "$LOG/out" \
   && ok "says both places were asked" || bad "says both places were asked" "$(cat "$LOG/out")"
 
+# 12c. The ok names every input a pre-unlock boot needs, not just three.
+fresh_state
+if run; then ok "the full boot set passes"; else bad "the full boot set passes" "$(cat "$LOG/out")"; fi
+grep -q 'ok    restarts at boot.*auto_start on, allowlisted, fine+coarse location granted, background location granted, notifications granted, boot_completed granted, direct boot aware' "$LOG/out" \
+  && ok "names the whole pre-unlock boot set" \
+  || bad "names the whole pre-unlock boot set" "$(cat "$LOG/out")"
+
+# 12d. A declared-but-denied grant is named on its own and points at the fixer.
+for entry in \
+  'ACCESS_COARSE_LOCATION|coarse location is not granted' \
+  'ACCESS_FINE_LOCATION|fine location is not granted' \
+  'ACCESS_BACKGROUND_LOCATION|background location is not granted' \
+  'POST_NOTIFICATIONS|notifications are not granted'
+do
+  permission=${entry%%|*}
+  phrase=${entry#*|}
+  fresh_state
+  sed -i "s/android.permission.$permission: granted=true/android.permission.$permission: granted=false/" "$LOG/dumpsys"
+  if run; then bad "$permission denied exits 1"; else ok "$permission denied exits 1"; fi
+  grep -q "FAIL  restarts at boot.*$phrase" "$LOG/out" \
+    && ok "names the denied $permission" \
+    || bad "names the denied $permission" "$(cat "$LOG/out")"
+  grep -q 'run phone-proxy-boot' "$LOG/out" \
+    && ok "a denied $permission points at the fixer" \
+    || bad "a denied $permission points at the fixer" "$(cat "$LOG/out")"
+  grep -q 'reinstall the release' "$LOG/out" \
+    && bad "a denied $permission is not called a manifest fact" \
+    || ok "a denied $permission is not called a manifest fact"
+done
+
+# 12e. An undeclared permission is a manifest fact: only a reinstall fixes it.
+fresh_state
+sed -i '/android.permission.ACCESS_FINE_LOCATION: granted=true/d' "$LOG/dumpsys"
+if run; then bad "an undeclared grant exits 1"; else ok "an undeclared grant exits 1"; fi
+grep -q 'FAIL  restarts at boot.*the build does not declare fine location.*reinstall the release' "$LOG/out" \
+  && ok "an undeclared grant asks for a reinstall" \
+  || bad "an undeclared grant asks for a reinstall" "$(cat "$LOG/out")"
+
+# 12f. The boot permission, the direct-boot flag and the locked-boot receiver
+#      are each named, with the same reinstall hint.
+fresh_state
+sed -i '/android.permission.RECEIVE_BOOT_COMPLETED: granted=true/d' "$LOG/dumpsys"
+if run; then bad "no boot permission exits 1"; else ok "no boot permission exits 1"; fi
+grep -q 'FAIL  restarts at boot.*RECEIVE_BOOT_COMPLETED is not granted.*reinstall the release' "$LOG/out" \
+  && ok "names the missing boot permission" \
+  || bad "names the missing boot permission" "$(cat "$LOG/out")"
+
+fresh_state
+sed -i 's/ PARTIALLY_DIRECT_BOOT_AWARE//' "$LOG/dumpsys"
+if run; then bad "no direct-boot flag exits 1"; else ok "no direct-boot flag exits 1"; fi
+grep -q 'FAIL  restarts at boot.*this build is not direct-boot aware.*reinstall the release' "$LOG/out" \
+  && ok "names the missing direct-boot flag" \
+  || bad "names the missing direct-boot flag" "$(cat "$LOG/out")"
+
+fresh_state
+sed -i '/Receiver Resolver Table:/,$d' "$LOG/dumpsys"
+if run; then bad "no locked-boot receiver exits 1"; else ok "no locked-boot receiver exits 1"; fi
+grep -q 'FAIL  restarts at boot.*no receiver handles LOCKED_BOOT_COMPLETED.*reinstall the release' "$LOG/out" \
+  && ok "names the missing locked-boot receiver" \
+  || bad "names the missing locked-boot receiver" "$(cat "$LOG/out")"
+
+# 12g. Notifications are only required when the app targets API 33+.
+fresh_state
+sed -i 's/targetSdk=34/targetSdk=32/' "$LOG/dumpsys"
+sed -i '/android.permission.POST_NOTIFICATIONS: granted=true/d' "$LOG/dumpsys"
+if run; then ok "targetSdk 32 needs no notification grant"; else bad "targetSdk 32 needs no notification grant" "$(cat "$LOG/out")"; fi
+grep -q 'ok    restarts at boot.*notifications' "$LOG/out" \
+  && bad "does not name notifications when not required" \
+  || ok "does not name notifications when not required"
+
+
 # 13. An APK that is not there is a required failure, and the one named is the
 # one the repair would hand to adb.
 fresh_state
@@ -529,7 +600,7 @@ grep -q "ok    proxy version.*0.1.0 (1)" "$LOG/out" \
   && ok "reports the installed version" || bad "reports the installed version" \
   "$(cat "$LOG/out")"
 fresh_state
-printf '    versionCode=24 minSdk=26 targetSdk=34\n    versionName=1.7.4\n    ACCESS_BACKGROUND_LOCATION: granted=true\n' >"$LOG/dumpsys"
+printf '    versionCode=24 minSdk=26 targetSdk=34\n    versionName=1.7.4\n    flags=[ HAS_CODE ]\n    privateFlags=[ PARTIALLY_DIRECT_BOOT_AWARE ]\n    android.permission.ACCESS_FINE_LOCATION: granted=true\n    android.permission.ACCESS_COARSE_LOCATION: granted=true\n    android.permission.ACCESS_BACKGROUND_LOCATION: granted=true\n    android.permission.POST_NOTIFICATIONS: granted=true\n    android.permission.RECEIVE_BOOT_COMPLETED: granted=true\nReceiver Resolver Table:\n  Non-Data Actions:\n      android.intent.action.LOCKED_BOOT_COMPLETED:\n        38b0d9 org.phonelink.proxy/.BootReceiver filter edb9a9e\n' >"$LOG/dumpsys"
 if run; then ok "another version still exits 0"; else bad "another version still exits 0"; fi
 grep -q "ok    proxy version.*1.7.4 (24)" "$LOG/out" \
   && ok "reports it without comparing" || bad "reports it without comparing" \

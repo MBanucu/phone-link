@@ -405,10 +405,14 @@ sets how many SOCKS connections the listener may keep open at once (16..1024);
 left out, the app keeps its saved value, which is 256 on a fresh install.
 `--check` prints the ceiling the phone reports and only treats a different one
 as a failure when `--max-connections` was given. `phone-proxy-boot` adds
-the battery exemption and the fine/background location permissions that the
-boot start and the SSID read need. The app's foreground service is
-`specialUse`, not `location`: a `location` service type cannot start before the
-first unlock and is not needed for the SSID read.
+the battery exemption, grants the fine/coarse, background and notification
+permissions the boot start and the SSID read need, and checks the manifest
+facts the app cannot change from adb: the direct-boot flag and a receiver for
+`LOCKED_BOOT_COMPLETED`. A missing manifest fact is reported as
+"reinstall the release"; the check never claims more than that, because only a
+reboot without unlocking proves the listener comes up. The app's foreground
+service is `specialUse`, not `location`: a `location` service type cannot start
+before the first unlock and is not needed for the SSID read.
 
 ## Uninstall
 
