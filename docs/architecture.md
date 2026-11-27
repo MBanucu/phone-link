@@ -37,7 +37,7 @@ flake.nix  →  modules/*.nix  →  lib/python/* + lib/*.sh  →  bin/*  →  te
 | Change the hairpin or fail-open | `modules/phone-link.nix` (`ap.uplink`, the `ap.*Rules` values); `modules/phone-link-failopen.nix` + `lib/phone-ap-failopen.sh` for the watchdog | `nix build .#checks.x86_64-linux.module` and `bash tests/phone-ap-failopen.test.sh` |
 | Change or add a command | `lib/python/phone_link/commands/<group>.py`, then its entry in `commands/__init__.py` and `actions.py`; the matching `bin/<name>` is only the shim. Full recipe in [commands](commands.md) | `bash tests/<name>.test.sh`, plus `nix build .#checks.x86_64-linux.registry` |
 | Change a module option | `modules/phone-link.nix`; document it in the [options table](options.md) | `nix build .#checks.x86_64-linux.module` |
-| Add or change a test | `tests/<name>.test.sh` | `bash tests/<name>.test.sh`; all suites: `nix build .#checks.x86_64-linux.script` |
+| Add or change a test | `tests/<name>.test.sh` | `bash tests/<name>.test.sh`; then `bash tests/check.sh fast` for the cheap set |
 | Change the GUI | `lib/python/phone_link_gui/app.py` (pages beside it); argv still comes from `lib/python/phone_link/actions.py` | `nix build .#checks.x86_64-linux.gui` and `.#checks.x86_64-linux.gui-registry` |
 | Change the proxy install | `lib/python/phone_link/commands/phone.py` (`phone_proxy_install`); the app itself is `MBanucu/phone-link-proxy` | `bash tests/phone-proxy-install.test.sh` |
 
