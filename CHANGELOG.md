@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commit, and ignores newer commits on the checkout's `main`; a moved tag is
   reported as a disagreement, and a branch input still gets the existing
   update warning when the branch has moved (#90).
+- The GUI's "PhoneLink access point" switch re-probes the radio when the
+  status page is refreshed, when the window is mapped, and when it regains
+  focus, so an AP brought up from a terminal no longer leaves the switch
+  showing off (#97).
 
 ## [0.18.0] - 2026-11-27
 

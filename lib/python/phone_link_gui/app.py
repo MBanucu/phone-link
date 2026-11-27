@@ -275,6 +275,7 @@ class Window(Adw.ApplicationWindow):
         self._list.connect("row-selected", self._on_row_selected)
         self._list.select_row(self._list.get_row_at_index(0))
         self.connect("map", self._on_map)
+        self.connect("notify::is-active", self._on_active)
 
     # -- layout --------------------------------------------------------
     def _sidebar_page(self) -> Adw.NavigationPage:
@@ -371,8 +372,13 @@ class Window(Adw.ApplicationWindow):
         self.show_page(PAGES[index][0])
 
     def _on_map(self, _window) -> None:
+        self._status.refresh_ap()
         if self._autostart:
             self._status.refresh()
+
+    def _on_active(self, window, _pspec) -> None:
+        if window.get_property("is-active"):
+            self._status.refresh_ap()
 
     def refresh_status(self) -> None:
         if self._search_bar.get_search_mode():
@@ -642,6 +648,18 @@ def selftest() -> int:
             if status._ap_switch.get_sensitive():
                 raise RuntimeError("the AP switch is usable while the action runs")
             status.ap_action_finished()
+            calls = []
+            status.refresh_ap = lambda: calls.append("ap")
+            status._probe = lambda escalate: None
+            status._busy = False
+            status.refresh()
+            if "ap" not in calls:
+                raise RuntimeError("refresh() does not re-probe the AP")
+            status._busy = False
+            calls.clear()
+            window._on_map(None)
+            if "ap" not in calls:
+                raise RuntimeError("_on_map() does not re-probe the AP")
             if status._fix_button({"id": "ip_forward", "status": "fail"}) is None:
                 raise RuntimeError("a fixable failure has no Fix button")
             if status._fix_button({"id": "flake_update", "status": "fail"}) is not None:
