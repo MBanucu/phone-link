@@ -321,6 +321,25 @@
               };
             }
           ];
+          # Opt-in hairpin: the one client is accepted, masqueraded into the
+          # tunnel, and gets a router and DNS option from DHCP.  The default
+          # stays link-only.
+          apHairpin = evalModule [
+            {
+              networking.networkmanager.enable = true;
+              phoneLink = {
+                enable = true;
+                ap = {
+                  enable = true;
+                  ssid = "TestLink";
+                  address = "192.168.99.1/24";
+                  uplink = "tunnel";
+                  forwardClient = "192.168.77.232";
+                  uplinkDns = "9.9.9.9";
+                };
+              };
+            }
+          ];
           relayOn = evalModule [
             {
               phoneLink = {
@@ -571,6 +590,63 @@
               apNoFirewall.systemd.services ? phone-link-ap-noforward
             ) "the AP forward drop must not depend on networking.firewall.enable";
             assert lib.assertMsg (
+              apOn.phoneLink.ap.uplink == "none"
+            ) "the AP must stay link-only unless uplink is set";
+            assert lib.assertMsg (
+              apOn.phoneLink.ap.forwardClient == apOn.phoneLink.proxyHost
+            ) "forwardClient must default to the proxy host";
+            assert lib.assertMsg (
+              apOn.phoneLink.ap.forwardRules == apOn.phoneLink.ap.noForwardRules
+            ) "uplink = none must keep the plain forward drop";
+            assert lib.assertMsg (
+              apOn.phoneLink.ap.hairpinRules == ""
+            ) "uplink = none must not masquerade anything";
+            assert lib.assertMsg (
+              !(lib.hasInfix "ip saddr" apOn.phoneLink.ap.forwardRules)
+            ) "uplink = none must not accept any AP client";
+            assert lib.assertMsg (
+              !(lib.hasInfix "phone_link_hairpin" apOn.phoneLink.ap.ruleset)
+            ) "uplink = none must not install the hairpin table";
+            assert lib.assertMsg
+              (lib.hasInfix ''iifname "wlp110s0" ip saddr 192.168.77.232 accept'' apHairpin.phoneLink.ap.forwardRules)
+              "uplink = tunnel must accept the configured client";
+            assert lib.assertMsg (lib.hasInfix ''iifname "wlp110s0" drop'' apHairpin.phoneLink.ap.forwardRules)
+              "uplink = tunnel must keep dropping every other AP client";
+            assert lib.assertMsg (
+              builtins.match ".*accept.*drop.*" (
+                lib.replaceStrings [ "\n" ] [ " " ] apHairpin.phoneLink.ap.forwardRules
+              ) != null
+            ) "the accept must come before the drop";
+            assert lib.assertMsg
+              (lib.hasInfix "table ip phone_link_hairpin" apHairpin.phoneLink.ap.hairpinRules)
+              "uplink = tunnel must install a separate nat table";
+            assert lib.assertMsg
+              (lib.hasInfix ''oifname "phone-tun" ip saddr 192.168.77.232 masquerade'' apHairpin.phoneLink.ap.hairpinRules)
+              "the masquerade must be scoped to the client and the tunnel";
+            assert lib.assertMsg (
+              !(lib.hasInfix "192.168.99.0/24" apHairpin.phoneLink.ap.hairpinRules)
+            ) "the masquerade must not be a general AP NAT";
+            assert lib.assertMsg
+              (lib.hasInfix "--dhcp-option=option:router,192.168.99.1" apHairpin.systemd.services.phone-link-ap-dhcp.serviceConfig.ExecStart)
+              "uplink = tunnel must send the AP address as the router";
+            assert lib.assertMsg
+              (lib.hasInfix "--dhcp-option=option:dns-server,9.9.9.9" apHairpin.systemd.services.phone-link-ap-dhcp.serviceConfig.ExecStart)
+              "uplink = tunnel must send uplinkDns as the resolver";
+            assert lib.assertMsg (
+              !(lib.hasInfix "--dhcp-option=option:router," apOn.systemd.services.phone-link-ap-dhcp.serviceConfig.ExecStart)
+            ) "uplink = none must not send a router value";
+            assert lib.assertMsg (
+              !(lib.hasInfix "--dhcp-option=option:dns-server," apOn.systemd.services.phone-link-ap-dhcp.serviceConfig.ExecStart)
+            ) "uplink = none must not send a resolver value";
+            assert lib.assertMsg (apHairpin.boot.kernel.sysctl."net.ipv4.ip_forward"
+            ) "uplink = tunnel must enable forwarding";
+            assert lib.assertMsg (
+              !(apOn.boot.kernel.sysctl ? "net.ipv4.ip_forward")
+            ) "uplink = none must not change ip_forward";
+            assert lib.assertMsg (
+              apHairpin.networking.firewall.extraForwardRules == ""
+            ) "the hairpin must not add NixOS firewall forward rules";
+            assert lib.assertMsg (
               !(on.systemd.services ? phone-link-ap-dhcp)
             ) "the AP DHCP server must be opt-in";
             assert lib.assertMsg (
@@ -648,6 +724,23 @@
               grep -qF 'PHONE_AP_SSID=TestLink' "$rejoin"
               grep -qF 'PHONE_AP_REJOIN_STATE=/run/phone-link/ap-rejoin.last' "$rejoin"
               grep -qF 'android-tools' "$rejoin"
+              # The hairpin ruleset is exactly what the unit loads: the accept
+              # comes before the drop, and the NAT is a separate scoped table.
+              hairpin=${pkgs.writeText "phone-link-ap-hairpin.nft" apHairpin.phoneLink.ap.ruleset}
+              grep -qF 'iifname "wlp110s0" ip saddr 192.168.77.232 accept' "$hairpin"
+              grep -qF 'iifname "wlp110s0" drop' "$hairpin"
+              grep -qF 'table ip phone_link_hairpin' "$hairpin"
+              grep -qF 'oifname "phone-tun" ip saddr 192.168.77.232 masquerade' "$hairpin"
+              accept_line=$(grep -nF 'ip saddr 192.168.77.232 accept' "$hairpin" | cut -d: -f1)
+              drop_line=$(grep -nF 'iifname "wlp110s0" drop' "$hairpin" | cut -d: -f1)
+              test -n "$accept_line" -a -n "$drop_line" -a "$accept_line" -lt "$drop_line"
+              # DNS needs no ip rule: rule 9001 already sends the forwarded
+              # packet into table 2022/phone-tun (measured with
+              # `ip route get 1.1.1.1 from 192.168.77.232 iif wlp110s0`), and
+              # sing-box's hijack-dns answers port 53 there.  The DHCP DNS
+              # option and the hijack are the whole DNS path.
+              grep -q '"action": "hijack-dns"' ${tunnelConfig}
+              grep -q '"type": "https"' ${tunnelConfig}
               touch $out
             '';
 

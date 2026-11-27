@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `phoneLink.ap.uplink = "tunnel"` hairpins the one AP client in
+  `phoneLink.ap.forwardClient` (default `phoneLink.proxyHost`) through
+  `phone-tun`, so Android can validate the AP instead of dropping a link-only
+  network. The AP had no uplink at all: `inet phone_link_ap` dropped every
+  forwarded packet and the DHCP server sent neither a router nor a DNS option.
+  The new mode keeps the drop for every other source, adds a scoped
+  `ip phone_link_hairpin` masquerade only for that client and only out of
+  `phone-tun`, advertises the AP address and `phoneLink.ap.uplinkDns`
+  (default `1.1.1.1`) over DHCP, and enables `net.ipv4.ip_forward` as a
+  `mkDefault`. DNS needs no new ip rule: rule 9001 already routes the forwarded
+  port-53 packet into table 2022, where sing-box's `hijack-dns` answers it
+  through the proxy, so no UDP crosses the TCP-only SOCKS upstream (#43, #44).
+  The default `"none"` still installs the plain drop with no accept, no
+  masquerade and no router/DNS option.
 - `phone-link-ap-rejoin` re-asserts the phone's association with the link-only
   AP after the AP restarts. Android validates the AP as "no internet" and
   temporarily disables auto-join for the saved network; with no USB the phone

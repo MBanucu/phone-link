@@ -205,9 +205,21 @@ let
   # no router and no DNS option.  Forwarded traffic from the AP is dropped in
   # its own nftables table, so the rule also holds when the NixOS firewall is
   # disabled and does not depend on its backend.
-  apSubnet = lib.concatStringsSep "." (
-    lib.take 3 (lib.splitString "." (lib.head (lib.splitString "/" cfg.ap.address)))
-  );
+  #
+  # `ap.uplink = "tunnel"` is the opt-in exception: one configured client is
+  # accepted into the forward hook and its traffic is routed into phone-tun by
+  # the ip rules sing-box already installed, then masqueraded to the TUN
+  # address.  The drop stays after the accept, so every other AP client is
+  # still cut off.  No ip rule is added for DNS: on the live system
+  # `ip route get 1.1.1.1 from 192.168.77.232 iif wlp110s0` already resolves to
+  # `via 172.19.0.2 dev phone-tun table 2022`, because rule 9001
+  # (`not from all iif lo lookup 2022`) comes before the dport-53-to-main rule.
+  # The forwarded DNS packet therefore enters the TUN and sing-box's existing
+  # `{"protocol": "dns", "action": "hijack-dns"}` answers it through the
+  # remote DoH server; the proxy never sees UDP.  No NixOS firewall rule is
+  # added either: the only forward drop in this setup is the table below.
+  apAddress = lib.head (lib.splitString "/" cfg.ap.address);
+  apSubnet = lib.concatStringsSep "." (lib.take 3 (lib.splitString "." apAddress));
   apNoForwardRules = ''
     table inet phone_link_ap {
       chain forward {
@@ -216,8 +228,36 @@ let
       }
     }
   '';
+  apForwardRules =
+    if cfg.ap.uplink == "tunnel" then
+      ''
+        table inet phone_link_ap {
+          chain forward {
+            type filter hook forward priority -10; policy accept;
+            iifname "${cfg.apInterface}" ip saddr ${cfg.ap.forwardClient} accept
+            iifname "${cfg.apInterface}" drop
+          }
+        }
+      ''
+    else
+      apNoForwardRules;
+  # A separate nat table, so stopping the AP or the fail-open path removes the
+  # masquerade without touching a table someone else owns.  Only the one client
+  # is translated, and only on the way out of the TUN: the tunnel's own socket
+  # to the proxy leaves through the AP interface (192.168.0.0/16 is in the
+  # sing-box route_exclude_address list) and must not be NATed here.
+  apHairpinRules = lib.optionalString (cfg.ap.uplink == "tunnel") ''
+    table ip phone_link_hairpin {
+      chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
+        oifname "${cfg.interfaceName}" ip saddr ${cfg.ap.forwardClient} masquerade
+      }
+    }
+  '';
+  apRuleset = apForwardRules + apHairpinRules;
   apNoForwardStop = pkgs.writeShellScript "phone-link-ap-noforward-stop" ''
     ${pkgs.nftables}/bin/nft delete table inet phone_link_ap 2>/dev/null || true
+    ${pkgs.nftables}/bin/nft delete table ip phone_link_hairpin 2>/dev/null || true
   '';
 in
 {
@@ -314,13 +354,58 @@ in
         description = "IPv4 address of the AP interface.";
       };
 
+      uplink = lib.mkOption {
+        type = lib.types.enum [
+          "none"
+          "tunnel"
+        ];
+        default = "none";
+        description = ''
+          Whether the AP may carry its client's traffic.  `"none"` keeps the
+          AP a link only: forwarded traffic entering the AP interface is
+          dropped, the DHCP server sends no router or DNS option, and Android
+          keeps mobile data as its default network.  `"tunnel"` hairpins the
+          one client in `forwardClient` through `phone-tun`, so the phone can
+          validate the AP and reach the internet over the tunnel instead of
+          looping it back over the same link.  Every other AP client stays
+          dropped.  The tunnel must be up: while it is down the accepted
+          client's traffic is no longer routed into `phone-tun`, and the
+          fail-open watchdog in #46 is what restores the plain drop for that
+          state.
+        '';
+      };
+
+      forwardClient = lib.mkOption {
+        type = lib.types.str;
+        default = cfg.proxyHost;
+        description = ''
+          The single AP client allowed through when `uplink = "tunnel"`.
+          Defaults to `proxyHost`, which is the phone on the AP.  It is the
+          source address in both the forward accept and the masquerade; every
+          other source entering the AP interface is dropped.
+        '';
+      };
+
+      uplinkDns = lib.mkOption {
+        type = lib.types.str;
+        default = "1.1.1.1";
+        description = ''
+          DNS server advertised to the AP client when `uplink = "tunnel"`.
+          The address only has to enter the tunnel: sing-box's `hijack-dns`
+          answers it through the proxy's DoH server, so the proxy never has to
+          carry UDP.  Ignored when `uplink = "none"`.
+        '';
+      };
+
       dhcpRange = lib.mkOption {
         type = lib.types.str;
         default = "${apSubnet}.10,${apSubnet}.254,3600";
         description = ''
           dnsmasq DHCP range and lease time, as `start,end,lease`.  The default
-          is .10–.254 in the /24 of `address`, for one hour.  This is DHCP only:
-          the AP sends no router or DNS option.
+          is .10–.254 in the /24 of `address`, for one hour.  With
+          `uplink = "none"` this is DHCP only: the AP sends no router or DNS
+          option.  With `uplink = "tunnel"` it sends the AP address as the
+          router and `uplinkDns` as the resolver.
         '';
       };
 
@@ -332,6 +417,41 @@ in
         description = ''
           nftables rules that drop forwarded traffic entering from the AP
           interface, so the AP cannot become the phone's internet uplink.
+          Unchanged by `uplink = "tunnel"`; the effective rules are in
+          `forwardRules`.
+        '';
+      };
+
+      forwardRules = lib.mkOption {
+        type = lib.types.lines;
+        internal = true;
+        readOnly = true;
+        default = apForwardRules;
+        description = ''
+          The effective `inet phone_link_ap` forward rules: the plain drop, or
+          the one-client accept followed by the drop when `uplink = "tunnel"`.
+        '';
+      };
+
+      hairpinRules = lib.mkOption {
+        type = lib.types.lines;
+        internal = true;
+        readOnly = true;
+        default = apHairpinRules;
+        description = ''
+          The scoped `ip phone_link_hairpin` masquerade when
+          `uplink = "tunnel"`, otherwise empty.
+        '';
+      };
+
+      ruleset = lib.mkOption {
+        type = lib.types.lines;
+        internal = true;
+        readOnly = true;
+        default = apRuleset;
+        description = ''
+          Both nftables tables as one ruleset, exactly what the AP's forward
+          unit loads.  Read-only, so checks can render the same file.
         '';
       };
     };
@@ -484,6 +604,14 @@ in
           assertion = !cfg.ap.enable || cfg.ap.band != "bg" || cfg.ap.channelWidth <= 40;
           message = "phoneLink.ap.channelWidth must be 0, 20 or 40 when phoneLink.ap.band is bg";
         }
+        {
+          assertion = cfg.ap.uplink == "none" || cfg.ap.enable;
+          message = "phoneLink.ap.uplink = \"tunnel\" requires phoneLink.ap.enable = true";
+        }
+        {
+          assertion = cfg.ap.uplink == "none" || cfg.ap.forwardClient != "";
+          message = "phoneLink.ap.uplink = \"tunnel\" needs a forwardClient (defaults to proxyHost)";
+        }
       ];
     }
     (lib.mkIf cfg.enable (
@@ -579,8 +707,13 @@ in
           # also sent a router and DNS option and installed NAT.  It reads the
           # same root-only drop-in directory NetworkManager used, so a
           # `dhcp-host` reservation there keeps the phone's address.
+          #
+          # The link-only AP sends neither option.  In the hairpin mode the
+          # client needs both: the AP address as its default route, and a
+          # resolver address that only has to enter the tunnel (sing-box
+          # hijacks port 53 there).  The phone has no default route otherwise.
           systemd.services.phone-link-ap-dhcp = {
-            description = "DHCP for the PhoneLink access point (no uplink)";
+            description = "DHCP for the PhoneLink access point";
             wantedBy = [ "multi-user.target" ];
             after = [ "network.target" ];
             serviceConfig = {
@@ -595,8 +728,10 @@ in
                 "--port=0"
                 "--dhcp-range=${cfg.ap.dhcpRange}"
                 "--dhcp-leasefile=/var/lib/phone-link/dnsmasq-${cfg.apInterface}.leases"
-                "--dhcp-option=option:router"
-                "--dhcp-option=option:dns-server"
+                "--dhcp-option=option:router${lib.optionalString (cfg.ap.uplink == "tunnel") ",${apAddress}"}"
+                "--dhcp-option=option:dns-server${
+                  lib.optionalString (cfg.ap.uplink == "tunnel") ",${cfg.ap.uplinkDns}"
+                }"
                 "--conf-dir=/etc/NetworkManager/dnsmasq-shared.d"
               ];
               StateDirectory = "phone-link";
@@ -607,20 +742,28 @@ in
 
           # The AP's own nftables table, not `firewall.extraForwardRules`:
           # that option only exists while the NixOS firewall is enabled, and
-          # this drop has to hold either way.  priority -10 runs before the
+          # this policy has to hold either way.  priority -10 runs before the
           # filter chains, including the accept rule NetworkManager installs
-          # for a shared connection.
+          # for a shared connection.  With `uplink = "tunnel"` the same file
+          # also carries the scoped postrouting masquerade; there is no NixOS
+          # firewall rule, because the only forward drop here is this table.
           systemd.services.phone-link-ap-noforward = {
-            description = "Drop forwarded traffic from the PhoneLink access point";
+            description = "Apply the PhoneLink access point forward policy";
             wantedBy = [ "multi-user.target" ];
             after = [ "network.target" ];
             serviceConfig = {
               Type = "oneshot";
               RemainAfterExit = true;
-              ExecStart = "${pkgs.nftables}/bin/nft -f ${pkgs.writeText "phone-link-ap-noforward.nft" apNoForwardRules}";
+              ExecStart = "${pkgs.nftables}/bin/nft -f ${pkgs.writeText "phone-link-ap.nft" cfg.ap.ruleset}";
               ExecStop = apNoForwardStop;
             };
           };
+
+          # Forwarding must be on for the hairpin; keep the declarative default
+          # while still letting the host's own sysctl setting win.
+          boot.kernel.sysctl."net.ipv4.ip_forward" = lib.mkIf (cfg.ap.uplink == "tunnel") (
+            lib.mkDefault true
+          );
 
           # Remove a persistent profile left by phone-ap-create, so enabling
           # phoneLink.ap does not leave two profiles with the same name.

@@ -73,7 +73,10 @@ stopped proxy app cannot blackhole traffic.
 | `phoneLink.ap.ssid` | `PhoneLink` | SSID of the laptop access point |
 | `phoneLink.ap.band` / `channel` / `channelWidth` | `a` / `149` / `80` | 802.11 band, channel and AP channel width (5 GHz, non-DFS) |
 | `phoneLink.ap.address` | `192.168.77.1/24` | IPv4 address of the AP interface |
-| `phoneLink.ap.dhcpRange` | `.10–.254` of the AP /24, 3600 s | DHCP range and lease time; the AP sends no router or DNS option |
+| `phoneLink.ap.uplink` | `none` | `none` keeps the AP link-only; `tunnel` hairpins one client through `phone-tun` so the AP can validate |
+| `phoneLink.ap.forwardClient` | `phoneLink.proxyHost` | the one AP client accepted when `uplink = "tunnel"`; every other source stays dropped |
+| `phoneLink.ap.uplinkDns` | `1.1.1.1` | DNS advertised to that client when `uplink = "tunnel"`; it is answered by the tunnel, not UDP-over-SOCKS |
+| `phoneLink.ap.dhcpRange` | `.10–.254` of the AP /24, 3600 s | DHCP range and lease time; the AP sends no router or DNS option unless `uplink = "tunnel"` |
 | `phoneLink.proxyHost` | `192.168.77.232` | primary address of the phone's SOCKS proxy |
 | `phoneLink.proxyHosts` | `[]` | additional addresses tried in order after `proxyHost`, e.g. the USB tether |
 | `phoneLink.proxyPort` | `1080` | default SOCKS port; the port in use is `/run/phone-link/proxy-port` |
@@ -113,6 +116,79 @@ domain marks 36/44 `no IR`. `channelWidth = 0` lets NetworkManager choose the
 width (NetworkManager 1.50+ supports the setting; 2.4 GHz is capped at 40 MHz).
 The hand-made profile from `phone-ap-create` uses the same band, channel and
 width.
+
+### Hairpin uplink: `ap.uplink = "tunnel"`
+
+The link-only AP is the default, but Android then never validates it and this
+phone drops the association (#11). `ap.uplink = "tunnel"` makes one client — the
+phone — a real uplink without making the AP a general router:
+
+```nix
+phoneLink.ap = {
+  enable = true;
+  uplink = "tunnel";
+  # forwardClient = "192.168.77.232";  # default: phoneLink.proxyHost
+  # uplinkDns = "1.1.1.1";
+};
+```
+
+The packet path is short and entirely on the laptop:
+
+1. The phone sends to its new default route, `192.168.77.1`, with source
+   `192.168.77.232`. The forwarded packet enters `wlp110s0`.
+2. `inet phone_link_ap` (priority -10) matches
+   `iifname "wlp110s0" ip saddr 192.168.77.232 accept` and lets it through; the
+   `iifname "wlp110s0" drop` behind it still cuts off every other AP client.
+3. The `ip rule` set sing-box installed sends it to table 2022, so it leaves
+   through `phone-tun` (`via 172.19.0.2`) instead of the laptop's own uplink.
+4. `ip phone_link_hairpin` postrouting masquerades exactly
+   `oifname "phone-tun" ip saddr 192.168.77.232` to the TUN address, so
+   sing-box's gvisor stack sees `172.19.0.1` and conntrack can reverse it on the
+   way back.
+5. The tunnel's SOCKS connection to `192.168.77.232:<phoneLink.proxyPort>`
+   (1080 by default) stays on the main table (`192.168.0.0/16` is in the
+   sing-box `route_exclude_address` list), so the forwarded packet and the
+   tunnel's own uplink meet at the proxy without the proxy entering the tunnel.
+
+The DHCP server changes with the mode: it advertises the AP address as the
+router and `uplinkDns` as the resolver. The link-only DHCP sends neither, and
+the phone has no default route, so both options are required for the hairpin.
+DNS needs **no new ip rule**: on the live laptop
+`ip route get 1.1.1.1 from 192.168.77.232 iif wlp110s0` already resolves to
+`via 172.19.0.2 dev phone-tun table 2022` through rule 9001, ahead of the
+dport-53-to-main rule. The DNS packet enters the TUN, and sing-box's existing
+`{"protocol": "dns", "action": "hijack-dns"}` resolves it with the `remote` DoH
+server through the proxy and synthesizes the reply. No UDP is carried over
+SOCKS, and the phone's later app DNS goes through the same hijack.
+
+Loop safety is the same property as before: the proxy's own egress is a
+cellular-bound request in the app, not the AP default route, and the laptop's
+tunnel socket to the proxy is excluded from the tunnel. The hairpin is not
+free: every phone byte crosses the AP link **twice** — phone→laptop as the
+forwarded packet and laptop→phone inside the tunnel's SOCKS connection to the
+proxy. That is not a loop, because both crossings terminate at the proxy and
+its egress is cellular, but it halves the useful airtime of the single-radio AP
+and adds the extra Wi-Fi hop to the round-trip latency.
+
+Failure semantics: the accept does not check the tunnel's state. If
+`phone-tun` is not running, sing-box's ip rules and the table-2022 route are
+gone too, so the accepted packet is no longer sent into the tunnel. With no
+other default route the kernel fails it as unreachable; with a second uplink (a
+USB tether) it can follow the laptop's main table. Closing that window —
+removing `ip phone_link_hairpin` and restoring the plain drop while the tunnel
+is inactive — is the fail-open watchdog in #46, a separate change. This mode
+does not pretend to be link-only when the tunnel is missing; until #46 lands,
+treat a stopped tunnel as a known gap rather than a safe fallback. There are no
+NixOS firewall rules for the hairpin: the only forward drop is
+`inet phone_link_ap`, so the policy holds with
+`networking.firewall.enable = false` too. `net.ipv4.ip_forward` is set as a
+`mkDefault` when the mode is on.
+
+Keep `forwardClient` to the phone's reservation. A second AP client, or a
+spoofed source other than the configured one, still matches the drop. The
+doctor keeps its `ap forward drop` check: in this mode the table still contains
+the `iifname "wlp110s0" drop`, so the finding stays `ok` rather than reporting
+a hairpin as a missing drop.
 
 Set `phoneLink.ap.autoconnect = true` to bring the AP back after a reboot
 without running `phone-ap-up`. It lets NetworkManager activate the profile at
@@ -382,7 +458,7 @@ the same table, and `phone-link status` prints the doctor's JSON.
 | `package` | every script in the flake exists, is executable, kept its wrapped `PATH`, and `phone-net-status` prints a status |
 | `shellcheck` | every script and `lib/*.sh` is clean at shellcheck warning level |
 | `format` | `flake.nix` and `modules/phone-link.nix` are nixfmt-clean |
-| `module` | the module generates the expected sing-box config and units (5 s probe, 20 s first run, AP DHCP hole, a DHCP-only AP with no router/DNS option, an nftables forward drop that also works with the firewall off, an opt-in AP autoconnect that leaves the profile link-only, an opt-in rejoin watchdog, pinned resolver, never started at boot) and defines nothing when disabled |
+| `module` | the module generates the expected sing-box config and units (5 s probe, 20 s first run, AP DHCP hole, a DHCP-only AP with no router/DNS option, an nftables forward drop that also works with the firewall off, an opt-in hairpin with one accepted client, a scoped masquerade and DHCP router/DNS, an opt-in AP autoconnect that leaves the profile link-only, an opt-in rejoin watchdog, pinned resolver, never started at boot) and defines nothing when disabled |
 | `script` | hermetic tests with stub `adb`/`curl`/`avahi-browse`: for `phone-proxy-install` the F-Droid version selection, cache keying and reuse, `--check` staying read-only, the exact install argv and `--pull` naming; for `phone-proxy-uninstall` the confirm/`--yes` guard, `--keep-data`, idempotence and the exact uninstall argv; for `phone-proxy-data-clear` the prompt guard, `--check` staying read-only and the `pm clear` argv; for `phone-proxy-setup` the START intent's extras, the `--max-connections` extra and its 16..1024 refusals, the verification request, the settings `--check` against a stub service dump (including an old app's missing ceiling line); for `phone-proxy-switch` a listening port and a saved proxy started by name, the closed port and the proxy whose user the laptop has no password for refused, the failed start and the refused password rolled back, the request answered before the tunnel restart and the old port dropped only after it, and `--check`/`--list` staying read-only; for `phone-unlock` the keyguard check, PIN entry and wrong-PIN failure; for `phone-proxy-battery-whitelist` the idempotent add, `--check` and the device-idle argv; for `phone-proxy-start`/`phone-proxy-stop` the START/STOP intents, the dumped state, the already-running/stopped no-op, the gated start and the proxy that will not stop; for `phone-wifi-concurrency` the supported, unsupported and inconclusive verdicts and the read-only queries; for `phone-usb-tether-check` the rndis0/usb state, the host route and a source-bound request; for `net-check` the three fetches, their failure modes and the cache-busting URL; for `phone-reboot-unlock` the reboot/wait/unlock sequence, the slow-boot wait, the aborted prompt and the boot timeout; for `phone-usb-tether-default` the current and screen-unlocked functions, the `--check` report and an ineffective setter; for `phone-wifi-enable` the idempotent enable and `--check`; for `phone-wifi-forget` the saved-network table, the prompt/`--yes` guard and idempotence; for `phone-wifi-connect` the password sources, remote quoting of SSID/passphrase and the association wait; for `phone-wifi-reconnect` the matching and mismatching `--check` report, both writes and the idempotent re-read; for `phone-tether-cycle` the MTP disable, the health check, the lock/unlock restore, an adb abort retry, the already-off case, an unhealthy restore and the prompt guard; for `phone-adb-wifi` the legacy/TLS split, the mDNS port lookup, the `adb_wifi_enabled` write, the already-on case and the missing-port failure; for `phone-doctor` the ready, hotspot, locked, missing-adb, missing-secrets and dead-proxy paths, the app that is off the battery allowlist or has `auto_start` off (named separately in `[app]`), plus a rotated adb port found over mDNS; ; and `tests/phone-adb-mdns.test.sh` the stale network serial that is rewritten to the advertised port, the retry after a transport vanished mid-command, the serial recovered from the record when `adb devices` is empty, the preferred address when two phones are advertised and `PHONE_ADB_MDNS=0`; and for `--build` the refusal that names the app's repository and a bare install fetching the newest release; and `tests/phone-tun-toggle.test.sh` the primary chosen when both hosts answer, the fallback that restarts `phone-tun` after one confirming tick and lands in the generated config, the stable selection that never restarts, a one-tick flap that does not restart, and the stop when no host answers; and `tests/phone-ap-rejoin.test.sh` the down interface and the associated station that make no adb call, the missing USB device that writes no state, one successful `connect-network` with the right SSID and key management, the Wi-Fi disable/enable fallback, the throttle on an immediate second run, and a PSK that never reaches stdout or stderr |
 
 The `script` check also covers `phone-doctor --analyze` (problem ids, AP down and
@@ -485,6 +561,9 @@ In AP mode the phone keeps mobile data as its default network while it is
 associated: the AP is DHCP-only and drops forwarded traffic (see the options
 above), so the link carries the laptop's tunnel to the proxy and the phone's own
 internet does not cross it. The association drop in #11 is separate.
+`phoneLink.ap.uplink = "tunnel"` is the opt-in opposite: the phone's traffic is
+hairpinned through the laptop's tunnel so Android can validate the AP; every
+other AP client is still dropped.
 
 Both ends deal with the port being new after every reboot. The first thing
 `lib/python/phone_link/adb.py` asks is the **pinned** port: the keeper app on
