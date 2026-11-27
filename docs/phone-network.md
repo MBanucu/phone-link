@@ -61,54 +61,15 @@ stable.
 
 ## USB-primary and the runtime host
 
-USB tethering is the shortest path when the cable is in: `rndis0` has carried
-`10.23.190.38`, and the proxy binds it as well as the Wi-Fi addresses. Rather
-than rebuild to move `phoneLink.proxyHost` between the tether and the AP, list
-both. `proxyHost` is tried first, then each entry of `proxyHosts` in order, and
-duplicates are removed. For USB primary:
-
-```nix
-phoneLink = {
-  proxyHost = "10.23.190.38";
-  proxyHosts = [ "192.168.77.232" ];
-};
-```
-
-Reverse the two to keep the AP primary and use USB only when the cable is out.
-
-The host list is not enough on its own. The app is SSID-gated: it listens only
-while the phone is a client of the configured SSID (`PhoneLink` by default), and
-tethering is out of scope for it. With the phone on USB and off `PhoneLink`
-there is no listener at `10.23.190.38:1081`, so `proxyHosts` has nothing to
-reach. USB-primary needs the app started with `any_network` (the panel's
-**Ignore the SSID**), which the app documents as a test/escape hatch, or the
-phone also joined to `PhoneLink`.
-
-The choice is runtime state. Every 5 s, `phone-tun-toggle` does a `timeout 3`
-TCP connect to each effective host and writes the first that answers to
-`/run/phone-link/proxy-host` (temp file plus `mv`, so a reader never sees a
-partial value). `phone-tun-config` reads that file, checks it is one of the
-effective hosts, and fills the generated sing-box outbound from it; the relay
-reads it too. When no host answers the service is stopped, and the file is only
-a hint for the next start. With no `proxyHosts` there is one candidate and
-behaviour is unchanged. The tether address still changes per connection, so a
-new address is a module edit; the host file only saves the rebuild when the
-reachable path switches between addresses already listed.
-
-The running tunnel does not re-read that file. Its config is rendered once in
-`ExecStartPre`, so when the selected host differs from the `phone` outbound's
-`server` the toggle restarts `phone-tun.service` instead of starting it, which
-reruns the generator and makes sing-box dial the new address. A change is
-confirmed on the next 5 s tick before that restart: one dropped probe cannot
-cost a reconnect, and a probe that flaps between two hosts cannot restart the
-tunnel every tick. A stable selection is a no-op, and the host file is written
-as soon as the probe chooses so the relay and the next start see it.
+`rndis0` has carried `10.23.190.38`, and the proxy binds it as well as the
+Wi-Fi addresses. How to list the tether and the AP in `proxyHost`/`proxyHosts`,
+and how the 5 s probe keeps `/run/phone-link/proxy-host` current, is in
+[operations](operations.md#usb-primary-and-host-fallback).
 
 ## The AP band
 
-The AP defaults to 5 GHz channel 149 at 80 MHz (`band = "a"`, `channel = 149`,
-`channelWidth = 80`). It used to be 2.4 GHz channel 1 at 20 MHz, the most
-crowded part of the band here.
+It used to be 2.4 GHz channel 1 at 20 MHz, the most crowded part of the band
+here.
 
 Channel 149 is non-DFS and one of the few 5 GHz channels this Intel 8265 lets
 an AP beacon on. `iw phy phy0 info` marks 36/44 `(no IR)` under the card's
@@ -121,6 +82,9 @@ The single-radio constraint in trap 4 still holds: the card cannot be a client
 and an AP on different channels. In AP mode that is exactly the intended case —
 the phone is the client and the laptop's uplink is `phone-tun` — so the AP owns
 the radio and needs no client link of its own.
+
+The default band, channel and width are in
+[operations](operations.md#the-ap-band).
 
 ## The AP hairpin: `ap.uplink = "tunnel"`
 
