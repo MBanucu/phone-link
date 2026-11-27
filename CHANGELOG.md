@@ -23,6 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through the proxy, so no UDP crosses the TCP-only SOCKS upstream (#43, #44).
   The default `"none"` still installs the plain drop with no accept, no
   masquerade and no router/DNS option.
+- `tests/live/hairpin-measure.sh` is the before/after harness for the AP
+  hairpin (#47), with the runbook in `docs/hairpin-measure.md`. It measures the
+  phone's direct-cellular and hairpin latency and 8 MB transfer with
+  `adb shell` and `nc` (the phone has no curl), the laptop's 500 sequential /
+  200-at-40 / 5 x 8 MB soaks, proxy client count and `max_connections` every
+  5 s, battery over 30 minutes, AP retry deltas and the concurrent phone+laptop
+  path. Numbers that need the hairpin, fail-open or an AP validation are written as
+  `UNAVAILABLE`, never guessed; `--fallback` is opt-in and restores the tunnel with a trap.
+  `--check`, `--dry-run`, `--self-test` and `--compare` need no phone or root,
+  and `tests/hairpin-measure.test.sh` runs those in `nix flake check`.
 - `phone-link-ap-rejoin` re-asserts the phone's association with the link-only
   AP after the AP restarts. Android validates the AP as "no internet" and
   temporarily disables auto-join for the saved network; with no USB the phone

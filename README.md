@@ -17,6 +17,7 @@ cable.
   `phone-proxy-install` fetches its releases
 - `CHANGELOG.md` — released changes, Keep a Changelog format
 - `docs/phone-network.md` — measured behaviour, evidence and the traps
+- `docs/hairpin-measure.md` — the before/after runbook for the AP hairpin (#47)
 
 ## Install the module
 
@@ -569,9 +570,27 @@ CSV history queryable (`results.py`). It installs the app's test build
 phone lives on, and `nix flake check` never runs it. That repository's README
 has the steps, the claims they make and the measurements behind them.
 
-The two live runs meet at the same phone: this repository's doctor test breaks
-the setup and requires the repair, and the app's run requires the panel and the
-adb contract. Neither is part of `nix flake check`.
+`tests/live/hairpin-measure.sh` records the numbers for the AP hairpin
+([#47](https://github.com/MBanucu/phone-link/issues/47)): the phone's direct and
+hairpin latency/8 MB transfer, the laptop's 500 sequential / 200-at-40 / 5 x
+8 MB soaks, proxy client headroom, battery over 30 minutes, the shared path,
+fallback (needs #46) and bootstrap (needs #43/#44). A normal run is read-only
+with respect to the network and the phone; `--fallback` is explicit because it
+stops the tunnel, and restores it with a trap. `--check` and `--dry-run` need no
+phone or root. `docs/hairpin-measure.md` is the runbook, including what stays
+`UNAVAILABLE` until the feature is live and the before/after table for #47.
+
+```sh
+sudo tests/live/hairpin-measure.sh --check
+sudo tests/live/hairpin-measure.sh --mode before
+sudo tests/live/hairpin-measure.sh --mode after
+tests/live/hairpin-measure.sh --compare result-live/hairpin-before result-live/hairpin-after
+```
+
+The live runs meet at the same phone: this repository's doctor test breaks the
+setup and requires the repair, the app's run requires the panel and the adb
+contract, and the hairpin measurement records what the network does. None is
+part of `nix flake check`.
 
 The `module` check evaluates a NixOS configuration with non-default options, so
 it catches option or unit regressions without building a system or a VM.
