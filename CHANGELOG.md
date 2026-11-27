@@ -32,6 +32,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   AP is up with no station, throttles attempts to one per five minutes, and
   falls back to a Wi-Fi disable/enable. `phoneLink.ap.rejoin = false` turns it
   off.
+- `phone-link-ap-failopen` removes the AP hairpin when `phone-tun` is down, its
+  TUN device is gone, or the hairpin rules disappeared, then restores it after
+  the tunnel has been healthy for 15 s (at most one restore per 30 s). The 5 s
+  timer opens within one tick and the 60 s acceptance budget leaves the rest to
+  Android's revalidation, so a validated-but-dead Wi-Fi cannot blackhole the
+  phone. It is on by default with `phoneLink.ap.uplink = "tunnel"`
+  (`phoneLink.apFailOpen.enable`) and loads the merged `ap.ruleset` and
+  `ap.noForwardRules`; set it to `false` to run the hairpin unguarded.
 
 ## [0.14.0] - 2026-11-26
 

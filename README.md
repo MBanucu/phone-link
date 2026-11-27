@@ -76,6 +76,9 @@ stopped proxy app cannot blackhole traffic.
 | `phoneLink.ap.uplink` | `none` | `none` keeps the AP link-only; `tunnel` hairpins one client through `phone-tun` so the AP can validate |
 | `phoneLink.ap.forwardClient` | `phoneLink.proxyHost` | the one AP client accepted when `uplink = "tunnel"`; every other source stays dropped |
 | `phoneLink.ap.uplinkDns` | `1.1.1.1` | DNS advertised to that client when `uplink = "tunnel"`; it is answered by the tunnel, not UDP-over-SOCKS |
+| `phoneLink.apFailOpen.enable` | `uplink == "tunnel"` | remove the AP hairpin while `phone-tun` is unhealthy; default-on with the hairpin, set `false` to disable |
+| `phoneLink.apFailOpen.client` | `phoneLink.ap.forwardClient` | the one AP client the watchdog requires in the hairpin |
+| `phoneLink.apFailOpen.grace` / `throttle` | `15` / `30` | healthy seconds before a restore / minimum seconds between restores |
 | `phoneLink.ap.dhcpRange` | `.10–.254` of the AP /24, 3600 s | DHCP range and lease time; the AP sends no router or DNS option unless `uplink = "tunnel"` |
 | `phoneLink.proxyHost` | `192.168.77.232` | primary address of the phone's SOCKS proxy |
 | `phoneLink.proxyHosts` | `[]` | additional addresses tried in order after `proxyHost`, e.g. the USB tether |
@@ -174,12 +177,10 @@ Failure semantics: the accept does not check the tunnel's state. If
 `phone-tun` is not running, sing-box's ip rules and the table-2022 route are
 gone too, so the accepted packet is no longer sent into the tunnel. With no
 other default route the kernel fails it as unreachable; with a second uplink (a
-USB tether) it can follow the laptop's main table. Closing that window —
-removing `ip phone_link_hairpin` and restoring the plain drop while the tunnel
-is inactive — is the fail-open watchdog in #46, a separate change. This mode
-does not pretend to be link-only when the tunnel is missing; until #46 lands,
-treat a stopped tunnel as a known gap rather than a safe fallback. There are no
-NixOS firewall rules for the hairpin: the only forward drop is
+USB tether) it can follow the laptop's main table. The fail-open watchdog
+removes `ip phone_link_hairpin` and restores the plain drop in that state; it is
+on by default with `uplink = "tunnel"` and described below. There are no NixOS
+firewall rules for the hairpin: the only forward drop is
 `inet phone_link_ap`, so the policy holds with
 `networking.firewall.enable = false` too. `net.ipv4.ip_forward` is set as a
 `mkDefault` when the mode is on.
@@ -189,6 +190,40 @@ spoofed source other than the configured one, still matches the drop. The
 doctor keeps its `ap forward drop` check: in this mode the table still contains
 the `iifname "wlp110s0" drop`, so the finding stays `ok` rather than reporting
 a hairpin as a missing drop.
+
+### Failing open when the tunnel is down
+
+A validated AP takes the phone's default route. If `phone-tun` then dies, that
+validated Wi-Fi is a blackhole until Android revalidates. The fail-open
+watchdog closes that window: `phoneLink.apFailOpen.enable` defaults to
+`phoneLink.ap.uplink == "tunnel"`, so enabling the hairpin enables the guard
+unless it is explicitly set to `false`.
+
+The timer runs every 5 s. Each tick checks that `phone-tun.service` is active,
+the `phone-tun` device exists, the client `ip saddr … accept` is in `inet
+phone_link_ap`, and (with `nat = true`, the default in tunnel mode) the scoped
+`masquerade` is in `ip phone_link_hairpin`. An unhealthy tick deletes both
+hairpin tables and loads `phoneLink.ap.noForwardRules` in one nft transaction,
+so forwarding is never open in between. Android's next connectivity probe then
+fails and it falls back to cellular.
+
+A healthy tunnel only restores `phoneLink.ap.ruleset` after 15 s healthy
+(`grace`) and at most once per 30 s (`throttle`), so the 5 s probe cannot flap
+the hairpin. Fail-open does not wait for either: safety comes first. State lives
+in `/run/phone-link/ap-failopen.state`; it is read, never sourced, and a
+malformed file is treated as unknown. A reboot starts from unknown, and the
+first healthy tick adopts an existing hairpin.
+
+The watchdog's own part is one 5 s tick. The 60 s acceptance budget is that
+tick plus Android's revalidation of the now-failing AP; issue #47 records the
+measured fallback. A dead tunnel, a missing TUN device and an externally
+flushed hairpin take the same path. Set
+`phoneLink.apFailOpen.enable = false` only when deliberately running the
+hairpin unguarded. The script takes `PHONE_AP_IF`, `PHONE_AP_CLIENT`,
+`PHONE_AP_TUN_IF`, `PHONE_NFT`, `PHONE_AP_NOFORWARD_RULES`,
+`PHONE_AP_HAIRPIN_RULES`, `PHONE_AP_FAILOPEN_STATE`,
+`PHONE_AP_FAILOPEN_GRACE` and `PHONE_AP_FAILOPEN_THROTTLE` from the
+environment, so the same file runs under the unit and under a test.
 
 Set `phoneLink.ap.autoconnect = true` to bring the AP back after a reboot
 without running `phone-ap-up`. It lets NetworkManager activate the profile at
@@ -458,8 +493,8 @@ the same table, and `phone-link status` prints the doctor's JSON.
 | `package` | every script in the flake exists, is executable, kept its wrapped `PATH`, and `phone-net-status` prints a status |
 | `shellcheck` | every script and `lib/*.sh` is clean at shellcheck warning level |
 | `format` | `flake.nix` and `modules/phone-link.nix` are nixfmt-clean |
-| `module` | the module generates the expected sing-box config and units (5 s probe, 20 s first run, AP DHCP hole, a DHCP-only AP with no router/DNS option, an nftables forward drop that also works with the firewall off, an opt-in hairpin with one accepted client, a scoped masquerade and DHCP router/DNS, an opt-in AP autoconnect that leaves the profile link-only, an opt-in rejoin watchdog, pinned resolver, never started at boot) and defines nothing when disabled |
-| `script` | hermetic tests with stub `adb`/`curl`/`avahi-browse`: for `phone-proxy-install` the F-Droid version selection, cache keying and reuse, `--check` staying read-only, the exact install argv and `--pull` naming; for `phone-proxy-uninstall` the confirm/`--yes` guard, `--keep-data`, idempotence and the exact uninstall argv; for `phone-proxy-data-clear` the prompt guard, `--check` staying read-only and the `pm clear` argv; for `phone-proxy-setup` the START intent's extras, the `--max-connections` extra and its 16..1024 refusals, the verification request, the settings `--check` against a stub service dump (including an old app's missing ceiling line); for `phone-proxy-switch` a listening port and a saved proxy started by name, the closed port and the proxy whose user the laptop has no password for refused, the failed start and the refused password rolled back, the request answered before the tunnel restart and the old port dropped only after it, and `--check`/`--list` staying read-only; for `phone-unlock` the keyguard check, PIN entry and wrong-PIN failure; for `phone-proxy-battery-whitelist` the idempotent add, `--check` and the device-idle argv; for `phone-proxy-start`/`phone-proxy-stop` the START/STOP intents, the dumped state, the already-running/stopped no-op, the gated start and the proxy that will not stop; for `phone-wifi-concurrency` the supported, unsupported and inconclusive verdicts and the read-only queries; for `phone-usb-tether-check` the rndis0/usb state, the host route and a source-bound request; for `net-check` the three fetches, their failure modes and the cache-busting URL; for `phone-reboot-unlock` the reboot/wait/unlock sequence, the slow-boot wait, the aborted prompt and the boot timeout; for `phone-usb-tether-default` the current and screen-unlocked functions, the `--check` report and an ineffective setter; for `phone-wifi-enable` the idempotent enable and `--check`; for `phone-wifi-forget` the saved-network table, the prompt/`--yes` guard and idempotence; for `phone-wifi-connect` the password sources, remote quoting of SSID/passphrase and the association wait; for `phone-wifi-reconnect` the matching and mismatching `--check` report, both writes and the idempotent re-read; for `phone-tether-cycle` the MTP disable, the health check, the lock/unlock restore, an adb abort retry, the already-off case, an unhealthy restore and the prompt guard; for `phone-adb-wifi` the legacy/TLS split, the mDNS port lookup, the `adb_wifi_enabled` write, the already-on case and the missing-port failure; for `phone-doctor` the ready, hotspot, locked, missing-adb, missing-secrets and dead-proxy paths, the app that is off the battery allowlist or has `auto_start` off (named separately in `[app]`), plus a rotated adb port found over mDNS; ; and `tests/phone-adb-mdns.test.sh` the stale network serial that is rewritten to the advertised port, the retry after a transport vanished mid-command, the serial recovered from the record when `adb devices` is empty, the preferred address when two phones are advertised and `PHONE_ADB_MDNS=0`; and for `--build` the refusal that names the app's repository and a bare install fetching the newest release; and `tests/phone-tun-toggle.test.sh` the primary chosen when both hosts answer, the fallback that restarts `phone-tun` after one confirming tick and lands in the generated config, the stable selection that never restarts, a one-tick flap that does not restart, and the stop when no host answers; and `tests/phone-ap-rejoin.test.sh` the down interface and the associated station that make no adb call, the missing USB device that writes no state, one successful `connect-network` with the right SSID and key management, the Wi-Fi disable/enable fallback, the throttle on an immediate second run, and a PSK that never reaches stdout or stderr |
+| `module` | the module generates the expected sing-box config and units (5 s probe, 20 s first run, AP DHCP hole, a DHCP-only AP with no router/DNS option, an nftables forward drop that also works with the firewall off, an opt-in hairpin with one accepted client, a scoped masquerade and DHCP router/DNS, a default-on fail-open watchdog with that hairpin and an explicit off switch, an opt-in AP autoconnect that leaves the profile link-only, an opt-in rejoin watchdog, pinned resolver, never started at boot) and defines nothing when disabled |
+| `script` | hermetic tests with stub `adb`/`curl`/`avahi-browse`: for `phone-proxy-install` the F-Droid version selection, cache keying and reuse, `--check` staying read-only, the exact install argv and `--pull` naming; for `phone-proxy-uninstall` the confirm/`--yes` guard, `--keep-data`, idempotence and the exact uninstall argv; for `phone-proxy-data-clear` the prompt guard, `--check` staying read-only and the `pm clear` argv; for `phone-proxy-setup` the START intent's extras, the `--max-connections` extra and its 16..1024 refusals, the verification request, the settings `--check` against a stub service dump (including an old app's missing ceiling line); for `phone-proxy-switch` a listening port and a saved proxy started by name, the closed port and the proxy whose user the laptop has no password for refused, the failed start and the refused password rolled back, the request answered before the tunnel restart and the old port dropped only after it, and `--check`/`--list` staying read-only; for `phone-unlock` the keyguard check, PIN entry and wrong-PIN failure; for `phone-proxy-battery-whitelist` the idempotent add, `--check` and the device-idle argv; for `phone-proxy-start`/`phone-proxy-stop` the START/STOP intents, the dumped state, the already-running/stopped no-op, the gated start and the proxy that will not stop; for `phone-wifi-concurrency` the supported, unsupported and inconclusive verdicts and the read-only queries; for `phone-usb-tether-check` the rndis0/usb state, the host route and a source-bound request; for `net-check` the three fetches, their failure modes and the cache-busting URL; for `phone-reboot-unlock` the reboot/wait/unlock sequence, the slow-boot wait, the aborted prompt and the boot timeout; for `phone-usb-tether-default` the current and screen-unlocked functions, the `--check` report and an ineffective setter; for `phone-wifi-enable` the idempotent enable and `--check`; for `phone-wifi-forget` the saved-network table, the prompt/`--yes` guard and idempotence; for `phone-wifi-connect` the password sources, remote quoting of SSID/passphrase and the association wait; for `phone-wifi-reconnect` the matching and mismatching `--check` report, both writes and the idempotent re-read; for `phone-tether-cycle` the MTP disable, the health check, the lock/unlock restore, an adb abort retry, the already-off case, an unhealthy restore and the prompt guard; for `phone-adb-wifi` the legacy/TLS split, the mDNS port lookup, the `adb_wifi_enabled` write, the already-on case and the missing-port failure; for `phone-doctor` the ready, hotspot, locked, missing-adb, missing-secrets and dead-proxy paths, the app that is off the battery allowlist or has `auto_start` off (named separately in `[app]`), plus a rotated adb port found over mDNS; ; and `tests/phone-adb-mdns.test.sh` the stale network serial that is rewritten to the advertised port, the retry after a transport vanished mid-command, the serial recovered from the record when `adb devices` is empty, the preferred address when two phones are advertised and `PHONE_ADB_MDNS=0`; and for `--build` the refusal that names the app's repository and a bare install fetching the newest release; and `tests/phone-tun-toggle.test.sh` the primary chosen when both hosts answer, the fallback that restarts `phone-tun` after one confirming tick and lands in the generated config, the stable selection that never restarts, a one-tick flap that does not restart, and the stop when no host answers; and `tests/phone-ap-rejoin.test.sh` the down interface and the associated station that make no adb call, the missing USB device that writes no state, one successful `connect-network` with the right SSID and key management, the Wi-Fi disable/enable fallback, the throttle on an immediate second run, and a PSK that never reaches stdout or stderr; and `tests/phone-ap-failopen.test.sh` the dead tunnel that removes the hairpin in one transaction, the active tunnel with a missing hairpin route that also fails open, the grace and throttle before a restore, the immediate open after a post-restore failure, a missing nft that writes no state, no rules file that leaves the hairpin open, and a malformed state file that still fails open |
 
 The `script` check also covers `phone-doctor --analyze` (problem ids, AP down and
 a missing APK, warnings-only, no headers or `ok` lines),
