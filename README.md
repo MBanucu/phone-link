@@ -89,4 +89,6 @@ their tools. `nix run .#gui` opens the panel. Every other command and flag is in
   and the traps
 - [docs/hairpin-measure.md](docs/hairpin-measure.md) — the before/after runbook
   for the AP hairpin (#47)
+- [docs/proxy-boundary.md](docs/proxy-boundary.md) — which repository owns the
+  app contract, build, install and live harnesses, and the change order
 - [CHANGELOG.md](CHANGELOG.md) — released changes, Keep a Changelog format

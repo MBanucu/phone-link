@@ -30,6 +30,8 @@ rules the work here has settled into, not a style guide.
 - The boundary: `MBanucu/phone-link` is this checkout (scripts, NixOS module,
   docs, tests); `MBanucu/phone-link-proxy` is the Android app (source, build,
   releases). Issues follow the same split — file app work in the proxy repo.
+  The ownership table, version policy and change order are in
+  `docs/proxy-boundary.md`.
 
 ## Rules
 

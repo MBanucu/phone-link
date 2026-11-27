@@ -93,6 +93,8 @@ All option defaults and descriptions are in the [options table](options.md).
 - [docs/phone-network.md](phone-network.md) — measured topology, DNS and the
   traps that cost time.
 - [docs/hairpin-measure.md](hairpin-measure.md) — the before/after live runbook.
+- [docs/proxy-boundary.md](proxy-boundary.md) — which repository owns the app
+  contract, build, install and live harnesses, and the change order.
 - [AGENTS.md](../AGENTS.md) — the repository rules and the wishlist workflow.
 - [MBanucu/phone-link-proxy](https://github.com/MBanucu/phone-link-proxy) — the
   proxy app, its adb contract, its tests and its releases.
