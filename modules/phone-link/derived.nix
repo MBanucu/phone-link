@@ -54,6 +54,12 @@ let
     PHONE_AP_CHANNEL=${lib.escapeShellArg (toString cfg.ap.channel)}
     PHONE_AP_CHANNEL_WIDTH=${lib.escapeShellArg (toString cfg.ap.channelWidth)}
     PHONE_AP_DECLARATIVE=${lib.escapeShellArg "/etc/phone-link/ap-profile"}
+    PHONE_AP_FALLBACK=${lib.escapeShellArg (if cfg.ap.fallback.enable then "1" else "0")}
+    PHONE_AP_FALLBACK_CHANNEL=${toString cfg.ap.fallback.channel}
+    PHONE_AP_FALLBACK_WIDTH=${toString cfg.ap.fallback.channelWidth}
+    PHONE_AP_FALLBACK_DELAY=${toString cfg.ap.fallback.delay}
+    PHONE_AP_FALLBACK_STATE=${lib.escapeShellArg "${runtimeDir}/ap-fallback"}
+    PHONE_AP_FALLBACK_TOOL=${lib.escapeShellArg "/etc/phone-link/ap-fallback.sh"}
     # phone-ap-up clears this file before asking the watchdog to run, so the
     # command and the timer share one throttle state.
     PHONE_AP_REJOIN_STATE=${lib.escapeShellArg "${runtimeDir}/ap-rejoin.last"}
@@ -196,6 +202,28 @@ let
     exec ${pkgs.bash}/bin/bash ${../../lib/phone-ap-rejoin.sh}
   '';
 
+  # The 2.4 GHz fallback: one attempt per boot when the 5 GHz AP cannot start.
+  # The unit and phone-ap-up run the same script, so there is one state file,
+  # one attempt and one message.  It changes only band, channel and width; the
+  # PSK stays in the profile NetworkManager already has.
+  apFallback = pkgs.writeShellScript "phone-link-ap-fallback" ''
+    export PHONE_AP_CON=${lib.escapeShellArg cfg.ap.name}
+    export PHONE_AP_IF=${lib.escapeShellArg cfg.apInterface}
+    export PHONE_AP_FALLBACK_CHANNEL=${toString cfg.ap.fallback.channel}
+    export PHONE_AP_FALLBACK_WIDTH=${toString cfg.ap.fallback.channelWidth}
+    export PHONE_AP_FALLBACK_DELAY=${toString cfg.ap.fallback.delay}
+    export PHONE_AP_FALLBACK_STATE=${lib.escapeShellArg "${runtimeDir}/ap-fallback"}
+    export PATH=${
+      lib.makeBinPath [
+        pkgs.bash
+        pkgs.coreutils
+        pkgs.gnugrep
+        config.networking.networkmanager.package
+      ]
+    }
+    exec ${pkgs.bash}/bin/bash ${../../lib/phone-ap-fallback.sh} "$@"
+  '';
+
   relay = pkgs.writeShellScript "phone-socks-relay" ''
     port=$(${runtimePort} ${portFile} ${toString cfg.proxyPort})
     host=$(${pkgs.coreutils}/bin/cat ${hostFile} 2>/dev/null || true)
@@ -290,6 +318,7 @@ in
     tunConfig
     toggle
     rejoin
+    apFallback
     relay
     apAddress
     apSubnet

@@ -204,6 +204,73 @@ def _ap_activation_failed(
     raise SystemExit(code)
 
 
+def _ap_fallback_enabled() -> bool:
+    """Whether the module turned on the one-shot 2.4 GHz fallback."""
+    return settings.PHONE_AP_FALLBACK == "1"
+
+
+def _try_ap_fallback(reason: str) -> bool:
+    """Run the shared 2.4 GHz fallback script once; False leaves the caller to die.
+
+    The script (and the boot unit) own the one-attempt-per-boot state file and
+    the profile change, so the command and the unattended path cannot loop or
+    disagree.  It reads no secret: NetworkManager already holds the PSK.
+    """
+    if not _ap_fallback_enabled():
+        return False
+    tool = settings.PHONE_AP_FALLBACK_TOOL
+    if not os.access(tool, os.X_OK):
+        log(
+            f"the 2.4 GHz fallback is enabled but {tool} is missing or not "
+            "executable; rebuild the module or disable phoneLink.ap.fallback"
+        )
+        return False
+    log(f"trying the 2.4 GHz fallback (one attempt per boot): {reason}")
+    code, output = run_both([tool, "--now", "--reason", reason])
+    if output:
+        log(output)
+    return code == 0
+
+
+def _restore_declared_ap_profile() -> None:
+    """Undo a runtime fallback so the next switch-on tries 5 GHz again."""
+
+    if not _ap_fallback_enabled():
+        return
+    if not os.path.exists(settings.PHONE_AP_FALLBACK_STATE):
+        return
+    code, output = run_both(
+        [
+            "nmcli",
+            "connection",
+            "modify",
+            settings.PHONE_AP_CON,
+            "802-11-wireless.band",
+            settings.PHONE_AP_BAND,
+            "802-11-wireless.channel",
+            settings.PHONE_AP_CHANNEL,
+            "802-11-wireless.channel-width",
+            settings.PHONE_AP_CHANNEL_WIDTH,
+        ]
+    )
+    if output:
+        log(output)
+    if code != 0:
+        log(
+            "could not restore the declared AP profile after the 2.4 GHz "
+            "fallback; the next switch-on keeps 2.4 GHz until a reboot"
+        )
+        return
+    try:
+        os.unlink(settings.PHONE_AP_FALLBACK_STATE)
+    except OSError:
+        pass
+    log(
+        "AP profile restored to the declared band/channel; the next "
+        "phone-ap-up tries 5 GHz again"
+    )
+
+
 def phone_ap_up(args: list[str]) -> int:
     """Bring up the laptop access point the phone joins as a Wi-Fi client."""
     phone.as_root("phone-ap-up", args)
@@ -226,7 +293,11 @@ def phone_ap_up(args: list[str]) -> int:
     if capture(["nmcli", "-g", "wifi.backend"]) == "iwd":
         die("NetworkManager uses iwd; AP mode needs wpa_supplicant")
 
-    verdict = _preflight_ap_channel()
+    verdict = _ap_channel_verdict()
+    blocked = verdict is not None and verdict.allowed is False
+    if blocked and not _ap_fallback_enabled():
+        # No fallback to try: keep the precise refusal and its remediation.
+        _preflight_ap_channel()
 
     if not _profile_exists():
         if phone.ap_declarative():
@@ -246,14 +317,39 @@ def phone_ap_up(args: list[str]) -> int:
                     "(run phone-ap-create)"
                 )
 
-    code, output = run_both(["nmcli", "connection", "up", settings.PHONE_AP_CON])
-    if code != 0:
-        _ap_activation_failed(code, output, verdict)
-    if output:
-        log(output)
+    fallback_up = False
+    if blocked:
+        what = regdomain.channel_label(
+            settings.PHONE_AP_BAND, int(settings.PHONE_AP_CHANNEL)
+        )
+        reason = (
+            f"{what} is {verdict.reason} in "
+            f"{regdomain.country_label(verdict.country)}"
+        )
+        if _try_ap_fallback(reason):
+            fallback_up = True
+        else:
+            _preflight_ap_channel()
+    else:
+        code, output = run_both(["nmcli", "connection", "up", settings.PHONE_AP_CON])
+        if code != 0:
+            if _try_ap_fallback(output or f"nmcli connection up exited {code}"):
+                fallback_up = True
+            else:
+                _ap_activation_failed(code, output, verdict)
+        if output:
+            log(output)
     _request_ap_rejoin()
     must(["ip", "-4", "-br", "addr", "show", settings.PHONE_AP_IF])
-    log("AP up. The phone must have Wi-Fi (client) on, not the hotspot.")
+    if fallback_up:
+        log(
+            "AP up on the 2.4 GHz fallback "
+            f"(channel {settings.PHONE_AP_FALLBACK_CHANNEL} at "
+            f"{settings.PHONE_AP_FALLBACK_WIDTH} MHz). 5 GHz is retried at the "
+            "next boot or after phone-ap-down."
+        )
+    else:
+        log("AP up. The phone must have Wi-Fi (client) on, not the hotspot.")
     return 0
 
 
@@ -283,6 +379,11 @@ def phone_ap_down(args: list[str]) -> int:
 
     if status(["nmcli", "connection", "down", settings.PHONE_AP_CON]) != 0:
         die(f"could not stop {settings.PHONE_AP_CON}")
+
+    # A fallback changed only the runtime profile, so put the declared
+    # band/channel back while it is down: the next phone-ap-up tries 5 GHz
+    # again instead of silently staying on the slow band until a reboot.
+    _restore_declared_ap_profile()
 
     if client_only:
         log(

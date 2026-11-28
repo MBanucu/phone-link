@@ -9,6 +9,13 @@
 }:
 let
   cfg = config.phoneLink;
+  internal = import ../derived.nix {
+    inherit
+      config
+      lib
+      pkgs
+      ;
+  };
 in
 {
   config = lib.mkIf (cfg.enable && cfg.ap.enable && cfg.ap.role == "local") {
@@ -56,5 +63,34 @@ in
     # The external role has no profile here, and the role in
     # /etc/phone-link/env is what commands and the doctor read instead.
     environment.etc."phone-link/ap-profile".text = cfg.ap.name;
+
+    # The 2.4 GHz fallback script: `phone-ap-up` runs it after a failed
+    # 5 GHz attempt, and the boot unit below runs the same file so both share
+    # one state file and one attempt per boot.
+    environment.etc."phone-link/ap-fallback.sh" = lib.mkIf cfg.ap.fallback.enable {
+      source = internal.apFallback;
+      mode = "0755";
+    };
+
+    # At boot NetworkManager tries the 5 GHz profile unattended, so a failure
+    # there is the case no one can run phone-ap-up for.  The unit waits
+    # `ap.fallback.delay` for the 5 GHz AP to appear (and returns as soon as it
+    # does), then makes the one fallback attempt.  It only exists when the AP
+    # is meant to come up at boot; with autoconnect off the AP stays down until
+    # phone-ap-up, which runs the same script itself.
+    systemd.services.phone-link-ap-fallback = lib.mkIf (cfg.ap.fallback.enable && cfg.ap.autoconnect) {
+      description = "Fall back to 2.4 GHz when the PhoneLink 5 GHz AP cannot start";
+      wantedBy = [ "multi-user.target" ];
+      wants = [ "network-online.target" ];
+      after = [
+        "NetworkManager.service"
+        "network-online.target"
+      ];
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = internal.apFallback;
+        TimeoutStartSec = "${toString (cfg.ap.fallback.delay + 60)}s";
+      };
+    };
   };
 }

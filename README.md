@@ -76,6 +76,17 @@ next boot, and `iw reg set DE` changes the running domain now. Without it,
 `phone-ap-up` refuses a channel the domain does not allow instead of waiting
 for the supplicant timeout, and `phone-doctor` reports `ap channel`.
 
+A 5 GHz AP can also fail for reasons the country does not explain: a stale
+wpa_supplicant state, a driver that refuses the channel, or a card that cannot
+beacon there. `phoneLink.ap.fallback.enable = true` keeps a link instead of
+leaving the phone with none: `phone-ap-up` tries 2.4 GHz channel 1 at 20 MHz
+once after the 5 GHz attempt fails, and with `ap.autoconnect` a boot unit makes
+the same one attempt after `ap.fallback.delay` seconds (`30` by default). The
+declared 5 GHz profile is not rewritten, so the next boot — or `phone-ap-down`,
+which restores it — tries 5 GHz again. This is availability, not throughput:
+2.4 GHz is limited to 40 MHz and is slower. Set `ap.fallback.channel` to 6 or
+11 if 1 is crowded, and keep `ap.band = "a"`; the fallback is local-role only.
+
 ## Three commands
 
 ```sh

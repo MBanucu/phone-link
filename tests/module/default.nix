@@ -106,6 +106,40 @@ let
       };
     }
   ];
+  # The 2.4 GHz fallback: the declared profile stays 5 GHz, and when the AP
+  # also autoconnects the boot unit makes the one fallback attempt.
+  apFallback = evalModule [
+    {
+      networking.networkmanager.enable = true;
+      phoneLink = {
+        enable = true;
+        ap = {
+          enable = true;
+          autoconnect = true;
+          fallback = {
+            enable = true;
+            channel = 6;
+            channelWidth = 40;
+            delay = 45;
+          };
+        };
+      };
+    }
+  ];
+  # Without autoconnect the AP stays down until phone-ap-up, so no boot unit
+  # may try to raise it behind the user's back.
+  apFallbackNoAutoconnect = evalModule [
+    {
+      networking.networkmanager.enable = true;
+      phoneLink = {
+        enable = true;
+        ap = {
+          enable = true;
+          fallback.enable = true;
+        };
+      };
+    }
+  ];
   # The country option must reach the kernel command line and merge with an
   # existing boot.kernelParams; unset must add nothing.
   apCountry = evalModule [
@@ -229,6 +263,8 @@ let
       apOn
       apNamed
       apAutoconnect
+      apFallback
+      apFallbackNoAutoconnect
       apCountry
       apNoRejoin
       apNoFirewall

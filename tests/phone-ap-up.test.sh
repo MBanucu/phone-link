@@ -231,4 +231,71 @@ printf '\t* AP\n'
 EOF
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 
+# 8. fallback enabled: a channel the domain refuses goes to the 2.4 GHz
+#    fallback script instead of dying, and the AP still comes up.
+stub_cmd iw "$STUBS" <<'EOF'
+printf '%s\n' "$*" >>"$LOG/iw"
+case "$*" in
+  list) printf '\t* AP\n\t* managed\n' ;;
+  "dev wlp110s0 station dump") : ;;
+  "reg get") cat "$LOG/iw_reg" 2>/dev/null ;;
+  "dev wlp110s0 info") cat "$LOG/iw_info" 2>/dev/null ;;
+  "phy "*) cat "$LOG/iw_phy" 2>/dev/null ;;
+esac
+EOF
+rm -f "$LOG/iw_reg"
+cp "$ROOT/tests/fixtures/iw-reg-country-00.txt" "$LOG/iw_reg"
+rm -f "$LOG/actions" "$LOG/fallback"
+cat >"$TMP/ap-fallback" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$LOG/fallback"
+exit "${FALLBACK_EXIT:-0}"
+EOF
+# Nix builds have no /usr/bin/env; use the bash this suite runs under.
+sed -i "1s|^#!.*|#!$BASH_BIN|" "$TMP/ap-fallback"
+chmod +x "$TMP/ap-fallback"
+export PHONE_AP_FALLBACK=1
+export PHONE_AP_FALLBACK_TOOL=$TMP/ap-fallback
+export PHONE_AP_FALLBACK_STATE=$TMP/ap-fallback.state
+export PHONE_AP_FALLBACK_CHANNEL=1
+if run; then ok "a blocked 5 GHz channel falls back instead of dying"; else
+    bad "a blocked 5 GHz channel falls back instead of dying" "$(cat "$LOG/out")"
+fi
+grep -q -- '--now --reason .*channel 149.*passive-only' "$LOG/fallback" \
+    && ok "the fallback gets the measured reason" \
+    || bad "the fallback gets the measured reason" "$(cat "$LOG/fallback" 2>/dev/null)"
+[ -e "$LOG/actions" ] && bad "the blocked channel never reaches nmcli up" \
+    || ok "the blocked channel never reaches nmcli up"
+grep -q 'AP up on the 2.4 GHz fallback' "$LOG/out" \
+    && ok "reports the 2.4 GHz fallback" \
+    || bad "reports the 2.4 GHz fallback" "$(cat "$LOG/out")"
+
+# 9. fallback enabled: an allowed channel that still fails activation also
+#    falls back.
+rm -f "$LOG/actions" "$LOG/fallback" "$LOG/nmcli_fail"
+rm -f "$LOG/iw_reg"
+cp "$ROOT/tests/fixtures/iw-reg-country-de.txt" "$LOG/iw_reg"
+printf '802.1x\n' >"$LOG/nmcli_fail"
+if run; then ok "a failed activation falls back"; else
+    bad "a failed activation falls back" "$(cat "$LOG/out")"
+fi
+grep -q -- '--now --reason' "$LOG/fallback" \
+    && ok "a failed activation calls the fallback" \
+    || bad "a failed activation calls the fallback" "$(cat "$LOG/fallback" 2>/dev/null)"
+grep -qx 'connection up phonelink' "$LOG/actions" \
+    && ok "the 5 GHz attempt still ran first" \
+    || bad "the 5 GHz attempt still ran first" "$(cat "$LOG/actions" 2>/dev/null)"
+
+# 10. A fallback that fails leaves the precise refusal, not a silent success.
+rm -f "$LOG/actions" "$LOG/fallback"
+rm -f "$LOG/iw_reg"
+cp "$ROOT/tests/fixtures/iw-reg-country-00.txt" "$LOG/iw_reg"
+if FALLBACK_EXIT=1 run; then bad "a failed fallback maps back to the refusal"; else
+    ok "a failed fallback maps back to the refusal"
+fi
+grep -q 'channel 149 (5 GHz, band a) is passive-only' "$LOG/out" \
+    && ok "the failed fallback keeps the channel diagnosis" \
+    || bad "the failed fallback keeps the channel diagnosis" "$(cat "$LOG/out")"
+unset PHONE_AP_FALLBACK PHONE_AP_FALLBACK_TOOL PHONE_AP_FALLBACK_STATE PHONE_AP_FALLBACK_CHANNEL
+
 finish

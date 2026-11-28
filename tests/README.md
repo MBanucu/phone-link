@@ -26,6 +26,7 @@ command is usually the first one to run.
 | `phone-ap-delete` | `--check` is read-only and `--yes` downs then deletes the profile | `bin/phone-ap-delete` |
 | `phone-ap-rejoin` | a missing station is rejoined through adb, with a throttle and an external-role path | `lib/phone-ap-rejoin.sh` |
 | `phone-ap-failopen` | a dead tunnel drops the hairpin and leaves the AP drop, without rewriting nft twice | `lib/phone-ap-failopen.sh` |
+| `phone-ap-fallback` | the one 2.4 GHz attempt changes only band/channel/width, records the reason, and waits at boot | `lib/phone-ap-fallback.sh` |
 | `phone-ap-regdomain` | channel 149 is passive-only in country 00 and allowed in DE, for the command and the doctor | `lib/python/phone_link/regdomain.py` |
 | `phone-wifi-connect` | a saved network is joined with the passphrase the handler expects | `bin/phone-wifi-connect` |
 | `phone-wifi-enable` | the radio is enabled and polled until it reports on | `bin/phone-wifi-enable` |
