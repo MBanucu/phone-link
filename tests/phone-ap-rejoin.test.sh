@@ -8,9 +8,8 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/lib/phone-ap-rejoin.sh
 
 . "$ROOT/tests/lib/harness.sh"
-tmpdir TMP
-export LOG=$TMP/log STUBS=$TMP/bin
-mkdir -p "$LOG" "$STUBS" "$TMP/run/phone-link"
+suite --no-home
+mkdir -p "$TMP/run/phone-link"
 
 PSK=psk-do-not-leak-42
 SSID=PhoneLink

@@ -6,24 +6,12 @@ set -u
 BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/bin/phone-usb-tether-check
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
-mkdir -p "$LOG" "$STUBS"
+. "$ROOT/tests/lib/harness.sh"
+suite
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
-cat >"$STUBS/adb" <<'EOF'
-#!/usr/bin/env bash
+stub adb
+answer adb <<'EOF'
 args=("$@")
 if [ "${args[0]:-}" = "-s" ]; then args=("${args[@]:2}"); fi
 case "${args[0]:-}" in
@@ -38,10 +26,9 @@ case "${args[0]:-}" in
     ;;
 esac
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/adb"
 
-cat >"$STUBS/ip" <<'EOF'
-#!/usr/bin/env bash
+stub ip
+answer ip <<'EOF'
 # Only `ip -o route get <ip>` is used by the script.
 if [ -f "$LOG/route" ]; then
   cat "$LOG/route"
@@ -50,17 +37,13 @@ else
   exit 2
 fi
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/ip"
 
-cat >"$STUBS/curl" <<'EOF'
-#!/usr/bin/env bash
+stub curl
+answer curl <<'EOF'
 printf '%s' "$*" >"$LOG/curl.argv"
 printf '%s' "$(cat "$LOG/code" 2>/dev/null || echo 000)"
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/curl"
 
-chmod +x "$STUBS/adb" "$STUBS/ip" "$STUBS/curl"
-export PATH="$STUBS:$PATH"
 
 set_state() {
   printf 'List of devices attached\nXPLO2EEA0001541\tdevice\n' >"$LOG/devices"
@@ -153,5 +136,4 @@ grep -q 'no phone attached' "$LOG/out" && ok "no phone message" || bad "no phone
 # 7. --help exits 0.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

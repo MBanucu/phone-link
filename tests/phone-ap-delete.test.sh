@@ -5,25 +5,13 @@ set -u
 BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/bin/phone-ap-delete
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
+. "$ROOT/tests/lib/harness.sh"
+suite
 export PHONE_AP_DECLARATIVE=$TMP/ap-profile
-mkdir -p "$LOG" "$STUBS"
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
-cat >"$STUBS/nmcli" <<'EOF'
-#!/usr/bin/env bash
+stub nmcli
+answer nmcli <<'EOF'
 case "$*" in
   "-t -f NAME con show") cat "$LOG/names" ;;
   "-t -f NAME,DEVICE con show --active") cat "$LOG/active" ;;
@@ -35,19 +23,16 @@ case "$*" in
 esac
 EOF
 
-cat >"$STUBS/id" <<'EOF'
-#!/usr/bin/env bash
+stub id
+answer id <<'EOF'
 printf '0\n'
 EOF
 
-cat >"$STUBS/sudo" <<'EOF'
-#!/usr/bin/env bash
+stub sudo
+answer sudo <<'EOF'
 exec "$@"
 EOF
 
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS"/*
-chmod +x "$STUBS"/*
-export PATH="$STUBS:$PATH"
 
 run() {
   "$BASH_BIN" "$SCRIPT" "$@" >"$LOG/out" 2>&1
@@ -125,5 +110,4 @@ grep -q 'nothing is deleted' "$LOG/out" \
 # 8. --help.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

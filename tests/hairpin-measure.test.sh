@@ -7,19 +7,9 @@ set -u
 BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/tests/live/hairpin-measure.sh
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+. "$ROOT/tests/lib/harness.sh"
+suite --no-home
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s\n' "$*"
-}
 
 run() { # output file, args...
   local out=$1
@@ -157,5 +147,4 @@ grep -Fq 'Started %s. Evidence: `%s`.\n\n'"'"' "$STARTED_ISO" "$OUT"' "$SCRIPT" 
   ok "the summary prints the captured start" ||
   bad "the summary prints the captured start"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

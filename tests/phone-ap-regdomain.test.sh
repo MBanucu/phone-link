@@ -9,9 +9,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 FIXTURES=$ROOT/tests/fixtures
 
 . "$ROOT/tests/lib/harness.sh"
-tmpdir TMP
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
-mkdir -p "$LOG" "$STUBS"
+suite
 
 # 1. The country-00 and country-DE captures: channel 149 is present in both,
 #    but passive-only (NO-IR/PASSIVE-SCAN) in the world domain.

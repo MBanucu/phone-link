@@ -10,9 +10,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/bin/phone-ap-down
 
 . "$ROOT/tests/lib/harness.sh"
-tmpdir TMP
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
-mkdir -p "$LOG" "$STUBS"
+suite
 
 export PHONE_HOTSPOT_CON=PhoneHotspot
 export PHONE_AP_CON=phonelink
@@ -33,8 +31,6 @@ case "$*" in
 esac
 exit 0
 EOF
-
-export PATH="$STUBS:$PATH"
 
 run() {
   "$BASH_BIN" "$SCRIPT" "$@" >"$LOG/out" 2>&1
