@@ -18,6 +18,8 @@ flake.nix  →  modules/*.nix  →  lib/python/* + lib/*.sh  →  bin/*  →  te
   `derived.nix` the values both sides share. `phone-link-failopen.nix` adds the
   fail-open watchdog. Neither contains a shell implementation.
 - `lib/` — `python/phone_link/` is the action registry and the command bodies,
+  one module per feature under `commands/` (`adb`, `wifi`, `usb`, `ap`,
+  `tunnel`, `repair`, `install`, `proxy`; shared helpers in `common`),
   `python/phone_doctor/` the checker (one module per symptom group),
   `python/phone_link_gui/` the GTK4 panel; `lib/*.sh` are the helpers the units
   run (tunnel toggle, AP rejoin, fail-open).
@@ -35,13 +37,13 @@ flake.nix  →  modules/*.nix  →  lib/python/* + lib/*.sh  →  bin/*  →  te
 | Task | First file | Test to run |
 |---|---|---|
 | Change the tunnel | `modules/phone-link/config/tunnel.nix` (`phone-tun`, `phone-tun-toggle`) and `modules/phone-link/derived.nix` (generated config) | `nix build .#checks.x86_64-linux.module` and `bash tests/phone-tun-toggle.test.sh` |
-| Change the AP profile | `modules/phone-link/config/networkmanager.nix` (`networking.networkmanager.ensureProfiles`); the imperative path is `lib/python/phone_link/commands/network.py` | `nix build .#checks.x86_64-linux.module` and `bash tests/phone-ap-create.test.sh` |
+| Change the AP profile | `modules/phone-link/config/networkmanager.nix` (`networking.networkmanager.ensureProfiles`); the imperative path is `lib/python/phone_link/commands/ap.py` | `nix build .#checks.x86_64-linux.module` and `bash tests/phone-ap-create.test.sh` |
 | Change the hairpin or fail-open | `modules/phone-link/options/ap.nix` (`ap.uplink`, the `ap.*Rules` values) and `derived.nix` (the rulesets); `modules/phone-link-failopen.nix` + `lib/phone-ap-failopen.sh` for the watchdog | `nix build .#checks.x86_64-linux.module` and `bash tests/phone-ap-failopen.test.sh` |
 | Change or add a command | `lib/python/phone_link/commands/<group>.py`, then one `Action` in `actions.py` (its `module:function`, usage, docs row and flags); `registry_gen --write` writes the shim, `COMMANDS` entry and docs row. Full recipe in [commands](commands.md) | `bash tests/<name>.test.sh`, plus `nix build .#checks.x86_64-linux.registry` |
 | Change a module option | `modules/phone-link/options/<group>.nix` (or `options/ap.nix` for `ap.*` and its rulesets); document it in the [options table](options.md) | `nix build .#checks.x86_64-linux.module` |
 | Add or change a test | `tests/<name>.test.sh` | `bash tests/<name>.test.sh`; then `bash tests/check.sh fast` for the cheap set |
 | Change the GUI | `lib/python/phone_link_gui/app.py` (pages beside it); argv still comes from `lib/python/phone_link/actions.py` | `nix build .#checks.x86_64-linux.gui` and `.#checks.x86_64-linux.gui-registry` |
-| Change the proxy install | `lib/python/phone_link/commands/phone.py` (`phone_proxy_install`); the app itself is `MBanucu/phone-link-proxy` | `bash tests/phone-proxy-install.test.sh` |
+| Change the proxy install | `lib/python/phone_link/commands/install.py` (`phone_proxy_install`); the app itself is `MBanucu/phone-link-proxy` | `bash tests/phone-proxy-install.test.sh` |
 
 [`nix build .#checks.x86_64-linux.format`](checks.md) guards the Nix files,
 [`shellcheck`](checks.md) guards `bin/`, `lib/*.sh` and every `*.sh` under

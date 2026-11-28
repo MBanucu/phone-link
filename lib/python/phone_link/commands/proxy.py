@@ -24,8 +24,9 @@ import tempfile
 import time
 import urllib.parse
 
-from .. import phone, settings
+from .. import boot, phone, settings
 from ..shell import capture, die, log, must, status
+from .common import _only_help, _serial, _shell
 
 # The class keeps its package whatever id the app is installed under, the way
 # the harness names it: only the package half of the component follows
@@ -1263,4 +1264,179 @@ def phone_proxy_import(args: list[str]) -> int:
     if not serial:
         die("no phone attached (see adb devices)")
     import_from(serial, path)
+    return 0
+
+
+USAGE_BATTERY = """usage: phone-proxy-battery-whitelist [--check]
+
+Adds the proxy app to the device-idle (Doze) whitelist with
+`cmd deviceidle whitelist +<package>`. --check only reports the state.
+"""
+
+
+def phone_proxy_battery_whitelist(args: list[str]) -> int:
+    """Exempt the proxy app from battery optimisation (Doze)."""
+    _only_help([value for value in args if value != "--check"], USAGE_BATTERY)
+    check_only = "--check" in args
+    serial = _serial()
+    package = settings.PHONE_PROXY_PKG
+    log(f"phone: {serial}")
+
+    installed = _shell(serial, "pm", "path", package)
+    if not any(line.startswith("package:") for line in installed.splitlines()):
+        die(f"{package} is not installed; run phone-proxy-install first")
+
+    def whitelisted() -> bool:
+        return f",{package}," in _shell(serial, "dumpsys", "deviceidle", "whitelist")
+
+    if whitelisted():
+        log(f"{package}: already whitelisted from battery optimisation")
+        return 0
+    if check_only:
+        log(f"{package}: not whitelisted (Doze may stop the proxy)")
+        return 1
+
+    output = capture(
+        ["adb", "-s", serial, "shell", "cmd", "deviceidle", "whitelist", f"+{package}"]
+    ).replace("\r", "")
+    if not whitelisted():
+        die(f"whitelisting failed: {output or 'no output'}")
+
+    log(f"whitelisted {package} from battery optimisation")
+    log("Doze will now leave the proxy service alone")
+    return 0
+
+
+USAGE_BOOT = """usage: phone-proxy-boot [--check]
+
+Makes this repository's app come back by itself after a reboot: adds it to the
+device-idle allowlist, grants the location and notification permissions a boot
+start needs, and turns auto_start on (which also starts the proxy). It also
+checks that the installed build can start before the first unlock: the
+direct-boot flag and a receiver for LOCKED_BOOT_COMPLETED. --check only
+reports, naming each missing input; a manifest fact needs a reinstall.
+
+DokeOS Auto Start Management is the other boot gate. It is behind a signature
+permission, so this command cannot read or write it: it names the screen and
+reports the app's dated "likely blocked" fact without promising a restart.
+"""
+
+
+def phone_proxy_boot(args: list[str]) -> int:
+    """Make the phone-link app survive a reboot."""
+    _only_help([value for value in args if value != "--check"], USAGE_BOOT)
+    check_only = "--check" in args
+    serial = _serial()
+    package = settings.PHONE_APP_PKG
+    # The class keeps the app's own namespace: `.ProxyService` would be resolved
+    # against the manifest package, which a renamed (test, vendored) build does
+    # not share with the Java classes.
+    service = f"{package}/{settings.PHONE_APP_NAMESPACE}.ProxyService"
+    log(f"phone: {serial}")
+
+    installed = _shell(serial, "pm", "path", package)
+    if not any(line.startswith("package:") for line in installed.splitlines()):
+        die(f"{package} is not installed; run phone-proxy-install first")
+
+    def package_dump() -> str:
+        return _shell(serial, "dumpsys", "package", package)
+
+    def device_sdk() -> str:
+        return _shell(serial, "getprop", "ro.build.version.sdk").strip()
+
+    def whitelisted() -> bool:
+        return f",{package}," in _shell(serial, "dumpsys", "deviceidle", "whitelist")
+
+    def state_text() -> str:
+        return _shell(
+            serial,
+            "cat",
+            f"/sdcard/Android/data/{package}/files/state.txt",
+        )
+
+    def auto_start() -> str:
+        # A stopped service prints nothing; the app's state file still answers,
+        # the same fallback the doctor uses.
+        text = _shell(serial, "dumpsys", "activity", "service", service)
+        return boot.auto_start_state(text, state_text())
+
+    def oem_note() -> None:
+        # This is the gate adb cannot set: the list is behind a signature
+        # permission, so say it is unknown instead of implying the reboot is
+        # proven.
+        log(
+            "DokeOS Auto Start Management is not readable from adb; enable "
+            '"Phone link proxy" there (System Manager > App Management > '
+            "Auto Start Management)"
+        )
+        if boot.last_boot_missed(state_text()):
+            log(
+                "the app reports the last boot as likely blocked by DokeOS "
+                "Auto Start Management; the same screen is where to enable it"
+            )
+
+    fixable, reinstall, unknown = boot.inspect(
+        package_dump(), device_sdk(), auto_start(), whitelisted()
+    )
+    missing = fixable + reinstall
+
+    if not missing and not unknown:
+        log(f"{package}: every boot input adb can check is present")
+        oem_note()
+        log(
+            "a reboot without unlocking is the only proof; with the DokeOS "
+            "gate unreadable, this does not promise a restart"
+        )
+        return 0
+    if check_only:
+        for problem in missing + unknown:
+            log(f"{package}: {problem}")
+        if reinstall:
+            log(f"{package}: reinstall the release; adb cannot add a manifest fact")
+        return 1
+
+    # Grants first, then the allowlist and auto_start, so the final read sees
+    # the same state a boot would.
+    for permission in boot.grants_needed(package_dump(), device_sdk()):
+        status(
+            [
+                "adb", "-s", serial, "shell", "pm", "grant", package,
+                f"android.permission.{permission}",
+            ]
+        )
+    if not whitelisted():
+        status(
+            [
+                "adb", "-s", serial, "shell", "cmd", "deviceidle", "whitelist",
+                f"+{package}",
+            ]
+        )
+    if auto_start() != "true":
+        status(
+            [
+                "adb", "-s", serial, "shell", "am", "start-foreground-service",
+                "-n", service, "-a", f"{package}.action.START",
+                "--ez", "auto_start", "true",
+            ]
+        )
+        # The app writes auto_start when it handles the intent; give it up to
+        # ten seconds instead of trusting a fixed sleep.
+        deadline = time.time() + 10
+        while auto_start() != "true" and time.time() < deadline:
+            time.sleep(1)
+
+    fixable, reinstall, unknown = boot.inspect(
+        package_dump(), device_sdk(), auto_start(), whitelisted()
+    )
+    if fixable or unknown:
+        die("; ".join(fixable + unknown))
+    if reinstall:
+        die(
+            f"{package}: this install cannot start before unlock: "
+            + "; ".join(reinstall)
+            + " (reinstall the release)"
+        )
+    log(f"{package}: every boot input adb can change is set")
+    oem_note()
+    log("a reboot without unlocking is the only proof")
     return 0

@@ -30,8 +30,9 @@ doctor (`phone-doctor`, which is an action but lives in `phone_doctor`).
    from script name to function. The name is the contract; the registry, the
    Nix wrappers, the tests and the GUI all address scripts, not modules.
 3. `lib/python/phone_link/commands/<area>.py` — the function and its `USAGE_*`
-   text, grouped by area: `status`, `phone`, `network`, `proxy`, `device`,
-   `maintenance`, `doctor_fix`.
+   text, grouped by area: `status`, `adb`, `wifi`, `usb`, `ap`, `tunnel`,
+   `repair`, `install`, `proxy`, `device`, `maintenance`, `doctor_fix`; the
+   helpers those modules share live in `common.py`.
 4. `lib/python/phone_link/actions.py` — the source of everything above: the
    `Action` carries id, group, title, summary, docs description, usage,
    `module:function`, `root`, `supports_check`, `supports_yes`, `destructive`,
