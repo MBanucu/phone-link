@@ -149,9 +149,10 @@ let
       ${lib.escapeShellArgs effectiveHosts}
   '';
 
-  # Started and restarted by the timer. The logic lives in a plain script so the
-  # test suite can run it with stubbed systemctl and probe commands; the module
-  # only binds the paths, the declared host order and the binaries.
+  # Started and restarted by the timer. The decision lives in Python
+  # (`phone_link.unit.tun_toggle`); this hook only binds the paths, the declared
+  # host order and the binaries, then execs it, so the unit and the test suite
+  # run the same code.
   toggle = pkgs.writeShellScript "phone-tun-toggle" ''
     export PHONE_TUN_HOSTS=${lib.escapeShellArg (lib.concatStringsSep " " effectiveHosts)}
     export PHONE_TUN_AP_HOST=${lib.escapeShellArg cfg.proxyHost}
@@ -171,7 +172,11 @@ let
         pkgs.python3
       ]
     }
-    exec ${pkgs.bash}/bin/bash ${../../lib/phone-tun-toggle.sh}
+    # The same tree the `phone-link` package installs as
+    # share/phone-link/lib/python; the hook is not part of the package, so it
+    # points at the package source instead of resolving a sibling bin/ shim.
+    export PYTHONPATH=${../../lib/python}''${PYTHONPATH:+:$PYTHONPATH}
+    exec ${pkgs.python3}/bin/python3 -m phone_link.unit.tun_toggle
   '';
 
   # Android marks the link-only AP as "no internet" and temporarily disables
