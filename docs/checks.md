@@ -11,7 +11,8 @@ Run every target with `nix flake check`; run one with
 | `package` | every script in the flake exists, is executable, kept its wrapped `PATH`, and `phone-net-status` prints a status |
 | `shellcheck` | `bin/`, `lib/*.sh` and every tracked `*.sh` under `tests/` — the suites, the shared harness, `check-timings.sh` and the live scripts — are clean at shellcheck warning level |
 | `python` | every module under `lib/python/` compiles without being imported; GTK is not loaded |
-| `python-lint` | `ruff check` and `ruff format --check` over the tree, and `mypy` over `lib/python/` with the rule set in `pyproject.toml`; the GUI is checked too, with GTK's missing stubs ignored |
+| `python-lint` | `ruff check` and `ruff format --check` over the tree, and `mypy` over `lib/python/` and `tests/python/` with the rule set in `pyproject.toml`; the GUI is checked too, with GTK's missing stubs ignored |
+| `python-tests` | the migrated Python suite under `tests/python/` builds fake `adb`/`curl`/`avahi-browse`/`nmcli` from one harness and runs the doctor case for case beside the shell suite it replaces |
 | `format` | `flake.nix`, every `.nix` under `modules/` and `tests/module/` discovered from the directories is nixfmt-clean |
 | `module` | the module generates the expected sing-box config and units (5 s probe, 20 s first run, AP DHCP hole, a DHCP-only AP with no router/DNS option, an nftables forward drop that also works with the firewall off, an opt-in hairpin with one accepted client, a scoped masquerade and DHCP router/DNS, a default-on fail-open watchdog with that hairpin and an explicit off switch, an opt-in AP autoconnect that leaves the profile link-only, an opt-in rejoin watchdog, an optional `cfg80211.ieee80211_regdom` kernel parameter that merges with existing ones, pinned resolver, never started at boot) and defines nothing when disabled |
 | `script` | every `tests/*.test.sh` suite runs hermetically with stub `adb`/`curl`/`avahi-browse`; [architecture](architecture.md#i-want-to) shows how to run one suite |
@@ -27,6 +28,22 @@ no-op and read-only `--check`). The AP regulatory domain has its own suite:
 captured `iw reg get`/`iw phy` output for `country 00` and `DE`, the shared
 parser, the doctor's `ap_channel` ok/warn/skip cases, and `phone-ap-up` failing
 before any activation when the channel is passive-only.
+
+### Two runners during the migration
+
+`script` still runs every `tests/*.test.sh`, and the new `python-tests` runs
+the suites already ported under `tests/python/`. `phone-doctor.test.sh` is the
+pilot ([#117](https://github.com/MBanucu/phone-link/issues/117)) and runs in
+both, against the same fixtures and the same 199 assertions, so a reviewer can
+compare the two. When the Python replacement is accepted the shell file is
+deleted; its case list and assertion count live in
+`tests/python/phone_link_tests/test_doctor.py`, where `test_case_inventory`
+fails if a numbered section is missing or the count drifts. The remaining suites
+stay on the shell runner until each has a Python replacement.
+
+While both run, `python-tests` is not part of `tests/check.sh fast`: `script`
+already runs the same 199 doctor assertions, and a `fast` push would pay for
+both. It becomes a `fast` target when the shell original is deleted.
 
 ### One entry point
 

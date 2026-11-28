@@ -27,6 +27,7 @@ files = [
   "lib/python/phone_link",
   "lib/python/phone_doctor",
   "lib/python/phone_link_gui",
+  "tests/python",
 ]
 # GTK has no type stubs; the import is real at runtime and only the stubs are
 # missing. Everything else is checked, including the GUI.

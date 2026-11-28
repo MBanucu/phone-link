@@ -30,7 +30,8 @@ usage: tests/check.sh <target>
   format         nixfmt-clean flake.nix, modules/*.nix and tests/module/*.nix
   shellcheck     bin/, lib/*.sh and every *.sh under tests/ at warning level
   python         compile every module under lib/python/ without importing it
-  python-lint    ruff check, ruff format --check and mypy over lib/python/
+  python-lint    ruff check, ruff format --check and mypy over lib/python/ and tests/python/
+  python-tests   the migrated Python suite under tests/python/
   module         the NixOS module's generated config and units
   script         every hermetic tests/*.test.sh suite
   package        every script is installed, executable and kept its wrapped PATH
@@ -50,7 +51,8 @@ list_targets() {
     format 'nixfmt-clean flake.nix, modules/*.nix and tests/module/*.nix' \
     shellcheck 'bin/, lib/*.sh and every *.sh under tests/ at warning level' \
     python 'compile every module under lib/python/ without importing it' \
-    python-lint 'ruff check, ruff format --check and mypy over lib/python/' \
+    python-lint 'ruff check, ruff format --check and mypy over lib/python/ and tests/python/' \
+    python-tests 'the migrated Python suite under tests/python/' \
     module "the NixOS module's generated config and units" \
     script 'every hermetic tests/*.test.sh suite' \
     package 'every script is installed, executable and kept its wrapped PATH' \
@@ -112,7 +114,7 @@ case ${1:-} in
   --help | -h)
     usage
     ;;
-  format | shellcheck | python | python-lint | module | script | package | registry | gui-registry | gui)
+  format | shellcheck | python | python-lint | python-tests | module | script | package | registry | gui-registry | gui)
     require_nix && build_target "$1" || exit 1
     ;;
   '')
