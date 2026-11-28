@@ -166,7 +166,6 @@ case "$*" in
 esac
 EOF
 rm -f "$LOG/iw_reg"
-rm -f "$LOG/iw_reg"
 cp "$ROOT/tests/fixtures/iw-reg-country-00.txt" "$LOG/iw_reg"
 rm -f "$LOG/iw_info" "$LOG/iw_phy"
 rm -f "$LOG/actions"
@@ -195,7 +194,6 @@ grep -q 'Not waiting for the supplicant timeout' "$LOG/out" \
 # 6. A country that allows 149 proceeds; a failing activation with the
 #    observed supplicant message then hints at the stale supplicant and the
 #    NetworkManager restart, and preserves the non-zero exit.
-rm -f "$LOG/iw_reg"
 rm -f "$LOG/iw_reg"
 cp "$ROOT/tests/fixtures/iw-reg-country-de.txt" "$LOG/iw_reg"
 rm -f "$LOG/actions" "$LOG/nmcli_fail"

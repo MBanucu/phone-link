@@ -7,21 +7,10 @@ set -u
 BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/lib/phone-ap-fallback.sh
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export LOG=$TMP/log STUBS=$TMP/bin
-mkdir -p "$LOG" "$STUBS" "$TMP/run/phone-link"
 
-pass=0
-fail=0
-ok() {
-    pass=$((pass + 1))
-    printf 'ok   %s\n' "$*"
-}
-bad() {
-    fail=$((fail + 1))
-    printf 'FAIL %s\n' "$*"
-}
+. "$ROOT/tests/lib/harness.sh"
+suite
+mkdir -p "$TMP/run/phone-link"
 
 CON=phonelink
 STATE=$TMP/run/phone-link/ap-fallback
@@ -43,8 +32,7 @@ reset() {
 
 # nmcli: the active list is a file so a test can make the AP appear at a chosen
 # moment; modify and up are logged and can be made to fail.
-cat >"$STUBS/nmcli" <<'EOF'
-#!/usr/bin/env bash
+stub_cmd nmcli <<'EOF'
 printf '%s\n' "$*" >>"$LOG/nmcli"
 case "$*" in
   "-t -f NAME connection show --active")
@@ -61,8 +49,7 @@ esac
 exit 0
 EOF
 
-cat >"$STUBS/sleep" <<'EOF'
-#!/usr/bin/env bash
+stub_cmd sleep <<'EOF'
 printf '%s\n' "$*" >>"$LOG/sleep"
 n=$(( $(cat "$LOG/sleep_count" 2>/dev/null || echo 0) + 1 ))
 printf '%s\n' "$n" >"$LOG/sleep_count"
@@ -73,13 +60,9 @@ fi
 EOF
 chmod +x "$STUBS/sleep"
 
-cat >"$STUBS/date" <<'EOF'
-#!/usr/bin/env bash
+stub_cmd date <<'EOF'
 printf '2026-11-28T12:00:00Z\n'
 EOF
-chmod +x "$STUBS/date" "$STUBS/nmcli" "$STUBS/sleep"
-# Nix builds have no /usr/bin/env; use the bash this suite runs under.
-sed -i "1s|^#!.*|#!$BASH_BIN|" "$STUBS/nmcli" "$STUBS/sleep" "$STUBS/date"
 
 # 1. The AP is already active: no fallback, no state.
 reset
@@ -187,5 +170,4 @@ if [ -s "$STATE" ]; then ok "a failed activation records the attempt"; else bad 
 reset
 if run --bogus; then bad "an unknown argument must fail"; else ok "an unknown argument fails"; fi
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish
