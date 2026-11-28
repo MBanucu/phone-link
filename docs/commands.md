@@ -2,12 +2,27 @@
 
 `bin/` holds the command names. The body of a normal command is a Python
 function under `lib/python/phone_link/commands/`; `phone-doctor` is the one
-exception, with its own package under `lib/python/phone_doctor/`. Long-running
-logic that a systemd unit runs stays in `lib/*.sh`. The table in
+exception, with its own package under `lib/python/phone_doctor/`. The table in
 [`actions.py`](../lib/python/phone_link/actions.py) is the **single metadata
 source** for the command surface: id, group, `module:function`, short summary,
 usage line, escalation (`root`), GUI visibility, variants and the
 `docs/scripts.md` description.
+
+## Where shell stops
+
+Python carries anything with branching, state, parsing, retries or structured
+output: commands, the decisions a unit makes, harnesses.
+
+Shell is only three things: the generated `bin/` shims, an `ExecStart` hook that
+`exec`s one Python module, and Nix activation snippets.
+
+A new `lib/*.sh` over about 40 lines, or a new `tests/*.test.sh`, needs an issue
+saying why Python is not the answer. The files already there are migrated under
+#116 and #117, not expanded.
+
+`tests/check.sh` is the one sanctioned large shell file in this repo: it turns
+`nix build` into one entry point and holds no logic of its own. The proxy repo's
+equivalent is `build.sh`.
 
 [`registry_gen.py`](../lib/python/phone_link/registry_gen.py) generates the
 `bin/` shims, `commands/__init__.py` and the scripts table from that one table.
@@ -85,7 +100,7 @@ PYTHONPATH=lib/python python3 -m phone_link.registry_gen --write
 | The change is… | Home | Real example |
 |---|---|---|
 | adb, `dumpsys`, JSON, argparse; a laptop-side read or state change | Python action in `lib/python/phone_link/commands/<area>.py` | `phone-net-status` in `commands/status.py` |
-| a long-running loop a systemd unit runs and a test stubs | `lib/*.sh`, wired by a module wrapper | `phone-tun-toggle` in `lib/phone-tun-toggle.sh`, started by `modules/phone-link/config/tunnel.nix` |
+| a long-running loop a systemd unit runs and a test stubs | Python, with a shell `ExecStart` hook that `exec`s it; the existing `lib/*.sh` helpers move under #116 | `phone-tun-toggle` in `lib/phone-tun-toggle.sh`, started by `modules/phone-link/config/tunnel.nix` |
 | an option, unit, generated config, firewall rule or watchdog | `modules/*.nix` | `phoneLink.ap.uplink` in `modules/phone-link/options/ap.nix` |
 | presentation only, over the same actions | `lib/python/phone_link_gui/` | the Proxy port page in `lib/python/phone_link_gui/port_page.py`; it runs `phone-proxy-switch`, it does not implement it |
 | a new proof, not a user-facing command | `flake.nix` / `tests/`, not `bin/` | the `registry` check in `flake.nix` |
