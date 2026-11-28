@@ -86,9 +86,7 @@ class RunWindow(Adw.Window):
 
     def _append(self, line: str) -> bool:
         self._buffer.insert(self._buffer.get_end_iter(), line + "\n")
-        self._view.scroll_to_iter(
-            self._buffer.get_end_iter(), 0.0, False, 0.0, 0.0
-        )
+        self._view.scroll_to_iter(self._buffer.get_end_iter(), 0.0, False, 0.0, 0.0)
         return False
 
     def _finish(self, outcome: Outcome) -> bool:
@@ -103,7 +101,9 @@ class RunWindow(Adw.Window):
             self._status.set_text(f"could not run: {outcome.error}")
             self._status.add_css_class("error")
         else:
-            self._status.set_text(f"exit {outcome.exit_code} · {outcome.duration:.1f} s")
+            self._status.set_text(
+                f"exit {outcome.exit_code} · {outcome.duration:.1f} s"
+            )
             # A failed run should not read like a successful one at a glance.
             self._status.add_css_class("success" if outcome.exit_code == 0 else "error")
         if self._on_finished is not None:

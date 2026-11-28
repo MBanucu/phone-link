@@ -74,7 +74,11 @@ def check(ctx: Context) -> list[Result]:
     if ctx.ap_external:
         if address:
             results.append(
-                ok("ap_address", "ap address", f"{ctx.ap_if} {address} (external AP client)")
+                ok(
+                    "ap_address",
+                    "ap address",
+                    f"{ctx.ap_if} {address} (external AP client)",
+                )
             )
         else:
             results.append(

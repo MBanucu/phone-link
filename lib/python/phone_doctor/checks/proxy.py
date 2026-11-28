@@ -82,7 +82,9 @@ def _latest_tag(ctx: Context, installed: str) -> str:
         ],
         timeout=5,
     )
-    match = re.search(r'"tag_name"\s*:\s*"([^"]+)"', (proc.stdout or "") if proc else "")
+    match = re.search(
+        r'"tag_name"\s*:\s*"([^"]+)"', (proc.stdout or "") if proc else ""
+    )
     tag = match.group(1) if match else ""
     if tag:
         try:
@@ -129,7 +131,9 @@ def _port_match(ctx: Context) -> Result:
     ports = _listening_ports(ctx)
     if not ports:
         return skip(
-            "proxy_port", "proxy port", f"laptop {laptop}, the phone is listening on nothing"
+            "proxy_port",
+            "proxy port",
+            f"laptop {laptop}, the phone is listening on nothing",
         )
     listed = ", ".join(str(port) for port in ports)
     if laptop.isdigit() and int(laptop) in ports:
@@ -193,7 +197,9 @@ def check(ctx: Context) -> list[Result]:
 
     serial = ctx.serial
     if serial:
-        if "package:" in ctx.text(["adb", "-s", serial, "shell", "pm", "path", ctx.proxy_pkg]):
+        if "package:" in ctx.text(
+            ["adb", "-s", serial, "shell", "pm", "path", ctx.proxy_pkg]
+        ):
             results.append(ok("proxy_app", "proxy app", ctx.proxy_pkg))
         else:
             results.append(

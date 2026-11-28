@@ -61,7 +61,9 @@ def phone_adb_wifi(args: list[str]) -> int:
         log("warning: avahi-browse is missing, cannot read the wireless debugging port")
 
     def wifi_debugging() -> str:
-        return _first_line(_shell(serial, "settings", "get", "global", "adb_wifi_enabled"))
+        return _first_line(
+            _shell(serial, "settings", "get", "global", "adb_wifi_enabled")
+        )
 
     def legacy_port() -> str:
         return _first_line(_shell(serial, "getprop", "service.adb.tcp.port"))
@@ -76,11 +78,7 @@ def phone_adb_wifi(args: list[str]) -> int:
         address = ""
         port = ""
         for line in output.splitlines():
-            if (
-                line.startswith("=")
-                and "IPv4" in line
-                and f"adb-{serial}" in line
-            ):
+            if line.startswith("=") and "IPv4" in line and f"adb-{serial}" in line:
                 seen = True
                 continue
             if not seen:
@@ -110,8 +108,17 @@ def phone_adb_wifi(args: list[str]) -> int:
             log("wireless debugging already enabled")
         else:
             status(
-                ["adb", "-s", serial, "shell", "settings", "put", "global",
-                 "adb_wifi_enabled", "1"]
+                [
+                    "adb",
+                    "-s",
+                    serial,
+                    "shell",
+                    "settings",
+                    "put",
+                    "global",
+                    "adb_wifi_enabled",
+                    "1",
+                ]
             )
             log("enabled wireless debugging (random TLS port)")
 
@@ -123,9 +130,7 @@ def phone_adb_wifi(args: list[str]) -> int:
                 f"warning: adb tcpip {settings.PHONE_ADB_PORT} restarts adbd "
                 "(USB adb and the tether blip)"
             )
-            if status(
-                ["adb", "-s", serial, "tcpip", settings.PHONE_ADB_PORT]
-            ) != 0:
+            if status(["adb", "-s", serial, "tcpip", settings.PHONE_ADB_PORT]) != 0:
                 die("adb tcpip failed")
             time.sleep(settings.PHONE_ADB_POLL)
 
@@ -187,7 +192,11 @@ def adb_wifi_connect(args: list[str]) -> int:
         time.sleep(settings.PHONE_ADB_POLL)
 
     target = ""
-    for address in [*phone.phone_ips(), settings.PHONE_HOTSPOT_IP, settings.PHONE_AP_IP]:
+    for address in [
+        *phone.phone_ips(),
+        settings.PHONE_HOTSPOT_IP,
+        settings.PHONE_AP_IP,
+    ]:
         if phone.tcp_open(address, 2, int(settings.PHONE_ADB_PORT)):
             target = address
             break

@@ -158,9 +158,7 @@ class PortPage(Gtk.Box):
         self._combo.set_model(
             Gtk.StringList.new(labels or ["nothing saved on the phone"])
         )
-        self._combo.set_subtitle(
-            "pick one" if labels else "nothing saved or listening"
-        )
+        self._combo.set_subtitle("pick one" if labels else "nothing saved or listening")
         self._combo.set_selected(0 if labels else Gtk.INVALID_LIST_POSITION)
         self._on_selected(self._combo, None)
         return False

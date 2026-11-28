@@ -160,15 +160,14 @@ def phone_tunnel_run(args: list[str]) -> int:
             serial = phone.phone_serial()
             if not serial:
                 die("no phone attached (see adb devices)")
-            if status(
-                ["adb", "-s", serial, "reverse", f"tcp:{port}", f"tcp:{port}"]
-            ) != 0:
+            if (
+                status(["adb", "-s", serial, "reverse", f"tcp:{port}", f"tcp:{port}"])
+                != 0
+            ):
                 die("adb reverse failed (is adb connected?)")
             with open(temporary, encoding="utf-8") as source:
                 rewritten = source.read()
-            rewritten = re.sub(
-                r'"server": "[^"]*"', '"server": "127.0.0.1"', rewritten
-            )
+            rewritten = re.sub(r'"server": "[^"]*"', '"server": "127.0.0.1"', rewritten)
             with open(temporary, "w", encoding="utf-8") as out:
                 out.write(rewritten)
             log(f"tunnel upstream: 127.0.0.1:{port} (adb reverse)")

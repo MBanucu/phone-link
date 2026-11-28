@@ -268,9 +268,7 @@ class Context:
         same to a reader that only takes the resolved lines, and they are fixed
         differently.
         """
-        output = self.text(
-            ["avahi-browse", "-rtp", "_adb-tls-connect._tcp"], timeout
-        )
+        output = self.text(["avahi-browse", "-rtp", "_adb-tls-connect._tcp"], timeout)
         announced = False
         for line in output.splitlines():
             if line.startswith("+"):
@@ -338,7 +336,11 @@ class Context:
                         key, _, value = line.partition("=")
                         key = key.strip().removeprefix("export ").strip()
                         value = value.strip()
-                        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                        if (
+                            len(value) >= 2
+                            and value[0] == value[-1]
+                            and value[0] in "\"'"
+                        ):
                             value = value[1:-1]
                         if key:
                             values[key] = value

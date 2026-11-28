@@ -121,9 +121,10 @@ def phone_fix_internet(args: list[str]) -> int:
             f"cmd wifi start-softap {shlex.quote(settings.PHONE_HOTSPOT_SSID)}",
         ]
     )
-    if settings.PHONE_HOTSPOT_CON in capture(
-        ["nmcli", "-t", "-f", "NAME", "con", "show"]
-    ).splitlines():
+    if (
+        settings.PHONE_HOTSPOT_CON
+        in capture(["nmcli", "-t", "-f", "NAME", "con", "show"]).splitlines()
+    ):
         if status(["nmcli", "connection", "up", settings.PHONE_HOTSPOT_CON]) != 0:
             log(f"warning: could not activate {settings.PHONE_HOTSPOT_CON}")
     elif os.environ.get("PHONE_HOTSPOT_PASS"):

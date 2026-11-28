@@ -139,7 +139,9 @@ def _ap_channel_verdict() -> regdomain.Verdict | None:
     """
     if not have("iw"):
         return None
-    channel = int(settings.PHONE_AP_CHANNEL) if settings.PHONE_AP_CHANNEL.isdigit() else 0
+    channel = (
+        int(settings.PHONE_AP_CHANNEL) if settings.PHONE_AP_CHANNEL.isdigit() else 0
+    )
     if not channel:
         return None
     return regdomain.probe(
@@ -188,8 +190,10 @@ def _ap_activation_failed(
     """Report an `nmcli connection up` failure, adding the stale-supplicant hint."""
     if output:
         log(output)
-    if verdict is not None and verdict.allowed is True and any(
-        needle in output.lower() for needle in _ACTIVATION_FAILED_AP
+    if (
+        verdict is not None
+        and verdict.allowed is True
+        and any(needle in output.lower() for needle in _ACTIVATION_FAILED_AP)
     ):
         what = regdomain.channel_label(
             settings.PHONE_AP_BAND, int(settings.PHONE_AP_CHANNEL)
@@ -282,7 +286,7 @@ def phone_ap_up(args: list[str]) -> int:
         # is safe when it is throttled, absent or there is no USB device.
         _request_ap_rejoin()
         log(
-            "AP is external (phoneLink.ap.role = \"external\"); this host does "
+            'AP is external (phoneLink.ap.role = "external"); this host does '
             "not own it and has nothing to activate. The laptop joins it as a "
             "client; the phone is nudged back over USB if it is away."
         )
@@ -301,7 +305,9 @@ def phone_ap_up(args: list[str]) -> int:
 
     if not _profile_exists():
         if phone.ap_declarative():
-            log(f"profile {settings.PHONE_AP_CON} missing; reloading it from phoneLink.ap")
+            log(
+                f"profile {settings.PHONE_AP_CON} missing; reloading it from phoneLink.ap"
+            )
             if status(["systemctl", "restart", settings.PHONE_AP_ENSURE_UNIT]) != 0:
                 die(f"could not restart {settings.PHONE_AP_ENSURE_UNIT}")
             if not _profile_exists():
@@ -323,8 +329,7 @@ def phone_ap_up(args: list[str]) -> int:
             settings.PHONE_AP_BAND, int(settings.PHONE_AP_CHANNEL)
         )
         reason = (
-            f"{what} is {verdict.reason} in "
-            f"{regdomain.country_label(verdict.country)}"
+            f"{what} is {verdict.reason} in {regdomain.country_label(verdict.country)}"
         )
         if _try_ap_fallback(reason):
             fallback_up = True
@@ -368,7 +373,7 @@ def phone_ap_down(args: list[str]) -> int:
 
     if _ap_is_external():
         log(
-            "AP is external (phoneLink.ap.role = \"external\"); this host does "
+            'AP is external (phoneLink.ap.role = "external"); this host does '
             "not own it and phone-ap-down does not stop it. The laptop's "
             "client link is unchanged; leave the external AP on so the phone "
             "stays associated."
@@ -396,9 +401,7 @@ def phone_ap_down(args: list[str]) -> int:
             "(is the phone sharing it?)"
         )
     else:
-        log(
-            f"AP down; joined the phone hotspot {settings.PHONE_HOTSPOT_CON}"
-        )
+        log(f"AP down; joined the phone hotspot {settings.PHONE_HOTSPOT_CON}")
     must(["nmcli", "-t", "-f", "NAME,DEVICE", "con", "show", "--active"])
     return 0
 
@@ -412,7 +415,7 @@ def phone_ap_create(args: list[str]) -> int:
 
     if _ap_is_external():
         log(
-            "AP is external (phoneLink.ap.role = \"external\"); there is no "
+            'AP is external (phoneLink.ap.role = "external"); there is no '
             "local profile to create or refresh. Configure the external AP "
             "itself as link-only and reserve proxyHost for the phone."
         )
@@ -449,8 +452,7 @@ def phone_ap_create(args: list[str]) -> int:
                 log(f"PSK source: {settings.PHONE_SECRETS} (PHONE_AP_PASS)")
             else:
                 log(
-                    f"PSK source: {settings.PHONE_SECRETS} not readable "
-                    "(run with sudo)"
+                    f"PSK source: {settings.PHONE_SECRETS} not readable (run with sudo)"
                 )
         return 0 if exists else 1
 
@@ -481,8 +483,7 @@ def phone_ap_create(args: list[str]) -> int:
 
     if existing and not refresh and method != "shared":
         log(
-            f"{settings.PHONE_AP_CON} already exists "
-            "(use --refresh to rewrite its PSK)"
+            f"{settings.PHONE_AP_CON} already exists (use --refresh to rewrite its PSK)"
         )
         return 0
     if existing and method == "shared":
@@ -585,7 +586,7 @@ def phone_ap_delete(args: list[str]) -> int:
 
     if _ap_is_external():
         log(
-            "AP is external (phoneLink.ap.role = \"external\"); there is no "
+            'AP is external (phoneLink.ap.role = "external"); there is no '
             "local profile this host owns, so nothing is deleted."
         )
         return 0

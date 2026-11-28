@@ -171,9 +171,7 @@ class StatusStream:
             name = str(event.get("name") or "")
             if not name:
                 return Change("section", accepted=False)
-            return Change(
-                "section", section=name, new_section=self._ensure(name)
-            )
+            return Change("section", section=name, new_section=self._ensure(name))
 
         if kind == "result":
             return self._apply_result(event)
@@ -236,10 +234,7 @@ class StatusStream:
 
     def reported_rows(self) -> int:
         return sum(
-            1
-            for rows in self.rows.values()
-            for row in rows.values()
-            if not row.pending
+            1 for rows in self.rows.values() for row in rows.values() if not row.pending
         )
 
     def payload(self) -> dict:

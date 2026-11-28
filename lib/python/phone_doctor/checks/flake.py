@@ -148,18 +148,13 @@ def _check_pin(
             warn(
                 "flake_update",
                 "flake update",
-                f"the lock pins {ref}, which origin does not have "
-                "(re-pin the input)",
+                f"the lock pins {ref}, which origin does not have (re-pin the input)",
             )
         ]
     if target == locked_rev:
         if kind == BRANCH and src:
             head = _local_head(ctx, src)
-            if (
-                head
-                and head != target
-                and not _is_ancestor(ctx, src, target, head)
-            ):
+            if head and head != target and not _is_ancestor(ctx, src, target, head):
                 return [
                     warn(
                         "flake_update",

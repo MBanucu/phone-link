@@ -20,9 +20,10 @@ checkout: unwiring the flake removes the installed copy.
 
 
 def _profile_exists() -> bool:
-    return settings.PHONE_AP_CON in capture(
-        ["nmcli", "-t", "-f", "NAME", "con", "show"]
-    ).splitlines()
+    return (
+        settings.PHONE_AP_CON
+        in capture(["nmcli", "-t", "-f", "NAME", "con", "show"]).splitlines()
+    )
 
 
 def _active_device() -> str:
@@ -138,9 +139,7 @@ def phone_link_uninstall(args: list[str]) -> int:
         settings.PHONE_NM_RUN_CONNECTIONS,
     ):
         try:
-            os.unlink(
-                os.path.join(directory, f"{settings.PHONE_AP_CON}.nmconnection")
-            )
+            os.unlink(os.path.join(directory, f"{settings.PHONE_AP_CON}.nmconnection"))
         except OSError:
             pass
     status(["nmcli", "connection", "reload"])

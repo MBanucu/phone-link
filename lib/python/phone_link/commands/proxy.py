@@ -170,10 +170,7 @@ def require_contract(serial: str, *, dump: str = "") -> int:
     """
     version = _contract(serial, dump)
     if contract.check(version) == contract.TOO_OLD:
-        die(
-            f"update the app to contract >= {contract.KNOWN}: run "
-            "phone-proxy-install"
-        )
+        die(f"update the app to contract >= {contract.KNOWN}: run phone-proxy-install")
     _warn_newer(version)
     return version if version is not None else 0
 
@@ -275,7 +272,9 @@ def phone_proxy_start(args: list[str]) -> int:
     if not serial:
         die("no phone attached (see adb devices)")
     if not _installed(serial):
-        die(f"{settings.PHONE_PROXY_PKG} is not installed; run phone-proxy-install first")
+        die(
+            f"{settings.PHONE_PROXY_PKG} is not installed; run phone-proxy-install first"
+        )
 
     dump = _dump(serial)
     _warn_newer(_contract(serial, dump))
@@ -320,7 +319,9 @@ def phone_proxy_stop(args: list[str]) -> int:
     if not serial:
         die("no phone attached (see adb devices)")
     if not _installed(serial):
-        die(f"{settings.PHONE_PROXY_PKG} is not installed; run phone-proxy-install first")
+        die(
+            f"{settings.PHONE_PROXY_PKG} is not installed; run phone-proxy-install first"
+        )
 
     dump = _dump(serial)
     _warn_newer(_contract(serial, dump))
@@ -453,7 +454,9 @@ def phone_proxy_setup(args: list[str]) -> int:
     if not serial:
         die("no phone attached (see adb devices)")
     if not _installed(serial):
-        die(f"{settings.PHONE_PROXY_PKG} is not installed; run phone-proxy-install first")
+        die(
+            f"{settings.PHONE_PROXY_PKG} is not installed; run phone-proxy-install first"
+        )
 
     _warn_newer(_contract(serial))
 
@@ -897,7 +900,7 @@ def phone_proxy_switch(args: list[str]) -> int:
             _send(serial, STOP, "--ei", "port", str(target))
             die(
                 f'the phone could not start "{profile}" on port {target} '
-                f'({_field(dump, "state") or "no state"}); nothing was changed'
+                f"({_field(dump, 'state') or 'no state'}); nothing was changed"
             )
         started = True
 
@@ -956,6 +959,7 @@ def phone_proxy_switch(args: list[str]) -> int:
 
 # -- past the app: export and import over a one-shot socket -----------------
 
+
 def backup_writable(path: str | None = None) -> bool:
     """Whether this process may write the backup at `path` (default) now."""
     target = path or settings.PHONE_PROXY_BACKUP
@@ -981,7 +985,10 @@ def check_backup_path(path: str) -> None:
     ).strip()
     if inside != "true":
         return
-    if status(["git", "-C", directory, "check-ignore", "-q", "--", target], timeout=10) == 0:
+    if (
+        status(["git", "-C", directory, "check-ignore", "-q", "--", target], timeout=10)
+        == 0
+    ):
         return
     die(
         "refusing to write the saved-proxy backup inside a git work tree: "
@@ -1194,7 +1201,9 @@ def import_from(serial: str, path: str, *, require: bool = True) -> int:
     while the backup in hand proves the previous app could export it.
     """
     if not _installed(serial):
-        die(f"{settings.PHONE_PROXY_PKG} is not installed; run phone-proxy-install first")
+        die(
+            f"{settings.PHONE_PROXY_PKG} is not installed; run phone-proxy-install first"
+        )
     if require:
         require_contract(serial)
     else:
@@ -1479,23 +1488,45 @@ def phone_proxy_boot(args: list[str]) -> int:
     for permission in boot.grants_needed(package_dump(), device_sdk()):
         status(
             [
-                "adb", "-s", serial, "shell", "pm", "grant", package,
+                "adb",
+                "-s",
+                serial,
+                "shell",
+                "pm",
+                "grant",
+                package,
                 f"android.permission.{permission}",
             ]
         )
     if not whitelisted():
         status(
             [
-                "adb", "-s", serial, "shell", "cmd", "deviceidle", "whitelist",
+                "adb",
+                "-s",
+                serial,
+                "shell",
+                "cmd",
+                "deviceidle",
+                "whitelist",
                 f"+{package}",
             ]
         )
     if auto_start() != "true":
         status(
             [
-                "adb", "-s", serial, "shell", "am", "start-foreground-service",
-                "-n", service, "-a", f"{package}.action.START",
-                "--ez", "auto_start", "true",
+                "adb",
+                "-s",
+                serial,
+                "shell",
+                "am",
+                "start-foreground-service",
+                "-n",
+                service,
+                "-a",
+                f"{package}.action.START",
+                "--ez",
+                "auto_start",
+                "true",
             ]
         )
         # The app writes auto_start when it handles the intent; give it up to

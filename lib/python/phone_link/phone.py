@@ -156,10 +156,7 @@ def proxy_pass() -> str:
     """PHONE_SOCKS_PASS, or a fatal error naming the missing file/key."""
     secrets = read_secrets()
     if "PHONE_SOCKS_PASS" not in secrets:
-        die(
-            "PHONE_SOCKS_PASS missing in "
-            f"{settings.PHONE_SECRETS}"
-        )
+        die(f"PHONE_SOCKS_PASS missing in {settings.PHONE_SECRETS}")
     return secrets["PHONE_SOCKS_PASS"]
 
 
@@ -169,8 +166,7 @@ def ap_pass() -> str:
         return os.environ["PHONE_AP_PASS"]
     if not os.access(settings.PHONE_SECRETS, os.R_OK):
         die(
-            f"cannot read {settings.PHONE_SECRETS} (run with sudo) or set "
-            "PHONE_AP_PASS"
+            f"cannot read {settings.PHONE_SECRETS} (run with sudo) or set PHONE_AP_PASS"
         )
     value = read_secrets().get("PHONE_AP_PASS", "")
     if not value:
@@ -250,8 +246,5 @@ def proxy_check(ip: str) -> bool:
         ],
         timeout=30,
     )
-    log(
-        f"{ip}:{port} -> https://example.com = "
-        f"{code or '000'}"
-    )
+    log(f"{ip}:{port} -> https://example.com = {code or '000'}")
     return code == "200"

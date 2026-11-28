@@ -90,8 +90,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="phone-doctor",
         description=(
-            "Check the runtime conditions of the whole phone-link setup. "
-            "Read-only."
+            "Check the runtime conditions of the whole phone-link setup. Read-only."
         ),
         epilog=(
             "--analyze prints one 'fail|warn ID detail' line per problem for "

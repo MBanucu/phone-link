@@ -270,9 +270,7 @@ class Window(Adw.ApplicationWindow):
         self.set_content(self._split)
 
         self._install_breakpoint()
-        self._split.connect(
-            "notify::collapsed", lambda *_args: self._update_subtitle()
-        )
+        self._split.connect("notify::collapsed", lambda *_args: self._update_subtitle())
         self._register_actions()
         self._list.connect("row-selected", self._on_row_selected)
         self._list.select_row(self._list.get_row_at_index(0))
@@ -431,7 +429,9 @@ class Window(Adw.ApplicationWindow):
             self._badge.set_visible(True)
         elif warns:
             self._badge.set_label(str(warns))
-            self._badge.set_tooltip_text(f"{warns} warning" + ("" if warns == 1 else "s"))
+            self._badge.set_tooltip_text(
+                f"{warns} warning" + ("" if warns == 1 else "s")
+            )
             self._badge.add_css_class("warning")
             self._badge.set_visible(True)
         else:
@@ -447,9 +447,7 @@ class Window(Adw.ApplicationWindow):
         dialog.set_application_icon("phone-link-gui")
         dialog.set_version(gui_version())
         dialog.set_developer_name("MBanucu")
-        dialog.set_comments(
-            "Tunnel, access point and adb control for the phone link."
-        )
+        dialog.set_comments("Tunnel, access point and adb control for the phone link.")
         dialog.set_website("https://github.com/MBanucu/phone-link")
         dialog.set_issue_url("https://github.com/MBanucu/phone-link/issues")
         return dialog
@@ -464,9 +462,7 @@ class Window(Adw.ApplicationWindow):
         self.add_action(refresh)
 
         search = Gio.SimpleAction.new("search", None)
-        search.connect(
-            "activate", lambda _a, _p: self._search_button.set_active(True)
-        )
+        search.connect("activate", lambda _a, _p: self._search_button.set_active(True))
         self.add_action(search)
 
         about = Gio.SimpleAction.new("about", None)
@@ -529,9 +525,7 @@ class Window(Adw.ApplicationWindow):
 
     def _launch(self, action, *, check: bool, args: tuple[str, ...]):
         try:
-            argv = registry.plan(
-                action, args=args, check=check, assume_yes=True
-            )
+            argv = registry.plan(action, args=args, check=check, assume_yes=True)
         except ValueError as exc:
             self.report_error(action.title, str(exc))
             return None
@@ -546,7 +540,9 @@ class Window(Adw.ApplicationWindow):
 
     def run_switch(self, args: tuple[str, ...]):
         """Run phone-proxy-switch with a chosen target, from the port page."""
-        return self._launch(registry.BY_ID["phone-proxy-switch"], check=False, args=args)
+        return self._launch(
+            registry.BY_ID["phone-proxy-switch"], check=False, args=args
+        )
 
     def start_ap_switch(self, on: bool) -> bool:
         """Run the AP action behind the status page's switch; False if it cannot."""
@@ -733,7 +729,10 @@ def selftest() -> int:
             root_only = {
                 "counts": {"fail": 1},
                 "sections": [
-                    {"name": "[secrets]", "results": [{"id": "secrets", "status": "fail"}]}
+                    {
+                        "name": "[secrets]",
+                        "results": [{"id": "secrets", "status": "fail"}],
+                    }
                 ],
             }
             status._escalated = False

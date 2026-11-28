@@ -35,9 +35,7 @@ PHONE_HOTSPOT_IP = _env("PHONE_HOTSPOT_IP", "10.244.108.165")
 PHONE_AP_IP = _env("PHONE_AP_IP", "192.168.77.232")
 PHONE_PROXY_HOST = _env("PHONE_PROXY_HOST", PHONE_AP_IP)
 PHONE_PROXY_HOSTS = tuple(
-    host
-    for host in _env("PHONE_PROXY_HOSTS", "").split()
-    if host
+    host for host in _env("PHONE_PROXY_HOSTS", "").split() if host
 )
 PHONE_AP_CON = _env("PHONE_AP_CON", "phonelink")
 # Who owns the AP: "local" is the profile this host declares; "external" is an
@@ -58,9 +56,7 @@ PHONE_AP_FALLBACK = _env("PHONE_AP_FALLBACK", "0")
 PHONE_AP_FALLBACK_TOOL = _env(
     "PHONE_AP_FALLBACK_TOOL", "/etc/phone-link/ap-fallback.sh"
 )
-PHONE_AP_FALLBACK_STATE = _env(
-    "PHONE_AP_FALLBACK_STATE", "/run/phone-link/ap-fallback"
-)
+PHONE_AP_FALLBACK_STATE = _env("PHONE_AP_FALLBACK_STATE", "/run/phone-link/ap-fallback")
 PHONE_AP_FALLBACK_CHANNEL = _env("PHONE_AP_FALLBACK_CHANNEL", "1")
 PHONE_AP_FALLBACK_WIDTH = _env("PHONE_AP_FALLBACK_WIDTH", "20")
 PHONE_AP_FALLBACK_DELAY = _env("PHONE_AP_FALLBACK_DELAY", "30")
@@ -70,9 +66,7 @@ PHONE_AP_ENSURE_UNIT = _env(
 # The rejoin watchdog's throttle file and unit: phone-ap-up clears the file and
 # starts the unit so a deliberate switch-on asks for the association at once
 # instead of waiting out the five-minute window.
-PHONE_AP_REJOIN_STATE = _env(
-    "PHONE_AP_REJOIN_STATE", "/run/phone-link/ap-rejoin.last"
-)
+PHONE_AP_REJOIN_STATE = _env("PHONE_AP_REJOIN_STATE", "/run/phone-link/ap-rejoin.last")
 PHONE_AP_REJOIN_UNIT = "phone-link-ap-rejoin.service"
 PHONE_HOTSPOT_CON = _env("PHONE_HOTSPOT_CON", "XPLORE 2")
 PHONE_HOTSPOT_SSID = _env("PHONE_HOTSPOT_SSID", PHONE_HOTSPOT_CON)

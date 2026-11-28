@@ -56,7 +56,7 @@ MANUAL_HINTS = {
     "adb_device": (
         "attach the phone over USB (or run phone-adb-wifi from a trusted host)"
     ),
-    "ap_profile": "create the phonelink profile with the nmcli command in README \"One-time setup\"",
+    "ap_profile": 'create the phonelink profile with the nmcli command in README "One-time setup"',
     "ap_dhcp": "enable phoneLink.ap and rebuild (nixos-rebuild switch)",
     "ap_noforward": "enable phoneLink.ap and rebuild (nixos-rebuild switch)",
     "ap_noforward_rules": "reload the AP forward drop: systemctl restart phone-link-ap-noforward",
@@ -175,8 +175,7 @@ def phone_doctor_fix(args: list[str]) -> int:
         problem
         for problem in FIX_ORDER
         if any(
-            re.match(rf"^(fail|warn) {re.escape(problem)}( |$)", line)
-            for line in lines
+            re.match(rf"^(fail|warn) {re.escape(problem)}( |$)", line) for line in lines
         )
     ]
     manual = []

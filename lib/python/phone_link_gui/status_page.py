@@ -46,6 +46,7 @@ STATUS_ICONS = {
 
 AUTH_PROBLEMS = {"secrets", "ap_pass", "proxy_request"}
 
+
 # phone-doctor-fix already maps one script per problem (its describe_fix), so
 # the rows point at the same registry actions instead of reimplementing a
 # repair. Problems missing here are the manual ones and get no button.
@@ -511,9 +512,7 @@ class StatusPage(Gtk.Box):
                 else "starting phone-doctor"
             )
             self._summary_row.set_title("Checking the setup")
-            self._summary_row.set_subtitle(
-                f"{progress} · {_counts_text(counts)}"
-            )
+            self._summary_row.set_subtitle(f"{progress} · {_counts_text(counts)}")
             self._set_summary_spinner()
             return
         ready = bool(self._model.ready)

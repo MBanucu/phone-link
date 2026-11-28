@@ -72,9 +72,13 @@ def launch(serial: str) -> None:
 
 def dump(serial: str, path: str) -> bool:
     """Save the hierarchy; false when the app is not on screen."""
-    if status(
-        ["adb", "-s", serial, "shell", "uiautomator", "dump", REMOTE], timeout=TIMEOUT
-    ) != 0:
+    if (
+        status(
+            ["adb", "-s", serial, "shell", "uiautomator", "dump", REMOTE],
+            timeout=TIMEOUT,
+        )
+        != 0
+    ):
         return False
     if status(["adb", "-s", serial, "pull", REMOTE, path]) != 0:
         return False
@@ -82,7 +86,9 @@ def dump(serial: str, path: str) -> bool:
         if os.path.getsize(path) <= 0:
             return False
         with open(path, encoding="utf-8") as handle:
-            if (os.environ.get("PHONE_PROXY_PKG") or "org.phonelink.proxy") not in handle.read():
+            if (
+                os.environ.get("PHONE_PROXY_PKG") or "org.phonelink.proxy"
+            ) not in handle.read():
                 return False
     except OSError:
         return False
@@ -115,11 +121,7 @@ def nodes(path: str):
 
 def buttons(path: str) -> list[tuple[int, int, str]]:
     """Every button on screen, from any package (so dialogs are visible)."""
-    return [
-        (x, y, text)
-        for css, text, x, y, _ in nodes(path)
-        if css == "Button"
-    ]
+    return [(x, y, text) for css, text, x, y, _ in nodes(path) if css == "Button"]
 
 
 def button(path: str, pattern: str) -> tuple[int, int, str] | None:

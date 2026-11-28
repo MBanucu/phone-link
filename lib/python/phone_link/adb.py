@@ -174,9 +174,7 @@ def hardware_serial(serial: str) -> str:
     be listed by an adb server that has not finished opening it. The identity
     fallback exists for both, so a failure here is not an error.
     """
-    done = _run(
-        ["adb", "-s", serial, "shell", "getprop", "ro.serialno"], timeout=3.0
-    )
+    done = _run(["adb", "-s", serial, "shell", "getprop", "ro.serialno"], timeout=3.0)
     if done is None or done.returncode != 0:
         return ""
     return done.stdout.strip()
@@ -271,14 +269,12 @@ def resolve_serial(
             # falls back to the transport serial, which is the old behaviour.
             states = devices()
             found = [
-                Device(serial=serial, state=state)
-                for serial, state in states.items()
+                Device(serial=serial, state=state) for serial, state in states.items()
             ]
         attached_devices = [
             device
             for device in found
-            if device.state == "device"
-            and (not network_only or ":" in device.serial)
+            if device.state == "device" and (not network_only or ":" in device.serial)
         ]
         if not attached_devices:
             return None
@@ -291,9 +287,7 @@ def resolve_serial(
         if len(groups) == 1:
             return _choose_transport(next(iter(groups.values())), values)
 
-        listed = ", ".join(
-            f"{serial} ({state})" for serial, state in states.items()
-        )
+        listed = ", ".join(f"{serial} ({state})" for serial, state in states.items())
         raise SerialError(
             "more than one adb device is attached: "
             f"{listed}; set PHONE_SERIAL to the one to use"
