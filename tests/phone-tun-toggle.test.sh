@@ -10,21 +10,10 @@ PYTHON_BIN=$(command -v python3)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 TOGGLE=$ROOT/lib/phone-tun-toggle.sh
 CONFIG_PY=$ROOT/lib/phone-tun-config.py
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export LOG=$TMP/log STUBS=$TMP/bin
-mkdir -p "$LOG" "$STUBS" "$TMP/run/phone-link" "$TMP/run/phone-tun"
+. "$ROOT/tests/lib/harness.sh"
+suite --no-home
+mkdir -p "$TMP/run/phone-link" "$TMP/run/phone-tun"
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s\n' "$*"
-}
 
 PRIMARY=192.168.77.232
 FALLBACK=10.23.190.38
@@ -59,8 +48,8 @@ cat >"$TEMPLATE" <<'EOF'
 }
 EOF
 
-cat >"$STUBS/systemctl" <<'EOF'
-#!/usr/bin/env bash
+stub systemctl
+answer systemctl <<'EOF'
 printf '%s\n' "$*" >>"$LOG/actions"
 case "${1:-}" in
   is-active)
@@ -80,15 +69,15 @@ case "${1:-}" in
 esac
 EOF
 
-cat >"$STUBS/probe" <<'EOF'
-#!/usr/bin/env bash
+stub probe
+answer probe <<'EOF'
 printf '%s\n' "$1" >>"$LOG/probes"
 grep -qxF "$1" "$LOG/reachable"
 EOF
 
 # Synthetic `ip` output: one default gateway and one point-to-point peer.
-cat >"$STUBS/ip" <<'EOF'
-#!/usr/bin/env bash
+stub ip
+answer ip <<'EOF'
 printf '%s\n' "$*" >>"$LOG/ipargs"
 case "$*" in
   "route show default")
@@ -106,8 +95,6 @@ IP
     ;;
 esac
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS"/systemctl "$STUBS"/probe "$STUBS"/ip
-chmod +x "$STUBS"/systemctl "$STUBS"/probe "$STUBS"/ip
 
 run() {
   "$BASH_BIN" "$TOGGLE" >"$LOG/out" 2>&1
@@ -312,5 +299,4 @@ run
 unset PHONE_TUN_IP PHONE_TUN_AP_HOST
 export PHONE_TUN_GATEWAYS=""
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

@@ -6,34 +6,22 @@ set -u
 BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/bin/phone-fix-internet
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
+. "$ROOT/tests/lib/harness.sh"
+suite
 # One target for every adb call; the live phone has more than one transport.
 export PHONE_SERIAL=TESTPHONE
 # The waits being tested are waits for a phone; here the phone is a stub,
 # so the polls are as short as the environment allows them to be.
 export PHONE_FIX_SETTLE=0
-mkdir -p "$LOG" "$STUBS"
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
-cat >"$STUBS/curl" <<'EOF'
-#!/usr/bin/env bash
+stub curl
+answer curl <<'EOF'
 if [ "$(cat "$LOG/online")" = 1 ]; then printf '200'; else printf '000'; fi
 EOF
 
-cat >"$STUBS/adb" <<'EOF'
-#!/usr/bin/env bash
+stub adb
+answer adb <<'EOF'
 printf 'adb %s\n' "$*" >>"$LOG/actions"
 case "$*" in
   *"cmd wifi start-softap"*)
@@ -42,8 +30,8 @@ case "$*" in
 esac
 EOF
 
-cat >"$STUBS/nmcli" <<'EOF'
-#!/usr/bin/env bash
+stub nmcli
+answer nmcli <<'EOF'
 printf 'nmcli %s\n' "$*" >>"$LOG/actions"
 case "$*" in
   "-t -f NAME con show") cat "$LOG/names" ;;
@@ -51,23 +39,20 @@ case "$*" in
 esac
 EOF
 
-cat >"$STUBS/phone-fix-mobile-data" <<'EOF'
-#!/usr/bin/env bash
+stub phone-fix-mobile-data
+answer phone-fix-mobile-data <<'EOF'
 printf 'phone-fix-mobile-data\n' >>"$LOG/actions"
 [ "${MOBILE_WORKS:-0}" = 1 ] && printf '1\n' >"$LOG/online"
 exit 0
 EOF
 
-cat >"$STUBS/phone-usb-tether-default" <<'EOF'
-#!/usr/bin/env bash
+stub phone-usb-tether-default
+answer phone-usb-tether-default <<'EOF'
 printf 'phone-usb-tether-default\n' >>"$LOG/actions"
 [ "${USB_TETHERS:-0}" = 1 ] && printf '1\n' >"$LOG/online"
 exit 0
 EOF
 
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS"/*
-chmod +x "$STUBS"/*
-export PATH="$STUBS:$PATH"
 
 run() {
   "$BASH_BIN" "$SCRIPT" "$@" >"$LOG/out" 2>&1
@@ -133,5 +118,4 @@ if run --check; then bad "offline --check exits 1"; else ok "offline --check exi
 # 7. --help.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish
