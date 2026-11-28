@@ -5,19 +5,9 @@
 set -u
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+. "$ROOT/tests/lib/harness.sh"
+suite --no-home
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
 cat >"$TMP/stub.py" <<'PY'
 import os
@@ -175,5 +165,4 @@ STUB_JOBS_FILE="$TMP/jobs" run --json-stream --jobs 3 >/dev/null 2>&1
 [ "$(cat "$TMP/jobs" 2>/dev/null)" = 3 ] && ok "--json-stream forwards --jobs" \
   || bad "--json-stream forwards --jobs" "$(cat "$TMP/jobs" 2>/dev/null)"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish
