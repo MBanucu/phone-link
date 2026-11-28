@@ -61,6 +61,7 @@ command is usually the first one to run.
 | `phone-proxy-list` | a stopped service still shows its saved proxies from the app's index, while a live dump wins | `bin/phone-proxy-switch` |
 | `phone-proxy-boot` | grants, the boot receiver and the idle whitelist are checked and applied | `bin/phone-proxy-boot` |
 | `phone-proxy-transfer` | saved proxies export and import over the one-shot adb-forward socket | `bin/phone-proxy-export` |
+| `phone-proxy-contract` | the app's contract version gates export/import, warns on a newer app, and appears in `--list` | `lib/python/phone_link/contract.py` |
 | `phone-proxy-data-clear` | the app's data is cleared only when installed, with `--yes` | `bin/phone-proxy-data-clear` |
 | `phone-proxy-battery-whitelist` | the app is put on the device-idle whitelist, read-only under `--check` | `bin/phone-proxy-battery-whitelist` |
 | `phone-fix-apk` | a stand-in build is copied into the cache and a wrong checksum is rejected | `bin/phone-fix-apk` |

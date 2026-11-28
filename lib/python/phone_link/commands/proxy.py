@@ -24,7 +24,7 @@ import tempfile
 import time
 import urllib.parse
 
-from .. import boot, phone, settings
+from .. import boot, contract, phone, settings
 from ..shell import capture, die, log, must, status
 from .common import _only_help, _serial, _shell
 
@@ -86,7 +86,8 @@ last, once the new one has answered.
 --check  report the laptop's port and the phone's listeners; exit 1 when the
          phone does not listen on the port the laptop uses
 --list   print the phone's saved proxies and listeners as JSON, for the panel;
-         `service` is running/gated/stopped, and a stopped service uses the
+         `service` is running/gated/stopped, `contract` is the app's contract
+         version (null when it does not say), and a stopped service uses the
          app's non-secret saved index when its dump has no saved lines
 """
 
@@ -134,6 +135,67 @@ def _state_text(serial: str) -> str:
     is read from it here.
     """
     return capture(["adb", "-s", serial, "shell", "cat", STATE_FILE])
+
+
+def _contract(serial: str, dump: str = "") -> int | None:
+    """The app's contract version, from ``state.txt`` first and the dump second.
+
+    The state file answers while the service is stopped, which is where a list
+    or a setup check usually finds it; the dump is the fallback for a build that
+    writes one but not the other. `dump` is the block a caller already read, so
+    reading the version does not repeat that adb call.
+    """
+    version = contract.parse(_state_text(serial))
+    if version is None:
+        version = contract.parse(dump or _dump(serial))
+    return version
+
+
+def _warn_newer(version: int | None) -> None:
+    """Name a newer app, then go on using the actions this laptop knows."""
+    if version is None or contract.check(version) != contract.NEWER:
+        return
+    log(
+        f"warning: the app speaks contract {version}; this laptop knows "
+        f"contract {contract.KNOWN} — newer actions or extras may be ignored"
+    )
+
+
+def require_contract(serial: str, *, dump: str = "") -> int:
+    """The app's contract version, refusing one too old for a transfer.
+
+    EXPORT, IMPORT and a just-installed app need contract 1. An app without
+    the line is contract 0, so the precise answer is to update the app rather
+    than wait for a socket it will never open.
+    """
+    version = _contract(serial, dump)
+    if contract.check(version) == contract.TOO_OLD:
+        die(
+            f"update the app to contract >= {contract.KNOWN}: run "
+            "phone-proxy-install"
+        )
+    _warn_newer(version)
+    return version if version is not None else 0
+
+
+def note_contract(serial: str) -> None:
+    """Report the version after an install without failing the install.
+
+    A fresh install, and an update from a build that predates the line, leave
+    ``state.txt`` exactly as the previous app wrote it until the app runs and
+    rewrites it. "No line yet" is therefore not proof that the APK just
+    installed is old, and the install has already succeeded: say what the next
+    transfer will do instead of reporting a failure for a stale file.
+    """
+    version = _contract(serial)
+    if contract.check(version) == contract.TOO_OLD:
+        log(
+            "note: the installed app has not published contract "
+            f">= {contract.KNOWN} yet; state.txt is rewritten when it runs, "
+            "and export/import will ask for an update until then"
+        )
+        return
+    _warn_newer(version)
 
 
 def _field(dump: str, name: str) -> str:
@@ -216,6 +278,7 @@ def phone_proxy_start(args: list[str]) -> int:
         die(f"{settings.PHONE_PROXY_PKG} is not installed; run phone-proxy-install first")
 
     dump = _dump(serial)
+    _warn_newer(_contract(serial, dump))
     state = _field(dump, "state")
     if _running(state):
         log(f"proxy is already listening ({state})")
@@ -259,7 +322,9 @@ def phone_proxy_stop(args: list[str]) -> int:
     if not _installed(serial):
         die(f"{settings.PHONE_PROXY_PKG} is not installed; run phone-proxy-install first")
 
-    state = _state(serial)
+    dump = _dump(serial)
+    _warn_newer(_contract(serial, dump))
+    state = _field(dump, "state")
     if not state:
         log("proxy is not running")
         return 0
@@ -389,6 +454,8 @@ def phone_proxy_setup(args: list[str]) -> int:
         die("no phone attached (see adb devices)")
     if not _installed(serial):
         die(f"{settings.PHONE_PROXY_PKG} is not installed; run phone-proxy-install first")
+
+    _warn_newer(_contract(serial))
 
     want_auto = "true" if auto_start else "false"
 
@@ -647,8 +714,7 @@ def _port_source() -> str:
     return "the module's default"
 
 
-def _list_payload(serial: str) -> dict:
-    dump = _dump(serial)
+def _list_payload(serial: str, dump: str, contract_version: int | None) -> dict:
     running = _dump_listeners(dump)
     status = _service_status(dump)
     entries = _dump_saved(dump)
@@ -678,6 +744,7 @@ def _list_payload(serial: str) -> dict:
         "port_source": _port_source(),
         "runtime_file": settings.PHONE_RUNTIME_PORT_FILE,
         "service": status,
+        "contract": contract_version,
         "running": running,
         "saved": saved,
     }
@@ -778,9 +845,11 @@ def phone_proxy_switch(args: list[str]) -> int:
     if not serial:
         die("no phone attached (see adb devices)")
     dump = _dump(serial)
+    contract_version = _contract(serial, dump)
+    _warn_newer(contract_version)
 
     if parsed["list"]:
-        print(json.dumps(_list_payload(serial), indent=2))
+        print(json.dumps(_list_payload(serial, dump, contract_version), indent=2))
         return 0
 
     active = settings.active_port()
@@ -1094,6 +1163,7 @@ def export_to(serial: str, path: str) -> dict:
     check_backup_path(path)
     if not _installed(serial):
         die(f"{settings.PHONE_PROXY_PKG} is not installed; nothing to export")
+    require_contract(serial)
     _, body = _exchange(serial, EXPORT, None)
     document = _document(body)
     _write_private(path, body)
@@ -1116,10 +1186,19 @@ def _read_file(path: str) -> bytes:
         die(f"cannot read the backup: {path}")
 
 
-def import_from(serial: str, path: str) -> int:
-    """Write a backup into the app; return how many saved proxies it wrote."""
+def import_from(serial: str, path: str, *, require: bool = True) -> int:
+    """Write a backup into the app; return how many saved proxies it wrote.
+
+    ``require=False`` is only for the restore after a replace-signer install:
+    that install cleared the app's data, so ``state.txt`` cannot exist yet,
+    while the backup in hand proves the previous app could export it.
+    """
     if not _installed(serial):
         die(f"{settings.PHONE_PROXY_PKG} is not installed; run phone-proxy-install first")
+    if require:
+        require_contract(serial)
+    else:
+        _warn_newer(_contract(serial))
     body = _read_file(path)
     _document(body)
     count, _ = _exchange(serial, IMPORT, body)
@@ -1129,7 +1208,7 @@ def import_from(serial: str, path: str) -> int:
 
 def restore(serial: str, document: dict, path: str) -> None:
     """Import a backup, start the proxy that was in use, and verify its port."""
-    count = import_from(serial, path)
+    count = import_from(serial, path, require=False)
     saved = [entry for entry in document.get("saved", []) if isinstance(entry, dict)]
     name = document.get("in_use") if isinstance(document.get("in_use"), str) else ""
     entry = next((one for one in saved if one.get("name") == name), None)

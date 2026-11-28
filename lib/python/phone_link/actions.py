@@ -653,8 +653,9 @@ SCRIPTS: tuple[Action, ...] = (
             "`/run/phone-link/proxy-port`, `phone-tun` and the relay are restarted if "
             "they were running, and the phone's listener on the old port is stopped last "
             "(`--check` compares the two ports, `--list` prints the phone's saved proxies, "
-            "listeners and `service` state as JSON for the panel; a stopped service uses "
-            "the app's non-secret saved index instead of reporting two empty lists)"
+            "listeners and `service` state as JSON for the panel, with `contract` as the "
+            "app's contract version (null when the app does not say); a stopped service "
+            "uses the app's non-secret saved index instead of reporting two empty lists)"
         ),
         usage="usage: phone-proxy-switch [--check | --list] (--port N | --profile NAME)",
         usage_const="USAGE_SWITCH",

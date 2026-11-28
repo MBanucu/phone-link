@@ -572,6 +572,12 @@ def phone_proxy_install(args: list[str]) -> int:
         log(f"uninstalled {package}")
 
     install_apks(local_apks)
+    if package.startswith(settings.PHONE_APP_NAMESPACE):
+        # Say what was installed as far as it can be seen. This cannot be a
+        # hard gate: an update from a build without the line, and a fresh
+        # install, leave state.txt stale or absent until the app runs, so the
+        # install has succeeded either way. EXPORT and IMPORT stay hard-gated.
+        proxy_commands.note_contract(serial)
     if restore_document is not None:
         # The app is back and empty; put its saved proxies back and prove the
         # proxy that was in use answers on the port it had before.

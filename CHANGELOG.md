@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The proxy app's contract version is read and enforced on the laptop (#63).
+  The app prints `contract_version <n>` in `dumpsys activity service` and as
+  the first line of its non-secret `files/state.txt`; `phone_link.contract`
+  parses that one integer (`KNOWN = 1`), preferring the state file and falling
+  back to the dump. `phone-proxy-export` and `phone-proxy-import` now refuse
+  an app older than contract 1 with `update the app to contract >= 1: run
+  phone-proxy-install` instead of waiting for a transfer socket it cannot open.
+  An install notes the version instead: a fresh install or an update from an
+  app without the line leaves `state.txt` stale until the app runs, and the
+  install has already succeeded, so it cannot be a failure; the restore after
+  `--replace-signer` skips the transfer gate for the same reason. A newer app
+  is a warning (`the app speaks contract N; this laptop knows contract 1`) and
+  the command continues; start, stop, switch, setup and `--list` still work on
+  an app that predates the line.
+  `phone-proxy-switch --list` reports the parsed value as `contract` (`null`
+  when unknown), without changing any other key.
 - An optional 2.4 GHz AP fallback (#7).  A 5 GHz activation failure used to
   leave no link at all; with `phoneLink.ap.fallback.enable = true`,
   `phone-ap-up` makes one attempt on 2.4 GHz channel 1 at 20 MHz
