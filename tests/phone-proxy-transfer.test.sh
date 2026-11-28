@@ -100,6 +100,7 @@ case "${args[0]:-}" in
         ;;
       *"dumpsys package"*) printf '        versionName=0.14.0\n' ;;
       *"dumpsys activity service"*)
+        printf '  contract_version 1\n'
         [ -s "$LOG/running" ] && cat "$LOG/running"
         [ -s "$LOG/saved" ] && cat "$LOG/saved"
         if [ -s "$LOG/state" ]; then

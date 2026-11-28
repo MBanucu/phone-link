@@ -30,6 +30,47 @@ failed run costs the phone nothing. Neither repository may change the test
 package or port alone; the app's `build.sh`, `tests/live/proxy-app.sh` and this
 repo's `tests/live/doctor-fix-proxy.sh` have to change together.
 
+## The contract version
+
+The app owns the contract's shape and its version. Since contract 1 it prints
+one integer on a line of its own, in `dumpsys activity service` and as the
+first line of the non-secret `files/state.txt`:
+
+```
+  contract_version 1        # dumpsys, indented in the live block
+contract_version 1          # state.txt, first line, before auto_start
+```
+
+The laptop parses that integer in one place, `lib/python/phone_link/contract.py`
+(`KNOWN = 1`), preferring `state.txt` because it answers while the service is
+stopped, and falling back to the dump. It is a version, not a feature string,
+and it carries no password or token.
+
+- **Too old** (`< 1`, or no line at all, which is contract 0):
+  `phone-proxy-export` and `phone-proxy-import` refuse with `update the app to
+  contract >= 1: run phone-proxy-install`. The transfer would otherwise wait
+  for a socket an app that predates EXPORT/IMPORT never opens.
+  `phone-proxy-start`, `phone-proxy-stop`, `phone-proxy-switch` and
+  `phone-proxy-setup` keep working: the actions they send existed before the
+  line.
+- **After an install** the version is advisory, not a hard gate: a fresh
+  install, and an update from a build without the line, leave `state.txt`
+  stale or absent until the app runs, while the APK has already been installed
+  successfully. The command notes that it cannot verify the contract yet and
+  leaves the next export/import to report it. The restore after
+  `--replace-signer` skips the gate for the same reason: the install cleared
+  the app's data, and the backup in hand proves the previous app could export
+  it.
+- **Known** (`1`): the commands run as documented.
+- **Newer** (`> 1`): every command that drives the app logs `the app speaks
+  contract N; this laptop knows contract 1` and continues, because the actions
+  this laptop sends are still actions the app accepts.
+
+`phone-proxy-switch --list` reports the parsed integer as `contract`, `null`
+when the app does not say. Bumping the integer is the app repository's change;
+this checkout's `KNOWN` changes in the same change set only when the laptop has
+to do something different with the new number.
+
 ## Version policy
 
 - `version` in this repository's `flake.nix` is phone-link's version. It is not

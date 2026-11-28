@@ -310,7 +310,8 @@ case "${args[0]:-}" in
         ;;
       *dumpsys*)
         [ "${ADB_STUB_ABSENT:-0}" = 1 ] \
-          || printf '        versionName=%s\r\n' "${ADB_STUB_VERSION:-1.7.4}"
+          || printf '        versionName=%s\r\n  contract_version 1\r\n' \
+            "${ADB_STUB_VERSION:-1.7.4}"
         ;;
     esac
     ;;
