@@ -141,13 +141,13 @@ class SearchPage(Gtk.Box):
         if not words:
             self._show(
                 "Search the actions",
-                f"Filter the {len(registry.ACTIONS)} actions by name or summary.",
+                f"Filter the {len(registry.gui_actions())} actions by name or summary.",
             )
             return 0
 
         groups = dict(registry.GROUPS)
         matches = []
-        for action in registry.ACTIONS:
+        for action in registry.gui_actions():
             # "root"/"sudo" make "which actions need privileges?" answerable
             # from the search bar, next to the lock on those rows.
             haystack = " ".join(
@@ -473,7 +473,7 @@ class Window(Adw.ApplicationWindow):
         about.connect("activate", lambda _a, _p: self._show_about())
         self.add_action(about)
 
-        for action in registry.ACTIONS:
+        for action in registry.gui_actions():
             if action.supports_check:
                 self._add_action(
                     f"check-{action.id}",
@@ -600,6 +600,17 @@ def check_registry(expected: list[str]) -> int:
     )
     if unknown:
         problems.append("fix buttons point at unknown actions: " + ", ".join(unknown))
+    rendered = {
+        action.id
+        for group_id, _title in registry.GROUPS
+        for action in registry.actions_in(group_id)
+    }
+    visible = {action.id for action in registry.gui_actions()}
+    if rendered != visible:
+        problems.append(
+            "the panels and the table disagree about which actions are visible: "
+            + ", ".join(sorted(rendered ^ visible))
+        )
     try:
         gi.require_version("Gtk", "4.0")
         gi.require_version("Adw", "1")
@@ -618,7 +629,7 @@ def check_registry(expected: list[str]) -> int:
             print(f"error: {problem}", file=sys.stderr)
         return 1
     print(
-        f"gui registry ok: {len(registry.ACTIONS)} actions, "
+        f"gui registry ok: {len(registry.gui_actions())} actions, "
         "GTK4 and libadwaita present"
     )
     return 0

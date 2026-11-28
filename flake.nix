@@ -229,6 +229,13 @@
           '';
 
           registry = pkgs.runCommand "phone-link-registry-check" { } ''
+            # The single source is phone_link.actions: the shims,
+            # commands/__init__.py and the docs/scripts.md table are generated
+            # from it. Check the source tree first, then the packaged table
+            # against the installed scripts.
+            export PYTHONPATH=${./lib/python}
+            export PYTHONDONTWRITEBYTECODE=1
+            ${pkgs.python3}/bin/python3 -m phone_link.registry_gen --check --root ${./.}
             ${package}/bin/phone-link check-registry ${lib.escapeShellArgs scripts}
             touch $out
           '';
@@ -239,6 +246,10 @@
             # GTK/fontconfig want a writable HOME in the build sandbox
             export HOME=$TMPDIR XDG_CACHE_HOME=$TMPDIR/cache
             mkdir -p "$XDG_CACHE_HOME"
+            # Same generated files, checked from the source tree the GUI reads.
+            export PYTHONPATH=${./lib/python}
+            export PYTHONDONTWRITEBYTECODE=1
+            ${pkgs.python3}/bin/python3 -m phone_link.registry_gen --check --root ${./.}
             ${gui}/bin/phone-link-gui --check-registry ${lib.escapeShellArgs scripts}
             touch $out
           '';
