@@ -5,16 +5,8 @@ set -u
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
+. "$ROOT/tests/lib/harness.sh"
+suite --no-home
 
 out=$(PYTHONPATH="$ROOT/lib/python" python3 - <<'PY'
 import json
@@ -135,5 +127,4 @@ else
   bad "parser and row state machine (pending, results, unknown ids, error)" "$out"
 fi
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

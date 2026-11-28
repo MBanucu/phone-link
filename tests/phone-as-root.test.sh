@@ -8,9 +8,8 @@ BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
 . "$ROOT/tests/lib/harness.sh"
-tmpdir TMP
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
-mkdir -p "$LOG" "$STUBS" "$TMP/checkout/bin"
+suite
+mkdir -p "$TMP/checkout/bin"
 
 stub_cmd id "$STUBS" <<'EOF'
 printf '1000\n'
@@ -24,7 +23,6 @@ stub_cmd phone-ap-up "$STUBS" <<'EOF'
 printf 'installed copy\n' >>"$LOG/ran"
 exit 0
 EOF
-export PATH="$STUBS:$PATH"
 
 shim=$TMP/checkout/bin/phone-ap-up
 printf '#!%s\nexit 0\n' "$BASH_BIN" >"$shim"

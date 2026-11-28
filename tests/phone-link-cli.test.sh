@@ -8,11 +8,8 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 LINK=$ROOT/bin/phone-link
 
 . "$ROOT/tests/lib/harness.sh"
-tmpdir TMP
-STUBS=$TMP/bin
-mkdir -p "$STUBS"
-export HOME=$TMP XDG_CACHE_HOME=$TMP/cache
-export PATH="$ROOT/bin:$PATH"
+suite
+export XDG_CACHE_HOME=$TMP/cache
 
 # Through bash explicitly: the checkout wrapper has a /usr/bin/env shebang,
 # which a hermetic build sandbox does not provide.
@@ -76,28 +73,23 @@ grep -q 'has no --check' "$TMP/err" && ok "--check refusal is explained" \
   || bad "--check refusal is explained" "$(cat "$TMP/err")"
 
 # 4. run executes the script, streams its output and keeps its exit status.
-cat >"$STUBS/phone-fix-mobile-data" <<'EOF'
-#!/usr/bin/env bash
+stub phone-fix-mobile-data
+answer phone-fix-mobile-data <<'EOF'
 printf 'argv:%s\n' "$*"
 printf 'mobile data done\n'
 exit 7
 EOF
 # A non-root action with --yes: a root one would be planned through pkexec,
 # which behaves differently in a desktop session and in a sandbox.
-cat >"$STUBS/phone-wifi-forget" <<'EOF'
-#!/usr/bin/env bash
+stub phone-wifi-forget
+answer phone-wifi-forget <<'EOF'
 printf 'argv:%s\n' "$*"
 exit 0
 EOF
-cat >"$STUBS/phone-doctor" <<'EOF'
-#!/usr/bin/env bash
+stub phone-doctor
+answer phone-doctor <<'EOF'
 printf '{"ready": true, "counts": {"ok": 1}, "sections": []}\n'
 EOF
-# Same reason: the stubs are executed directly, so point them at this bash.
-BASH=$(command -v bash)
-for stub in "$STUBS"/*; do sed -i "1s|.*|#!$BASH|" "$stub"; done
-chmod +x "$STUBS"/*
-export PATH="$STUBS:$PATH"
 # The doctor beside the checkout wins over PATH by design, and this suite is
 # about the CLI, not about that precedence: name the stub so it is the one used.
 export PHONE_DOCTOR=$STUBS/phone-doctor
