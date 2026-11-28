@@ -315,10 +315,11 @@
                 touch $out
               '';
 
-          # Lint and types over the same package: ruff reads ./pyproject.toml for
-          # the rule set and the GI import exception, mypy for the paths and the
-          # GTK stubs it does not have. Both write only to $TMPDIR, because the
-          # source tree in the store is read-only.
+          # Lint and types over the production packages and the Python tests:
+          # ruff reads ./pyproject.toml for the rule set and the GI import
+          # exception, mypy for the paths and the GTK stubs it does not have.
+          # Both write only to $TMPDIR, because the source tree in the store is
+          # read-only.
           python-lint =
             pkgs.runCommand "phone-link-python-lint-check"
               {
@@ -334,6 +335,32 @@
                 ruff check --no-cache .
                 ruff format --no-cache --check .
                 mypy --cache-dir=$TMPDIR/mypy-cache
+                touch $out
+              '';
+
+          # The pilot Python suite (#117): one harness that builds the fake
+          # adb/curl/avahi-browse/nmcli from a single place, and the doctor's
+          # 199 shell assertions ported case for case. It runs beside `script`
+          # while the other suites are still shell; the shell original of this
+          # one stays until the port is accepted, so both can be compared.
+          python-tests =
+            pkgs.runCommand "phone-link-python-tests-check"
+              {
+                nativeBuildInputs = [
+                  pkgs.bash
+                  pkgs.coreutils
+                  pkgs.gawk
+                  pkgs.gnugrep
+                  pkgs.gnused
+                  pkgs.git
+                  pkgs.python3
+                ];
+              }
+              ''
+                cd ${./.}
+                export HOME=$TMPDIR
+                export PYTHONDONTWRITEBYTECODE=1
+                python3 -m unittest discover -s tests/python -t . -v
                 touch $out
               '';
 

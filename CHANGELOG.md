@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A Python test-harness pilot (#117).  `tests/python/phone_link_tests` builds
+  the fake `adb`/`curl`/`avahi-browse`/`nmcli`/`systemctl` from one fixture and
+  carries `tests/phone-doctor.test.sh` case for case — same commands, same
+  output, same exit codes and the same 199 assertions.  The new `python-tests`
+  check runs it beside `script` while the shell original stays in the tree for
+  comparison; `test_case_inventory` fails if a numbered shell section or its
+  assertion count is missing.
 - The proxy app's contract version is read and enforced on the laptop (#63).
   The app prints `contract_version <n>` in `dumpsys activity service` and as
   the first line of its non-secret `files/state.txt`; `phone_link.contract`
