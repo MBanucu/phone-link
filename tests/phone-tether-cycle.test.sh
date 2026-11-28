@@ -67,6 +67,7 @@ cat >"$TMP/broken-check" <<'EOF'
 printf 'tether-check\n' >>"$LOG/actions"
 exit 1
 EOF
+sed -i "1s|.*|#!$BASH_BIN|" "$TMP/broken-check"
 chmod +x "$TMP/broken-check"
 
 export PHONE_NET_CHECK=$STUBS/net-check

@@ -397,6 +397,7 @@ case "$*" in
   *) exit 1 ;;
 esac
 EOF
+sed -i "1s|.*|#!$BASH_BIN|" "$TMP/module-nft"
 chmod +x "$TMP/module-nft"
 printf "PHONE_NFT='%s'\n" "$TMP/module-nft" >"$PHONE_CONFIG_FILE"
 mv "$STUBS/nft" "$TMP/nft.path"
