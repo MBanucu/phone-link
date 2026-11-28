@@ -52,7 +52,7 @@ run() {
 # Without PHONE_DOCTOR the fixer reads problems from the doctor beside it — the
 # checkout's — not the one first on PATH, which is the deployed copy.
 run_own_doctor() {
-  env -u PHONE_DOCTOR PATH="$STUBS:$PATH" "$BASH_BIN" "$SCRIPT" "$@" \
+  env -u PHONE_DOCTOR "$BASH_BIN" "$SCRIPT" "$@" \
     >"$LOG/out" 2>&1
 }
 

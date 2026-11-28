@@ -169,7 +169,6 @@ printf '1' >"$WORK/import_count"
 run() {
   local script=$1
   shift
-  HOME="$WORK/home" PATH="$WORK/stub:$PATH" \
     PHONE_SECRETS="$WORK/secrets" PHONE_PROXY_BACKUP="$WORK/backup.json" \
     PHONE_PROXY_TRANSFER_WAIT=1 PHONE_PROXY_WAIT=1 \
     bash "$ROOT/bin/$script" "$@" 2>&1
