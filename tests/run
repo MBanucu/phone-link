@@ -169,30 +169,15 @@ run_suite() {
 }
 
 failed=0
-
-if [ "$parallel" -le 1 ]; then
-  for index in "${!suites[@]}"; do
-    run_suite "$index"
-  done
-else
-  running=0
-  for index in "${!suites[@]}"; do
-    run_suite "$index" &
-    running=$((running + 1))
-    if [ "$running" -ge "$parallel" ]; then
-      wait -n || true
-      running=$((running - 1))
-    fi
-  done
-  wait || true
-fi
-
 total_ms=0
 rows=()
 slowest=()
 
-for index in "${!suites[@]}"; do
-  suite=${suites[$index]}
+# report_suite INDEX — print one finished suite and fold its time and part rows
+# into the summary.  Serial runs call it as each suite ends, so a long run shows
+# progress; a parallel run calls it in suite order once all have finished.
+report_suite() {
+  local index=$1 suite=${suites[$1]} status ms parts row
   status=$(cat "$TMP/status/$index" 2>/dev/null || printf 1)
   ms=$(cat "$TMP/ms/$index" 2>/dev/null || printf 0)
   total_ms=$((total_ms + ms))
@@ -215,7 +200,28 @@ for index in "${!suites[@]}"; do
     done <"$parts"
   fi
   slowest+=("$ms $suite")
-done
+}
+
+if [ "$parallel" -le 1 ]; then
+  for index in "${!suites[@]}"; do
+    run_suite "$index"
+    report_suite "$index"
+  done
+else
+  running=0
+  for index in "${!suites[@]}"; do
+    run_suite "$index" &
+    running=$((running + 1))
+    if [ "$running" -ge "$parallel" ]; then
+      wait -n || true
+      running=$((running - 1))
+    fi
+  done
+  wait || true
+  for index in "${!suites[@]}"; do
+    report_suite "$index"
+  done
+fi
 
 printf '\n%d suite(s): %d passed, %d failed in %d.%03d s\n' \
   "${#suites[@]}" "$((${#suites[@]} - failed))" "$failed" \
