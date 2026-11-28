@@ -19,9 +19,8 @@ SCRIPT=${SCRIPT:-$here/../bin/phone-proxy-install}
 }
 
 . "$ROOT/tests/lib/harness.sh"
-tmpdir WORK
-export LOG="$WORK"
-mkdir -p "$WORK/stub" "$WORK/cache" "$WORK/home"
+suite WORK --log . --stubs stub --home home
+mkdir -p "$WORK/cache"
 
 # adb stub: the common device/install/shell/dumpsys shape. ADB_STUB_ABSENT
 # simulates a phone without the app; ADB_STUB_BAD_SIG a different signing key.

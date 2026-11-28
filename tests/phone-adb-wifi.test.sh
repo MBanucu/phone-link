@@ -6,26 +6,14 @@ set -u
 BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/bin/phone-adb-wifi
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
+. "$ROOT/tests/lib/harness.sh"
+suite
 # adbd restarts take seconds on a phone and none in a stub.
 export PHONE_ADB_POLL=0
-mkdir -p "$LOG" "$STUBS"
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
-cat >"$STUBS/adb" <<'EOF'
-#!/usr/bin/env bash
+stub adb
+answer adb <<'EOF'
 target=""
 args=("$@")
 if [ "${args[0]:-}" = "-s" ]; then target=${args[1]}; args=("${args[@]:2}"); fi
@@ -75,10 +63,9 @@ case "${args[0]:-}" in
     ;;
 esac
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/adb"
 
-cat >"$STUBS/avahi-browse" <<'EOF'
-#!/usr/bin/env bash
+stub avahi-browse
+answer avahi-browse <<'EOF'
 [ -f "$LOG/tls_port" ] || exit 0
 port=$(cat "$LOG/tls_port")
 [ -n "$port" ] || exit 0
@@ -90,10 +77,7 @@ cat <<AVAHI
    txt = ["v=ADB_SECURE_SERVICE_VERSION"]
 AVAHI
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/avahi-browse"
 
-chmod +x "$STUBS/adb" "$STUBS/avahi-browse"
-export PATH="$STUBS:$PATH"
 
 fresh_state() {
   printf 'List of devices attached\nXPLO2EEA0001541\tdevice\n' >"$LOG/devices"
@@ -187,5 +171,4 @@ grep -q 'no phone attached' "$LOG/out" && ok "no phone message" || bad "no phone
 # 8. --help exits 0.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

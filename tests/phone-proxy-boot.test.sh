@@ -10,10 +10,9 @@ BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/bin/phone-proxy-boot
 . "$ROOT/tests/lib/harness.sh"
-tmpdir TMP
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
+suite
 export PHONE_SERIAL=TESTPHONE
-mkdir -p "$LOG/grants" "$STUBS"
+mkdir -p "$LOG/grants"
 
 # State file answers, when the service is silent or absent.
 stub_cmd shell "$TMP" <<'EOF'
@@ -80,7 +79,6 @@ esac
 EOF
 export ADB_STUB_SHELL=$TMP/shell
 stub_adb "$STUBS"
-export PATH="$STUBS:$PATH"
 
 reset() {
   : >"$LOG/installed"

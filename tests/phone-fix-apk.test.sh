@@ -6,30 +6,18 @@ set -u
 BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/bin/phone-fix-apk
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
+. "$ROOT/tests/lib/harness.sh"
+suite
 export PHONE_APK_CACHE=$TMP/cache
-mkdir -p "$LOG" "$STUBS" "$TMP/build"
+mkdir -p "$TMP/build"
 export PHONE_PROXY_APK=$TMP/build/phone-link-proxy.apk
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
 # A stub curl: two releases, each with the same app version under its own tag,
 # and a checksum that matches the bytes the download branch writes. Offline and
 # a wrong checksum are the two failures worth testing.
-cat >"$STUBS/curl" <<'CURL'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >>"$LOG/curl.log"
+stub curl
+answer curl <<'CURL'
 [ "${CURL_STUB_OFFLINE:-0}" = 1 ] && exit 22
 case "$*" in
   *per_page*)
@@ -54,22 +42,20 @@ case "$*" in
 esac
 exit 0
 CURL
-chmod 755 "$STUBS/curl"
-sed -i "1s|.*|#!${BASH_BIN}|" "$STUBS/curl"
 
 run() {
-  PATH="$STUBS:$PATH" "$BASH_BIN" "$SCRIPT" "$@" >"$LOG/out" 2>&1
+  "$BASH_BIN" "$SCRIPT" "$@" >"$LOG/out" 2>&1
 }
 
 run_no_home() {
-  env -u HOME -u XDG_CACHE_HOME PATH="$STUBS:$PATH" \
+  env -u HOME -u XDG_CACHE_HOME \
     "$BASH_BIN" "$SCRIPT" "$@" >"$LOG/out" 2>&1
 }
 
 run_env() {
   local setting=$1
   shift
-  env "$setting" PATH="$STUBS:$PATH" "$BASH_BIN" "$SCRIPT" "$@" >"$LOG/out" 2>&1
+  env "$setting" "$BASH_BIN" "$SCRIPT" "$@" >"$LOG/out" 2>&1
 }
 
 printf 'build one\n' >"$PHONE_PROXY_APK"
@@ -210,5 +196,4 @@ grep -q 'dropped 4 old release APK' "$LOG/out" && ok "the run says what it dropp
 # 6. --help.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish
