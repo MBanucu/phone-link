@@ -137,6 +137,20 @@ def _state_text(serial: str) -> str:
     return capture(["adb", "-s", serial, "shell", "cat", STATE_FILE])
 
 
+def _state_field(state_text: str, name: str) -> str:
+    """One ``key value`` line from the app's non-secret ``state.txt``.
+
+    The file is written as ``auto_start true``, without the indentation the
+    service dump uses, so this cannot share `_field`. A missing line is an
+    older app or one that has not run yet, never a failure.
+    """
+    for line in state_text.splitlines():
+        key, _, value = line.partition(" ")
+        if key.strip() == name:
+            return value.strip()
+    return ""
+
+
 def _contract(serial: str, dump: str = "") -> int | None:
     """The app's contract version, from ``state.txt`` first and the dump second.
 

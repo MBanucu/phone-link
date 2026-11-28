@@ -57,6 +57,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `phone-proxy-install` reports the listener it observes after an update
+  instead of asking for a manual start (#114). It reads only `auto_start` and
+  `port` from the app's non-secret `files/state.txt`: with auto-start on it
+  waits briefly for the app's package-replacement receiver to bring the proxy
+  back and names the stored port, falling back to the documented `START` when
+  the service stays down; with auto-start off it says the proxy stays stopped
+  until it is started. A stale or absent `state.txt` still never fails the
+  install, and the `--replace-signer` restore ends with the restored listener's
+  observed state too. No credential, token or export document is read.
+
 - `phone-proxy-switch --list` no longer reports two empty lists when the app's
   service is stopped (#88). It now prints `service: stopped` and reads the
   non-secret saved-profile index the app writes to `files/state.txt`, so a

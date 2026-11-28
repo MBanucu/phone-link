@@ -281,6 +281,109 @@ fi
 # import, start) is covered by tests/phone-proxy-transfer.test.sh, where a
 # stub device can answer the one-shot socket.
 
+# 30. After an update the install reads only auto_start and port from the app's
+#     non-secret state.txt and reports the listener it observes, instead of
+#     asking for a manual start. The shell stub can bring the service back on
+#     its own or only after the documented START fallback.
+mkdir -p "$WORK/listener"
+stub_cmd shell "$WORK/listener" <<'SHELL'
+case "$*" in
+  "cat "*state.txt*) cat "$LOG/listener/state" ;;
+  "dumpsys activity service "*)
+    if [ -f "$LOG/listener/started" ]; then
+      cat "$LOG/listener/up"
+    else
+      cat "$LOG/listener/down"
+    fi
+    ;;
+  "am start-foreground-service "*) touch "$LOG/listener/started" ;;
+  "pm path "*) printf 'package:/data/app/x/base.apk\n' ;;
+  "dumpsys package "*) printf '    versionName=0.17.0\n' ;;
+esac
+exit 0
+SHELL
+
+listener_run() {
+  PHONE_APK_DIR="$WORK/cache" \
+    PHONE_PROXY_PKG=org.phonelink.proxy \
+    PHONE_PROXY_BACKUP="$WORK/backup.json" PHONE_PROXY_TRANSFER_WAIT=0 \
+    PHONE_PROXY_WAIT=0 ADB_STUB_SHELL="$WORK/listener/shell" \
+    bash "$SCRIPT" "$@" 2>&1
+}
+
+printf '  state       listening on 0.0.0.0:1081 · 0 clients\n' \
+  >"$WORK/listener/up"
+: >"$WORK/listener/down"
+
+# 30a. auto_start on, the receiver brought it back: name the stored port and
+#      do not start it again.
+printf 'contract_version 1\nauto_start true\nport 1081\n' >"$WORK/listener/state"
+cp "$WORK/listener/up" "$WORK/listener/down"
+rm -f "$WORK/listener/started"
+: > "$WORK/adb.log"
+out=$(listener_run "$WORK/local.apk")
+rc=$?
+[ "$rc" = 0 ] && ok "an update with auto_start on exits 0" \
+  || bad "an update with auto_start on exits 0" "exit $rc: $out"
+case $out in
+  *"the proxy is listening on port 1081"*)
+    ok "auto_start on reports the listener that came back" ;;
+  *) bad "auto_start on reports the listener that came back" "$out" ;;
+esac
+if grep -q 'action.START' "$WORK/adb.log"; then
+  bad "a listener that came back is not started again" "$(grep action "$WORK/adb.log")"
+else
+  ok "a listener that came back is not started again"
+fi
+case $out in
+  *"open the app once"*) bad "a returned listener needs no manual start" "$out" ;;
+  *) ok "a returned listener needs no manual start" ;;
+esac
+
+# 30b. auto_start on but still down: the documented START is the fallback and
+#      the listener it brings up is what gets reported.
+printf 'contract_version 1\nauto_start true\nport 1081\n' >"$WORK/listener/state"
+: >"$WORK/listener/down"
+rm -f "$WORK/listener/started"
+: > "$WORK/adb.log"
+out=$(listener_run "$WORK/local.apk")
+rc=$?
+[ "$rc" = 0 ] && ok "an update that has to start the proxy exits 0" \
+  || bad "an update that has to start the proxy exits 0" "exit $rc: $out"
+if grep -q -- '-a org.phonelink.proxy.action.START' "$WORK/adb.log"; then
+  ok "a listener that stays down uses the START fallback"
+else
+  bad "a listener that stays down uses the START fallback" "$(cat "$WORK/adb.log")"
+fi
+case $out in
+  *"starting it over adb"*"the proxy is listening on port 1081"*)
+    ok "the fallback reports the listener it started" ;;
+  *) bad "the fallback reports the listener it started" "$out" ;;
+esac
+
+# 30c. auto_start off: say it stays stopped, and never ask to open the app.
+printf 'contract_version 1\nauto_start false\nport 1081\n' >"$WORK/listener/state"
+rm -f "$WORK/listener/started"
+: > "$WORK/adb.log"
+out=$(listener_run "$WORK/local.apk")
+rc=$?
+[ "$rc" = 0 ] && ok "an update with auto_start off exits 0" \
+  || bad "an update with auto_start off exits 0" "exit $rc: $out"
+case $out in
+  *"auto-start is off"*"stays stopped until it is started"*)
+    ok "auto_start off says the proxy stays stopped" ;;
+  *) bad "auto_start off says the proxy stays stopped" "$out" ;;
+esac
+case $out in
+  *"open the app once"*) bad "auto_start off needs no manual start line" "$out" ;;
+  *) ok "auto_start off needs no manual start line" ;;
+esac
+if grep -q 'action.START' "$WORK/adb.log"; then
+  bad "auto_start off starts nothing" "$(grep action "$WORK/adb.log")"
+else
+  ok "auto_start off starts nothing"
+fi
+
 expect_exit "--release --status is rejected" 1 --release --status
 expect_exit "--fdroid --release is rejected" 1 --fdroid --release
 expect_exit "--release with two tags is rejected" 1 --release v0.5.0 v0.4.0

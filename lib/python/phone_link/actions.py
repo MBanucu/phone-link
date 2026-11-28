@@ -554,7 +554,15 @@ SCRIPTS: tuple[Action, ...] = (
             "for the vendored app the old loss-on-uninstall still applies; `--pull` "
             "copies the installed APK off the phone, `--status` reports the version; for "
             "`org.phonelink.proxy` it also grants `WRITE_SECURE_SETTINGS` and the battery "
-            "allowlist, so the app can turn wireless debugging back on itself"
+            "allowlist, so the app can turn wireless debugging back on itself, and after an "
+            "install or update it reads only `auto_start` and `port` from the app's "
+            "non-secret `state.txt` and reports the listener it observes: with auto-start on "
+            "it waits for the app's package-replacement receiver and names the stored port, "
+            "falling back to the documented `START` when the service stays down, and with "
+            "auto-start off it says the proxy stays stopped until it is started \u2014 no "
+            'manual "open the app" step, and a stale or absent `state.txt` never fails the '
+            "install; the `--replace-signer` restore ends with the listener's observed state "
+            "too"
         ),
         usage="usage: phone-proxy-install [APK...]",
         usage_const="USAGE_INSTALL",
