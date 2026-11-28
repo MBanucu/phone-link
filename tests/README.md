@@ -42,7 +42,7 @@ command is usually the first one to run.
 
 | Suite | Proves | Guards |
 | --- | --- | --- |
-| `phone-tun-toggle` | the unit state and the rendered sing-box config follow the TCP probe and the route source | `lib/phone-tun-toggle.sh` |
+| `phone-tun-toggle` | the unit state and the rendered sing-box config follow the TCP probe and the route source | `lib/python/phone_link/unit/tun_toggle.py` |
 | `phone-fix-tunnel` | a stopped tunnel is restarted and its state reported | `bin/phone-fix-tunnel` |
 | `phone-fix-forwarding` | `ip_forward` is written and read back | `bin/phone-fix-forwarding` |
 | `phone-fix-internet` | routing, DNS and the per-path fixes are tried in order and reported | `bin/phone-fix-internet` |

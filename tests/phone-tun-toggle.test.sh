@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# Hermetic tests for lib/phone-tun-toggle.sh: stub systemctl, the TCP probe and
-# the route/address source, and render the config with the real
-# lib/phone-tun-config.py the unit runs in ExecStartPre. No network, no phone,
-# no systemd, no real ip command.
+# Hermetic tests for lib/python/phone_link/unit/tun_toggle.py: stub systemctl,
+# the TCP probe and the route/address source, and render the config with the
+# real lib/phone-tun-config.py the unit runs in ExecStartPre. No network, no
+# phone, no systemd, no real ip command.
 set -u
 
-BASH_BIN=$(command -v bash)
 PYTHON_BIN=$(command -v python3)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-TOGGLE=$ROOT/lib/phone-tun-toggle.sh
+PYTHON_LIB=$ROOT/lib/python
 CONFIG_PY=$ROOT/lib/phone-tun-config.py
 . "$ROOT/tests/lib/harness.sh"
 suite --no-home
@@ -97,7 +96,8 @@ esac
 EOF
 
 run() {
-  "$BASH_BIN" "$TOGGLE" >"$LOG/out" 2>&1
+  PYTHONPATH=$PYTHON_LIB PYTHONDONTWRITEBYTECODE=1 \
+    "$PYTHON_BIN" -m phone_link.unit.tun_toggle >"$LOG/out" 2>&1
 }
 reset() {
   printf 'inactive\n' >"$LOG/state"
@@ -133,6 +133,9 @@ printf '%s\n' "$PRIMARY" "$FALLBACK" >"$LOG/reachable"
 if run; then ok "the toggle exits 0"; else bad "the toggle exits 0 ($(cat "$LOG/out"))"; fi
 [ "$(host)" = "$PRIMARY" ] && ok "the primary is written to the host file" \
   || bad "the primary is written to the host file (got $(host))"
+mode=$(stat -c %a "$PHONE_TUN_HOST_FILE" 2>/dev/null || true)
+[ "$mode" = 644 ] && ok "the host file is 0644 like the port file" \
+  || bad "the host file is 0644 like the port file (mode ${mode:-missing})"
 [ "$(config_server)" = "$PRIMARY" ] && ok "the config carries the primary" \
   || bad "the config carries the primary (got $(config_server))"
 [ "$(changes)" = "start phone-tun.service" ] && ok "the tunnel is started once" \

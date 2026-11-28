@@ -36,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `phone-tun-toggle` decides in Python now. `lib/phone-tun-toggle.sh` is gone;
+  `phone_link.unit.tun_toggle` probes the declared hosts, the default-route
+  gateways and the point-to-point peers, and writes the same files with the
+  same contents. `modules/phone-link/derived.nix` keeps every `PHONE_TUN_*`
+  export and `exec`s `python3 -m phone_link.unit.tun_toggle`; the unit name,
+  the timer and `tests/phone-tun-toggle.test.sh`'s cases are unchanged. This is
+  the pilot for the four stateful unit helpers (#116).
 - `lib/python/` is gated on ruff and mypy: the new `python-lint` check runs
   `ruff check`, `ruff format --check` and `mypy` (the GUI included, with GTK's
   missing stubs ignored) from one `pyproject.toml`, and both tools are in the
