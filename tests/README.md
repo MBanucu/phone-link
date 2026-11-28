@@ -57,6 +57,7 @@ command is usually the first one to run.
 | `phone-proxy-start` | a stopped proxy is started and the listening state is observed | `bin/phone-proxy-start` |
 | `phone-proxy-stop` | a running proxy is stopped and a proxy that keeps listening fails | `bin/phone-proxy-stop` |
 | `phone-proxy-switch` | a listening port is probed, used, then the old one is dropped after the tunnel restart | `bin/phone-proxy-switch` |
+| `phone-proxy-list` | a stopped service still shows its saved proxies from the app's index, while a live dump wins | `bin/phone-proxy-switch` |
 | `phone-proxy-boot` | grants, the boot receiver and the idle whitelist are checked and applied | `bin/phone-proxy-boot` |
 | `phone-proxy-transfer` | saved proxies export and import over the one-shot adb-forward socket | `bin/phone-proxy-export` |
 | `phone-proxy-data-clear` | the app's data is cleared only when installed, with `--yes` | `bin/phone-proxy-data-clear` |
@@ -87,6 +88,7 @@ command is usually the first one to run.
 | `phone-reboot-unlock` | a phone that goes offline and comes back is unlocked after the reboot | `bin/phone-reboot-unlock` |
 | `phone-as-root` | sudo re-runs the shim that was invoked and keeps the PHONE_* overrides | `lib/python/phone_link/phone.py` |
 | `phone-link-cli` | the registry covers every script, unknown ids fail, and `run` passes argv and exit status | `bin/phone-link` |
+| `registry` | the generated shims, COMMANDS map and docs table agree with the actions table, and each drift is caught | `lib/python/phone_link/registry_gen.py` |
 | `phone-link-escalation` | one password prompt is reused by sudo's timestamp for the following root actions | `lib/python/phone_link/actions.py` |
 | `gui-status-stream` | the status page's stream parser and row state machine, without GTK | `lib/python/phone_link_gui/status_model.py` |
 

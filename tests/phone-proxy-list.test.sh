@@ -10,24 +10,12 @@ set -u
 BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/bin/phone-proxy-switch
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
-mkdir -p "$LOG" "$STUBS"
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
+. "$ROOT/tests/lib/harness.sh"
+suite
 
-cat >"$STUBS/adb" <<'EOF'
-#!/usr/bin/env bash
+stub adb
+answer adb <<'EOF'
 args=("$@")
 if [ "${args[0]:-}" = "-s" ]; then args=("${args[@]:2}"); fi
 cmd="${args[*]}"
@@ -36,9 +24,6 @@ case $cmd in
   "shell cat "*) cat "$LOG/state" ;;
 esac
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/adb"
-chmod +x "$STUBS/adb"
-export PATH="$STUBS:$PATH"
 
 export PHONE_SERIAL=XPLO2EEA0001541
 export PHONE_SECRETS=$TMP/secrets
@@ -161,5 +146,4 @@ run_list
 grep -q 'it uses user alice' "$LOG/out" && ok "the refusal names the user" \
   || bad "the refusal names the user" "$(cat "$LOG/out")"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish
