@@ -299,6 +299,75 @@ def phone_proxy_install(args: list[str]) -> int:
             log(f"  {path}")
         return 0
 
+    def listener_state() -> str:
+        return proxy_commands._field(proxy_commands._dump(serial), "state")
+
+    def report_observed(state: str, port: str = "") -> None:
+        on_port = f" on port {port}" if port else ""
+        if proxy_commands._running(state):
+            log(f"the proxy is listening{on_port} ({state})")
+        elif proxy_commands._gated(state):
+            log(
+                f"the proxy is up but not listening{on_port} ({state}); "
+                "phone-proxy-check reports why"
+            )
+        else:
+            log(f"the proxy is not running ({state or 'no state'})")
+
+    def report_listener() -> None:
+        """Say what the listener is doing after an install or update.
+
+        A package replacement with auto-start on brings the service back by
+        itself; the app's non-secret state file says whether that was asked for
+        and which port to name. Only those two fields are read. A stale or
+        absent file leaves the switches unknown, and that is not a reason to
+        fail an install that has already succeeded: the observed service state
+        is still reported, without waiting or starting anything.
+        """
+        state_text = proxy_commands._state_text(serial)
+        auto_start = proxy_commands._state_field(state_text, "auto_start")
+        port = proxy_commands._state_field(state_text, "port")
+        if auto_start == "false":
+            state = listener_state()
+            if proxy_commands._running(state) or proxy_commands._gated(state):
+                report_observed(state, port)
+            else:
+                log(
+                    "auto-start is off, so the proxy stays stopped until it is "
+                    "started (phone-proxy-start)"
+                )
+            return
+        if auto_start == "true":
+            state = proxy_commands._wait(
+                serial,
+                lambda each: (
+                    proxy_commands._running(each) or proxy_commands._gated(each)
+                ),
+                int(settings.PHONE_PROXY_WAIT),
+            )
+            if not state:
+                log(
+                    "the proxy did not come back after the update; starting it over adb"
+                )
+                proxy_commands._send(serial, proxy_commands.START)
+                state = proxy_commands._wait(
+                    serial,
+                    lambda each: (
+                        proxy_commands._running(each) or proxy_commands._gated(each)
+                    ),
+                    int(settings.PHONE_PROXY_WAIT),
+                )
+                if not state:
+                    log(
+                        "the proxy is still stopped; run phone-proxy-start once "
+                        "a saved proxy exists"
+                    )
+                    return
+        else:
+            # A fresh install, or an older app that has not written state.txt.
+            state = listener_state()
+        report_observed(state, port)
+
     def cache_dir() -> str:
         return os.environ.get("PHONE_APK_DIR") or (
             os.path.join(
@@ -592,8 +661,12 @@ def phone_proxy_install(args: list[str]) -> int:
         log("importing the saved proxies after the install")
         proxy_commands.restore(serial, restore_document, settings.PHONE_PROXY_BACKUP)
     show_status()
-    if restore_document is not None:
-        log("the app's saved proxies are back; phone-proxy-check reports the link")
-    else:
+    if package.startswith(settings.PHONE_APP_NAMESPACE):
+        if restore_document is not None:
+            log("the app's saved proxies are back")
+            report_observed(listener_state())
+        else:
+            report_listener()
+    elif restore_document is None:
         log("open the app once and start the proxy, then run phone-proxy-check")
     return 0
