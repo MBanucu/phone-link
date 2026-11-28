@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# phone-reboot-unlock lives in ../lib/python/phone_link/commands (one function
-# per script). This wrapper only resolves the package next to the checkout or
-# the store install, then hands over to it.
+# phone-reboot-unlock lives in ../lib/python/phone_link/commands (one function per
+# script). This wrapper only resolves the package next to the checkout or the
+# store install, then hands over to it.
 set -eu
 
 here=$(dirname -- "$(readlink -f -- "$0")")

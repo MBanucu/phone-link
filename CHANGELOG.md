@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `phoneLink.*` option path, default and description, every unit name and every
   generated file path is unchanged; the fail-open module is not split.
 
+- The command surface has one metadata source (#85). `phone_link.actions`
+  now carries each command's id, group, `module:function`, summary, usage,
+  escalation, GUI visibility and docs description; `phone_link.registry_gen`
+  writes the `bin/` shims, `commands/__init__.py` and the `docs/scripts.md`
+  table from it. Adding a command is the body, one table entry and a test —
+  the shim, `COMMANDS` map and docs row are generated — and the `registry` /
+  `gui-registry` checks fail when any of those four views disagrees.
+
 ### Fixed
 
 - `phone-proxy-switch --list` no longer reports two empty lists when the app's
@@ -24,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   normal update, a force-stop or a stopped service shows the saved names and
   ports instead of looking like data loss. While the service runs, its live
   dump is still the only source; no password is read or printed.
+
 
 ## [0.20.1] - 2026-11-27
 
