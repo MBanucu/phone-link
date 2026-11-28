@@ -17,7 +17,7 @@ it stays the one owner of them.
 |---|---|---|
 | adb contract: intents, actions, extras, `dumpsys` output, package names | `phone-link-proxy` | [proxy README](https://github.com/MBanucu/phone-link-proxy#readme) and `src/org/phonelink/proxy/` |
 | APK build, signing, release workflow, store metadata | `phone-link-proxy` | `build.sh`, `.github/workflows/release.yml`, the [releases page](https://github.com/MBanucu/phone-link-proxy/releases) |
-| install, update, uninstall, signer replacement, doctor version check | `phone-link` | `lib/python/phone_link/commands/phone.py` (`phone_proxy_install`, `phone_proxy_uninstall`, the `phone_proxy_*` group) and `lib/python/phone_doctor/checks/proxy.py` |
+| install, update, uninstall, signer replacement, doctor version check | `phone-link` | `lib/python/phone_link/commands/install.py` (install, update, uninstall, data clear), `commands/proxy.py` (lifecycle, boot, battery) and `lib/python/phone_doctor/checks/proxy.py` |
 | module, tunnel, AP, hairpin, fail-open | `phone-link` | `modules/phone-link/`, `modules/phone-link-failopen.nix` and the `lib/phone-*.sh` helpers the units run |
 | live repair harness | `phone-link` | [`tests/live/doctor-fix-proxy.sh`](../tests/live/doctor-fix-proxy.sh) |
 | live panel/contract harness | `phone-link-proxy` | `tests/live/proxy-app.sh` |
