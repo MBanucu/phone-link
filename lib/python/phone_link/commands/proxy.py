@@ -12,6 +12,8 @@ means anything: a request through the listener.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import os
 import re
@@ -30,6 +32,8 @@ from ..shell import capture, die, log, must, status
 # PHONE_PROXY_PKG.
 CLASS = "org.phonelink.proxy"
 SERVICE = f"{settings.PHONE_PROXY_PKG}/{CLASS}.ProxyService"
+STATE_FILE = f"/sdcard/Android/data/{settings.PHONE_PROXY_PKG}/files/state.txt"
+SAVED_INDEX_VERSION = 1
 START = f"{CLASS}.action.START"
 STOP = f"{CLASS}.action.STOP"
 EXPORT = f"{CLASS}.action.EXPORT"
@@ -80,7 +84,9 @@ last, once the new one has answered.
 
 --check  report the laptop's port and the phone's listeners; exit 1 when the
          phone does not listen on the port the laptop uses
---list   print the phone's saved proxies and listeners as JSON, for the panel
+--list   print the phone's saved proxies and listeners as JSON, for the panel;
+         `service` is running/gated/stopped, and a stopped service uses the
+         app's non-secret saved index when its dump has no saved lines
 """
 
 USAGE_EXPORT = """usage: phone-proxy-export [--out FILE]
@@ -117,6 +123,16 @@ def _dump(serial: str) -> str:
     return capture(
         ["adb", "-s", serial, "shell", "dumpsys", "activity", "service", SERVICE]
     )
+
+
+def _state_text(serial: str) -> str:
+    """The app's own facts, readable while the service is stopped.
+
+    A stopped service prints nothing for `dumpsys activity service`; the app
+    still rewrites this file on every store change. Only the non-secret index
+    is read from it here.
+    """
+    return capture(["adb", "-s", serial, "shell", "cat", STATE_FILE])
 
 
 def _field(dump: str, name: str) -> str:
@@ -521,6 +537,87 @@ def _dump_saved(dump: str) -> list[dict]:
     return saved
 
 
+def _decode_field(value: str) -> str:
+    """One Base64URL field from the app's saved-profile index.
+
+    The app writes ``~`` for an empty field, standard padding included, so an
+    unreadable field is treated as empty rather than ending the whole list: a
+    name is a label, not a credential.
+    """
+    if value in ("", "~"):
+        return ""
+    try:
+        raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+        return raw.decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError, ValueError):
+        return ""
+
+
+def _saved_index(state_text: str) -> list[dict]:
+    """The non-secret saved-profile index the app writes to ``state.txt``.
+
+    The service prints its saved list only while it runs; a stopped app still
+    rewrites this file on every change. The format is documented in the app's
+    README and ``SavedIndex.java``::
+
+        saved_index_version 1
+        saved_index_count 2
+        saved_index <b64(name)> <port> <b64(user)> <anonymous> <auto_start> <b64(ssid)> <any_network>
+
+    An unknown version or a file without the block is an older app, not an
+    error: the caller then has no saved list, exactly as before.
+    """
+    version = ""
+    count = None
+    entries: list[dict] = []
+    for line in state_text.splitlines():
+        name, _, value = line.partition(" ")
+        value = value.strip()
+        if name == "saved_index_version":
+            version = value
+        elif name == "saved_index_count":
+            try:
+                count = int(value)
+            except ValueError:
+                count = None
+        elif name == "saved_index":
+            parts = line.split(" ")
+            if len(parts) != 8 or parts[1] == "none":
+                continue
+            try:
+                port = int(parts[2])
+            except ValueError:
+                continue
+            entries.append(
+                {
+                    "name": _decode_field(parts[1]),
+                    "port": port,
+                    "user": _decode_field(parts[3]),
+                    "anonymous": parts[4] == "1",
+                    "auto_start": parts[5] == "1",
+                    "ssid": _decode_field(parts[6]),
+                    "any_network": parts[7] == "1",
+                }
+            )
+    if version != str(SAVED_INDEX_VERSION):
+        return []
+    if count is not None and count != len(entries):
+        # A torn write is possible in principle; the file is replaced
+        # atomically, so a mismatch means an app this build does not know.
+        return []
+    return entries
+
+
+def _service_status(dump: str) -> str:
+    """`running`, `gated` or `stopped` from the service's own state line."""
+    state = _field(dump, "state")
+    if _running(state):
+        return "running"
+    if state:
+        return "gated"
+    return "stopped"
+
+
 def _credentials_for(entry: dict) -> tuple[bool, str]:
     """Whether the laptop can authenticate to a saved proxy, and why not.
 
@@ -552,19 +649,34 @@ def _port_source() -> str:
 def _list_payload(serial: str) -> dict:
     dump = _dump(serial)
     running = _dump_listeners(dump)
+    status = _service_status(dump)
+    entries = _dump_saved(dump)
+    if not entries and status == "stopped":
+        # A stopped service prints no saved lines. The app's non-secret index
+        # is the difference between "nothing is saved" and "nothing can be
+        # read right now"; it is never a reason to start the service.
+        entries = _saved_index(_state_text(serial))
     saved = []
-    for entry in _dump_saved(dump):
+    for entry in entries:
         offerable, why = _credentials_for(entry)
-        entry.update(
-            running=entry["port"] in running,
-            offerable=offerable,
-            why=why,
+        # The same shape whether the list came from the dump or the index, so
+        # a consumer does not have to care which one answered.
+        saved.append(
+            {
+                "name": entry["name"],
+                "port": entry["port"],
+                "user": entry["user"],
+                "anonymous": entry["anonymous"],
+                "running": entry["port"] in running,
+                "offerable": offerable,
+                "why": why,
+            }
         )
-        saved.append(entry)
     return {
         "active": settings.active_port(),
         "port_source": _port_source(),
         "runtime_file": settings.PHONE_RUNTIME_PORT_FILE,
+        "service": status,
         "running": running,
         "saved": saved,
     }

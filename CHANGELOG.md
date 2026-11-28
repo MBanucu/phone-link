@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `phoneLink.*` option path, default and description, every unit name and every
   generated file path is unchanged; the fail-open module is not split.
 
+### Fixed
+
+- `phone-proxy-switch --list` no longer reports two empty lists when the app's
+  service is stopped (#88). It now prints `service: stopped` and reads the
+  non-secret saved-profile index the app writes to `files/state.txt`, so a
+  normal update, a force-stop or a stopped service shows the saved names and
+  ports instead of looking like data loss. While the service runs, its live
+  dump is still the only source; no password is read or printed.
+
 ## [0.20.1] - 2026-11-27
 
 ### Fixed
