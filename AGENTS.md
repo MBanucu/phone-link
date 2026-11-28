@@ -41,6 +41,13 @@ rules the work here has settled into, not a style guide.
   Close it with `Closes #N` in the PR that lands the work. A bottleneck found
   while working — something that slows development down or makes a command lie —
   is a wish too, even if nobody asked for the fix yet.
+- **Shell stops at the edges.** Python carries anything with branching, state,
+  parsing, retries or structured output — commands, the decisions a unit makes,
+  harnesses. Shell is only the generated `bin/` shims, an `ExecStart` hook that
+  `exec`s one Python module, and Nix activation snippets. A new `lib/*.sh` over
+  about 40 lines, or a new `tests/*.test.sh`, needs an issue saying why Python
+  is not the answer; `docs/commands.md` has the detail and names
+  `tests/check.sh` as the one sanctioned large shell file.
 - **Conventional Commits**, one change per commit: `feat(scope): …`,
   `fix(scope): …`, `test(live): …`, `docs: …`, `chore(release): …`. The
   footer is `Co-Authored-By: Codebuff <noreply@codebuff.com>` and nothing else.

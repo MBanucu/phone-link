@@ -40,6 +40,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ruff check`, `ruff format --check` and `mypy` (the GUI included, with GTK's
   missing stubs ignored) from one `pyproject.toml`, and both tools are in the
   dev shell and in `tests/check.sh fast`. The tree is `ruff format`-clean (#115).
+- `docs/commands.md` and `AGENTS.md` say where shell stops (#119). Python
+  carries anything with branching, state, parsing, retries or structured
+  output; shell is only the generated `bin/` shims, an `ExecStart` hook that
+  `exec`s one Python module, and Nix activation snippets. A new `lib/*.sh` over
+  about 40 lines, or a new `tests/*.test.sh`, needs an issue saying why Python
+  is not the answer; `tests/check.sh` is the one sanctioned large shell file
+  here.
 - The NixOS module is split into `modules/phone-link/`: `options/` has one file
   per option group (tunnel, proxy/relay, AP, secrets, packaging), `config/` one
   file per group of units or generated configuration, `derived.nix` holds the
