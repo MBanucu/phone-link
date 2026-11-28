@@ -395,7 +395,7 @@
 
       nixosModules =
         let
-          phoneLink = import ./modules/phone-link.nix;
+          phoneLink = import ./modules/phone-link;
           failOpen = import ./modules/phone-link-failopen.nix;
         in
         {

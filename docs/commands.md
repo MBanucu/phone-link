@@ -70,8 +70,8 @@ Consequences for a shim:
 | The change is… | Home | Real example |
 |---|---|---|
 | adb, `dumpsys`, JSON, argparse; a laptop-side read or state change | Python action in `lib/python/phone_link/commands/<area>.py` | `phone-net-status` in `commands/status.py` |
-| a long-running loop a systemd unit runs and a test stubs | `lib/*.sh`, wired by a module wrapper | `phone-tun-toggle` in `lib/phone-tun-toggle.sh`, started by `modules/phone-link.nix` |
-| an option, unit, generated config, firewall rule or watchdog | `modules/*.nix` | `phoneLink.ap.uplink` in `modules/phone-link.nix` |
+| a long-running loop a systemd unit runs and a test stubs | `lib/*.sh`, wired by a module wrapper | `phone-tun-toggle` in `lib/phone-tun-toggle.sh`, started by `modules/phone-link/config/tunnel.nix` |
+| an option, unit, generated config, firewall rule or watchdog | `modules/*.nix` | `phoneLink.ap.uplink` in `modules/phone-link/options/ap.nix` |
 | presentation only, over the same actions | `lib/python/phone_link_gui/` | the Proxy port page in `lib/python/phone_link_gui/port_page.py`; it runs `phone-proxy-switch`, it does not implement it |
 | a new proof, not a user-facing command | `flake.nix` / `tests/`, not `bin/` | the `registry` check in `flake.nix` |
 
