@@ -103,8 +103,9 @@ def _pinned_commit(ctx: Context, remote: str, ref: str) -> tuple[str, str]:
         # refs/tags/<ref>^{}; a lightweight tag prints only the commit.
         peeled = refs.get(f"refs/tags/{ref}^{{}}")
         tag = refs.get(f"refs/tags/{ref}")
-        if peeled or tag:
-            return TAG, peeled or tag
+        resolved = peeled or tag
+        if resolved:
+            return TAG, resolved
         branch = refs.get(f"refs/heads/{ref}")
         if branch:
             return BRANCH, branch

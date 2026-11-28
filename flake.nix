@@ -315,6 +315,28 @@
                 touch $out
               '';
 
+          # Lint and types over the same package: ruff reads ./pyproject.toml for
+          # the rule set and the GI import exception, mypy for the paths and the
+          # GTK stubs it does not have. Both write only to $TMPDIR, because the
+          # source tree in the store is read-only.
+          python-lint =
+            pkgs.runCommand "phone-link-python-lint-check"
+              {
+                nativeBuildInputs = [
+                  pkgs.mypy
+                  pkgs.ruff
+                ];
+              }
+              ''
+                cd ${./.}
+                export HOME=$TMPDIR
+                export RUFF_CACHE_DIR=$TMPDIR/ruff-cache
+                ruff check --no-cache .
+                ruff format --no-cache --check .
+                mypy --cache-dir=$TMPDIR/mypy-cache
+                touch $out
+              '';
+
           format = pkgs.runCommand "phone-link-format-check" { nativeBuildInputs = [ pkgs.nixfmt ]; } ''
             nixfmt --check ${./flake.nix} ${
               lib.escapeShellArgs (
@@ -412,6 +434,8 @@
           packages = runtimeDeps pkgs ++ [
             pkgs.shellcheck
             pkgs.nixfmt
+            pkgs.ruff
+            pkgs.mypy
             (pkgs.python3.withPackages (ps: [ ps.pygobject3 ]))
             pkgs.gtk4
             pkgs.libadwaita

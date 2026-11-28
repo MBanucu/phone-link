@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import threading
+from collections.abc import Sequence
 from pathlib import Path
 
 # The doctor shares the adb transport fallback with the commands: a phone that
@@ -189,7 +190,7 @@ class Context:
             return None
 
     def run(
-        self, argv: list[str], timeout: float | None = None
+        self, argv: Sequence[str], timeout: float | None = None
     ) -> subprocess.CompletedProcess[str] | None:
         try:
             # prepare() can discover and connect to a rotated wireless port.
@@ -210,7 +211,7 @@ class Context:
             return proc
         return self._spawn(recovered, timeout)
 
-    def text(self, argv: list[str], timeout: float | None = None) -> str:
+    def text(self, argv: Sequence[str], timeout: float | None = None) -> str:
         """stdout even on a non-zero exit (systemctl is-active does that)."""
         proc = self.run(argv, timeout)
         return proc.stdout if proc is not None else ""

@@ -1040,11 +1040,11 @@ def validate(expected: tuple[str, ...] | list[str] = ()) -> list[str]:
         ("phone-link-gui", "gui"),
         ("phone-link-gui-screenshots", "tool"),
     ):
-        script = SCRIPT_BY_ID.get(name)
-        if script is None:
+        entry = SCRIPT_BY_ID.get(name)
+        if entry is None:
             problems.append(f"missing entry point: {name}")
-        elif script.kind != kind:
-            problems.append(f"{name}: expected kind {kind}, found {script.kind}")
+        elif entry.kind != kind:
+            problems.append(f"{name}: expected kind {kind}, found {entry.kind}")
 
     # The checked-in shims, commands/__init__.py and the docs table are
     # generated from this table; the same check runs in the flake against the

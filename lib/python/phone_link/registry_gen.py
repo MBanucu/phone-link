@@ -135,8 +135,11 @@ def commands_text() -> str:
     return (
         COMMANDS_DOC
         + "\n\nfrom __future__ import annotations\n\nimport sys\n\n"
-        + f"from . import {', '.join(modules)}\n\n"
-        + "COMMANDS = {\n"
+        # One import per line so the generated file is stable under
+        # `ruff format`: a single combined import is re-wrapped (or collapsed)
+        # depending on how many modules exist.
+        + "".join(f"from . import {module}\n" for module in modules)
+        + "\nCOMMANDS = {\n"
         + mapping
         + "\n}\n\n"
         + 'USAGE = "usage: phone_link.commands <command> [options]'
@@ -218,12 +221,12 @@ def check(root: str | os.PathLike[str]) -> list[str]:
     docs = base / "docs" / "scripts.md"
     if docs.is_file():
         text = docs.read_text(encoding="utf-8")
-        expected = _replace_region(text, DOCS_BEGIN, DOCS_END, docs_table())
-        if expected is None:
+        rendered = _replace_region(text, DOCS_BEGIN, DOCS_END, docs_table())
+        if rendered is None:
             problems.append(
                 f"docs/scripts.md: missing the generated table markers ({WRITE_HINT})"
             )
-        elif expected != text:
+        elif rendered != text:
             problems.append(f"docs/scripts.md: table is out of date ({WRITE_HINT})")
     return problems
 

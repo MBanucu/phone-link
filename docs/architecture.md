@@ -25,6 +25,10 @@ flake.nix  →  modules/*.nix  →  lib/python/* + lib/*.sh  →  bin/*  →  te
   run (tunnel toggle, AP rejoin, fail-open).
 - `bin/` — one shim per command. A shim only resolves `PYTHONPATH` and hands
   over to `phone_link.commands`; the implementation is never here.
+- `pyproject.toml` — tooling only, no build: the ruff rule set (the default
+  `E4`/`E7`/`E9`/`F` plus the GI import exception) and mypy's paths and
+  `ignore_missing_imports`, read by the `python-lint` check. The packages are
+  imported through `PYTHONPATH`, never installed from a wheel.
 - `tests/` — `*.test.sh` are hermetic (stub `adb`/`curl`/`avahi-browse`) and run
   from the flake's `script` check; `tests/live/` needs the real phone and is
   never part of `nix flake check`.
@@ -47,7 +51,9 @@ flake.nix  →  modules/*.nix  →  lib/python/* + lib/*.sh  →  bin/*  →  te
 
 [`nix build .#checks.x86_64-linux.format`](checks.md) guards the Nix files,
 [`shellcheck`](checks.md) guards `bin/`, `lib/*.sh` and every `*.sh` under
-`tests/`, and [`python`](checks.md) compiles `lib/python/`. Every suite also
+`tests/`, [`python`](checks.md) compiles `lib/python/`, and
+[`python-lint`](checks.md) runs ruff and mypy over it against `pyproject.toml`.
+Every suite also
 runs through the `script` check inside `nix flake check`; [checks.md](checks.md)
 has the full table and how to run one target.
 

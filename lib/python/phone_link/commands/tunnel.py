@@ -148,11 +148,9 @@ def phone_tunnel_run(args: list[str]) -> int:
     # A config built before the placeholder existed still has a number.
     rewritten = re.sub(r'"server_port":\s*\d+', f'"server_port": {port}', rewritten)
 
-    handle, temporary = tempfile.mkstemp(
-        prefix="phone-tun.", suffix=".json", dir="/run"
-    )
+    fd, temporary = tempfile.mkstemp(prefix="phone-tun.", suffix=".json", dir="/run")
     try:
-        with os.fdopen(handle, "w", encoding="utf-8") as out:
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
             out.write(rewritten)
         os.chmod(temporary, 0o600)
 

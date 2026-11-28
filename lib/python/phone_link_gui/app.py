@@ -674,7 +674,8 @@ def selftest() -> int:
                 launched.append((action.id, args))
                 return object()
 
-            window._launch = capture_launch
+            # The selftest replaces the launcher so no command runs.
+            window._launch = capture_launch  # type: ignore[method-assign]
             window.start_ap_switch(False)
             window.start_ap_switch(True)
             if launched != [
@@ -695,8 +696,9 @@ def selftest() -> int:
                 raise RuntimeError("the AP switch is usable while the action runs")
             status.ap_action_finished()
             calls = []
-            status.refresh_ap = lambda: calls.append("ap")
-            status._probe_stream = lambda escalate: None
+            # Stubs, not behaviour: the selftest drives refresh() by hand.
+            status.refresh_ap = lambda: calls.append("ap")  # type: ignore[method-assign]
+            status._probe_stream = lambda escalate: None  # type: ignore[method-assign]
             status._busy = False
             status.refresh()
             if "ap" not in calls:

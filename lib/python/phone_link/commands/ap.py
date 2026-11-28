@@ -324,7 +324,7 @@ def phone_ap_up(args: list[str]) -> int:
                 )
 
     fallback_up = False
-    if blocked:
+    if blocked and verdict is not None:
         what = regdomain.channel_label(
             settings.PHONE_AP_BAND, int(settings.PHONE_AP_CHANNEL)
         )

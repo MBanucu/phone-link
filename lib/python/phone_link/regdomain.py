@@ -220,6 +220,7 @@ def evaluate(
     country = _country_for(sections, phy)
     listed = parse_phy_channels(phy_channels) if phy_channels else {}
 
+    reason: str | None
     if listed:
         if channel in listed:
             reason = listed[channel]

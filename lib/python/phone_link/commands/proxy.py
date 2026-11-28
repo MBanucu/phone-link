@@ -551,16 +551,16 @@ def phone_proxy_setup(args: list[str]) -> int:
         written += f", max-connections {written_max}"
     log(written)
 
-    verified = ""
+    reachable = ""
     for address in phone.phone_ips(serial):
         code = _request(address, port, user, password)
         log(f"{address}:{port} -> https://example.com = {code}")
         if code == "200":
-            verified = address
+            reachable = address
             break
-    if not verified:
+    if not reachable:
         die("the proxy is listening but no LAN address answered with 200")
-    log(f"phone proxy configured and verified through {verified}")
+    log(f"phone proxy configured and verified through {reachable}")
     return 0
 
 

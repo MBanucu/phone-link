@@ -13,7 +13,7 @@ import os
 import re
 import sys
 
-from .. import actions, phone, settings
+from .. import actions, phone
 from ..shell import capture, die, log, run
 
 USAGE = """usage: phone-doctor-fix [--yes] [--dry-run] [--required] [--which-doctor]
