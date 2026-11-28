@@ -7,21 +7,10 @@ set -u
 BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/lib/phone-ap-failopen.sh
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export LOG=$TMP/log STUBS=$TMP/bin
-mkdir -p "$LOG/tables" "$STUBS" "$TMP/run/phone-link"
+. "$ROOT/tests/lib/harness.sh"
+suite --no-home
+mkdir -p "$LOG/tables" "$TMP/run/phone-link"
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s\n' "$*"
-}
 
 CLIENT=192.168.77.232
 NOFORWARD=$TMP/noforward.nft
@@ -56,8 +45,8 @@ EOF
 # nft: `list table <family> <name>` reads a file; `-f` applies deletes and
 # materializes the tables named at the start of a line.  The real nft applies a
 # file as one transaction; the order in the file is what this models.
-cat >"$STUBS/nft" <<'EOF'
-#!/usr/bin/env bash
+stub nft
+answer nft <<'EOF'
 printf '%s\n' "$*" >>"$LOG/nft_calls"
 case "${1:-}" in
   list)
@@ -84,28 +73,26 @@ case "${1:-}" in
 esac
 EOF
 
-cat >"$STUBS/systemctl" <<'EOF'
-#!/usr/bin/env bash
+stub systemctl
+answer systemctl <<'EOF'
 printf '%s\n' "$*" >>"$LOG/systemctl_calls"
 case "${1:-}" in
   is-active) [ "$(cat "$LOG/tun_state" 2>/dev/null)" = active ] ;;
 esac
 EOF
 
-cat >"$STUBS/ip" <<'EOF'
-#!/usr/bin/env bash
+stub ip
+answer ip <<'EOF'
 case "$*" in
   'link show dev '*) [ "$(cat "$LOG/link_state" 2>/dev/null)" = up ] ;;
 esac
 EOF
 
-cat >"$STUBS/date" <<'EOF'
-#!/usr/bin/env bash
+stub date
+answer date <<'EOF'
 cat "$LOG/now" 2>/dev/null || printf '0\n'
 EOF
 
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS"/*
-chmod +x "$STUBS"/*
 
 export PHONE_AP_IF=wlp110s0
 export PHONE_AP_CLIENT=$CLIENT
@@ -324,5 +311,4 @@ if run; then ok "a malformed state file does not fail the run"; else bad "a malf
 [ "$(mode)" = open ] && ok "a malformed state file still fails open" \
   || bad "a malformed state file still fails open (got $(mode))"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

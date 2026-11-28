@@ -5,31 +5,18 @@ set -u
 BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/bin/net-check
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
-mkdir -p "$LOG" "$STUBS"
+. "$ROOT/tests/lib/harness.sh"
+suite
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
-cat >"$STUBS/curl" <<'EOF'
-#!/usr/bin/env bash
+stub curl
+answer curl <<'EOF'
 printf '%s\n' "$*" >"$LOG/curl.argv"
 cat "$LOG/code" 2>/dev/null || printf '000'
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/curl"
 
-cat >"$STUBS/google-chrome" <<'EOF'
-#!/usr/bin/env bash
+stub google-chrome
+answer google-chrome <<'EOF'
 printf '%s\n' "$*" >"$LOG/chrome.argv"
 case "$(cat "$LOG/chrome.mode" 2>/dev/null || echo ok)" in
   ok) printf '<html><title>Example Domain</title></html>\n' ;;
@@ -37,10 +24,9 @@ case "$(cat "$LOG/chrome.mode" 2>/dev/null || echo ok)" in
   die) exit 1 ;;
 esac
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/google-chrome"
 
-cat >"$STUBS/nix" <<'EOF'
-#!/usr/bin/env bash
+stub nix
+answer nix <<'EOF'
 printf '%s\n' "$*" >"$LOG/nix.argv"
 case "$(cat "$LOG/nix.mode" 2>/dev/null || echo ok)" in
   ok) printf '<html><title>Example Domain</title></html>\n' ;;
@@ -48,16 +34,13 @@ case "$(cat "$LOG/nix.mode" 2>/dev/null || echo ok)" in
   die) exit 1 ;;
 esac
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/nix"
 
-chmod +x "$STUBS/curl" "$STUBS/google-chrome" "$STUBS/nix"
 # The script gets only the stubs: falling back to a real google-chrome or nix
 # would make the "missing binary" cases pass for the wrong reason. The stubs
 # still need these host tools, and the script's shim needs an interpreter.
 for tool in timeout date grep readlink dirname cat python3; do
   ln -sf "$(command -v "$tool")" "$STUBS/$tool"
 done
-export PATH="$STUBS:$PATH"
 
 reset_state() {
   printf '200' >"$LOG/code"
@@ -167,5 +150,4 @@ grep -q 'nix:     not installed' "$LOG/out" && ok "missing nix reported" \
 # 8. --help exits 0.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

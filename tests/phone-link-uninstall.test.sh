@@ -5,32 +5,21 @@ set -u
 BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/bin/phone-link-uninstall
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
+. "$ROOT/tests/lib/harness.sh"
+suite
 export PHONE_SECRETS=$TMP/secrets
 export PHONE_APK_CACHE=$TMP/cache
 export PHONE_AP_DECLARATIVE=$TMP/ap-profile
 export PHONE_NM_SYSTEM_CONNECTIONS=$TMP/etc-connections
 export PHONE_NM_RUN_CONNECTIONS=$TMP/run-connections
-mkdir -p "$LOG" "$STUBS" "$PHONE_APK_CACHE" "$PHONE_NM_SYSTEM_CONNECTIONS" "$PHONE_NM_RUN_CONNECTIONS"
+mkdir -p "$PHONE_APK_CACHE" "$PHONE_NM_SYSTEM_CONNECTIONS" "$PHONE_NM_RUN_CONNECTIONS"
 printf 'PHONE_SOCKS_PASS=pass\nPHONE_PIN=1234\nPHONE_AP_PASS=ap-secret\n' >"$PHONE_SECRETS"
 chmod 600 "$PHONE_SECRETS"
 printf 'apk\n' >"$PHONE_APK_CACHE/proxy.apk"
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
-cat >"$STUBS/nmcli" <<'EOF'
-#!/usr/bin/env bash
+stub nmcli
+answer nmcli <<'EOF'
 case "$*" in
   "-t -f NAME con show") cat "$LOG/names" ;;
   "-t -f NAME,DEVICE con show --active") cat "$LOG/active" ;;
@@ -46,24 +35,21 @@ case "$*" in
 esac
 EOF
 
-cat >"$STUBS/systemctl" <<'EOF'
-#!/usr/bin/env bash
+stub systemctl
+answer systemctl <<'EOF'
 printf '%s\n' "$*" >>"$LOG/actions"
 EOF
 
-cat >"$STUBS/id" <<'EOF'
-#!/usr/bin/env bash
+stub id
+answer id <<'EOF'
 printf '0\n'
 EOF
 
-cat >"$STUBS/sudo" <<'EOF'
-#!/usr/bin/env bash
+stub sudo
+answer sudo <<'EOF'
 exec "$@"
 EOF
 
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS"/*
-chmod +x "$STUBS"/*
-export PATH="$STUBS:$PATH"
 
 run() {
   "$BASH_BIN" "$SCRIPT" "$@" >"$LOG/out" 2>&1
@@ -135,5 +121,4 @@ if run >/dev/null 2>&1; then bad "no --yes exits 1"; else ok "no --yes exits 1";
 # 7. --help.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

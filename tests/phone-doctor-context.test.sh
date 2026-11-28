@@ -5,21 +5,9 @@
 set -u
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export LOG=$TMP/log HOME=$TMP
-mkdir -p "$LOG"
+. "$ROOT/tests/lib/harness.sh"
+suite
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
 py() {
   PYTHONPATH="$ROOT/lib/python" python3 -c "$1"
@@ -295,5 +283,4 @@ PY
 [ "$out" = initialised-once ] && ok "concurrent caches initialise once" \
   || bad "concurrent caches initialise once" "$out"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

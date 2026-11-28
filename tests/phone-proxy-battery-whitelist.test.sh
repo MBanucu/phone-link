@@ -5,24 +5,12 @@ set -u
 BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/bin/phone-proxy-battery-whitelist
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
-mkdir -p "$LOG" "$STUBS"
+. "$ROOT/tests/lib/harness.sh"
+suite
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
-cat >"$STUBS/adb" <<'EOF'
-#!/usr/bin/env bash
+stub adb
+answer adb <<'EOF'
 args=("$@")
 if [ "${args[0]:-}" = "-s" ]; then args=("${args[@]:2}"); fi
 case "${args[0]:-}" in
@@ -48,9 +36,6 @@ case "${args[0]:-}" in
     ;;
 esac
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/adb"
-chmod +x "$STUBS/adb"
-export PATH="$STUBS:$PATH"
 
 run() {
   "$BASH_BIN" "$SCRIPT" "$@" >"$LOG/out" 2>&1
@@ -114,5 +99,4 @@ else
   bad "--help exits 0"
 fi
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

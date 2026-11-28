@@ -19,9 +19,8 @@ SCRIPT=${SCRIPT:-$here/../bin/phone-proxy-install}
 }
 
 . "$ROOT/tests/lib/harness.sh"
-tmpdir WORK
-export LOG="$WORK"
-mkdir -p "$WORK/stub" "$WORK/cache" "$WORK/home"
+suite WORK --log . --stubs stub --home home
+mkdir -p "$WORK/cache"
 
 # adb stub: the common device/install/shell/dumpsys shape. ADB_STUB_ABSENT
 # simulates a phone without the app; ADB_STUB_BAD_SIG a different signing key.
@@ -64,14 +63,14 @@ CURL
 # default package is the app's own repository, whose releases a bare install
 # fetches: this checkout no longer builds it.
 run() {
-  HOME="$WORK/home" PATH="$WORK/stub:$PATH" PHONE_APK_DIR="$WORK/cache" \
+  PHONE_APK_DIR="$WORK/cache" \
     PHONE_PROXY_PKG=com.tokyoxpa3.androidproxy \
     PHONE_PROXY_BACKUP="$WORK/backup.json" PHONE_PROXY_TRANSFER_WAIT=0 \
     bash "$SCRIPT" "$@" 2>&1
 }
 
 run_absent() {
-  HOME="$WORK/home" PATH="$WORK/stub:$PATH" PHONE_APK_DIR="$WORK/cache" \
+  PHONE_APK_DIR="$WORK/cache" \
     PHONE_PROXY_PKG=com.tokyoxpa3.androidproxy \
     PHONE_PROXY_BACKUP="$WORK/backup.json" PHONE_PROXY_TRANSFER_WAIT=0 \
     ADB_STUB_ABSENT=1 bash "$SCRIPT" "$@" 2>&1
@@ -158,7 +157,7 @@ else
 fi
 
 run_own() {
-  HOME="$WORK/home" PATH="$WORK/stub:$PATH" PHONE_APK_DIR="$WORK/cache" \
+  PHONE_APK_DIR="$WORK/cache" \
     PHONE_PROXY_PKG=org.phonelink.proxy bash "$SCRIPT" "$@" 2>&1
 }
 
@@ -183,7 +182,7 @@ fi
 # 24. --release takes the APK a release of the app's repository carries, checks
 #     the .sha256 beside it, and installs that file.
 release_run() {
-  HOME="$WORK/home" PATH="$WORK/stub:$PATH" PHONE_APK_DIR="$WORK/cache" \
+  PHONE_APK_DIR="$WORK/cache" \
     PHONE_PROXY_PKG=org.phonelink.proxy PHONE_PROXY_REPO=example/phone-link-proxy \
     PHONE_PROXY_BACKUP="$WORK/backup.json" PHONE_PROXY_TRANSFER_WAIT=0 \
     bash "$SCRIPT" "$@" 2>&1
@@ -228,7 +227,7 @@ esac
 # 27. A download that does not match the release is not installed.
 rm -f "$release_cache"
 : > "$WORK/adb.log"
-out=$(CURL_STUB_BAD_SUM=1 HOME="$WORK/home" PATH="$WORK/stub:$PATH" \
+out=$(CURL_STUB_BAD_SUM=1 \
   PHONE_APK_DIR="$WORK/cache" PHONE_PROXY_PKG=org.phonelink.proxy \
   PHONE_PROXY_REPO=example/phone-link-proxy bash "$SCRIPT" --release 2>&1)
 rc=$?
@@ -246,7 +245,7 @@ fi
 # 28. adb refusing because the keys differ is named, and --replace-signer is
 #     what gets past it: the old app goes first, so the install can land.
 : > "$WORK/adb.log"
-out=$(ADB_STUB_BAD_SIG=1 HOME="$WORK/home" PATH="$WORK/stub:$PATH" \
+out=$(ADB_STUB_BAD_SIG=1 \
   PHONE_APK_DIR="$WORK/cache" PHONE_PROXY_PKG=org.phonelink.proxy \
   bash "$SCRIPT" "$WORK/local.apk" 2>&1)
 rc=$?
@@ -257,7 +256,7 @@ case $out in
 esac
 
 : > "$WORK/adb.log"
-out=$(HOME="$WORK/home" PATH="$WORK/stub:$PATH" PHONE_APK_DIR="$WORK/cache" \
+out=$(PHONE_APK_DIR="$WORK/cache" \
   PHONE_PROXY_PKG=org.phonelink.proxy bash "$SCRIPT" --replace-signer "$WORK/local.apk" 2>&1)
 rc=$?
 [ "$rc" = 1 ] && ok "--replace-signer without --yes refuses" \

@@ -14,12 +14,7 @@ set -uo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd -- "$here/.." && pwd)
 . "$ROOT/tests/lib/harness.sh"
-tmpdir WORK
-export LOG="$WORK"
-mkdir -p "$WORK/stub" "$WORK/home"
-
-PASS=0
-FAIL=0
+suite WORK --log . --stubs stub --home home
 
 stub_cmd id "$WORK/stub" <<'ID'
 #!/usr/bin/env bash
@@ -147,8 +142,6 @@ printf '%s\n' "$*" >>"$LOG/curl.log"
 printf '%s' "$(cat "$LOG/http_code" 2>/dev/null || printf 200)"
 CURL
 
-chmod +x "$WORK/stub"/* 2>/dev/null || true
-export PATH="$WORK/stub:$PATH"
 export PHONE_SECRETS="$WORK/secrets"
 export PHONE_PROXY_BACKUP="$WORK/backup.json"
 # The app answers in the dump it just wrote; there is nothing to wait out.
@@ -176,7 +169,6 @@ printf '1' >"$WORK/import_count"
 run() {
   local script=$1
   shift
-  HOME="$WORK/home" PATH="$WORK/stub:$PATH" \
     PHONE_SECRETS="$WORK/secrets" PHONE_PROXY_BACKUP="$WORK/backup.json" \
     PHONE_PROXY_TRANSFER_WAIT=1 PHONE_PROXY_WAIT=1 \
     bash "$ROOT/bin/$script" "$@" 2>&1
@@ -192,11 +184,9 @@ fresh() {
 }
 
 passed() {
-  PASS=$((PASS + 1))
   ok "$1"
 }
 failed() {
-  FAIL=$((FAIL + 1))
   bad "$1" "${2:-}"
 }
 
@@ -395,7 +385,4 @@ case $out in
   *) failed "no export names the locked screen" "$out" ;;
 esac
 
-printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
-if [ "$FAIL" -ne 0 ]; then
-  exit 1
-fi
+finish

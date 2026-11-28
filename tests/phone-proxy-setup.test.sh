@@ -7,26 +7,14 @@ set -u
 BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/bin/phone-proxy-setup
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
-mkdir -p "$LOG" "$STUBS"
+. "$ROOT/tests/lib/harness.sh"
+suite
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
 # The app takes the extras of its START intent and prints them back: the dump
 # after a start is the configuration it was given, exactly like ProxyService.
-cat >"$STUBS/adb" <<'EOF'
-#!/usr/bin/env bash
+stub adb
+answer adb <<'EOF'
 args=("$@")
 if [ "${args[0]:-}" = "-s" ]; then args=("${args[@]:2}"); fi
 cmd="${args[*]}"
@@ -53,17 +41,13 @@ case $cmd in
     ;;
 esac
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/adb"
 
-cat >"$STUBS/curl" <<'EOF'
-#!/usr/bin/env bash
+stub curl
+answer curl <<'EOF'
 # What a request through the listener answers; $LOG/code says whether the
 # phone accepted the credentials.
 printf '%s' "$(cat "$LOG/code")"
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/curl"
-chmod +x "$STUBS"/*
-export PATH="$STUBS:$PATH"
 
 printf 'PHONE_SOCKS_PASS=s3cret\n' >"$TMP/secrets"
 export PHONE_SECRETS=$TMP/secrets
@@ -212,5 +196,4 @@ grep -q 'max_connections must be 16\.\.1024, got 1025' "$LOG/out" && ok "names t
 [ -s "$LOG/actions" ] && bad "nothing is sent for an out-of-range ceiling" \
   || ok "nothing is sent for an out-of-range ceiling"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

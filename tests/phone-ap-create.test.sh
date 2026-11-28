@@ -5,26 +5,14 @@ set -u
 BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/bin/phone-ap-create
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
+. "$ROOT/tests/lib/harness.sh"
+suite
 export PHONE_SECRETS=$TMP/secrets
 export PHONE_AP_DECLARATIVE=$TMP/ap-profile
-mkdir -p "$LOG" "$STUBS"
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
-cat >"$STUBS/nmcli" <<'EOF'
-#!/usr/bin/env bash
+stub nmcli
+answer nmcli <<'EOF'
 case "$*" in
   "-t -f NAME con show") cat "$LOG/names" ;;
   "connection add "*)
@@ -37,18 +25,18 @@ case "$*" in
 esac
 EOF
 
-cat >"$STUBS/id" <<'EOF'
-#!/usr/bin/env bash
+stub id
+answer id <<'EOF'
 printf '0\n'
 EOF
 
-cat >"$STUBS/sudo" <<'EOF'
-#!/usr/bin/env bash
+stub sudo
+answer sudo <<'EOF'
 exec "$@"
 EOF
 
-cat >"$STUBS/systemctl" <<'EOF'
-#!/usr/bin/env bash
+stub systemctl
+answer systemctl <<'EOF'
 case "$*" in
   # The module's DHCP-only dnsmasq and nft forward drop.
   "cat phone-link-ap-dhcp.service phone-link-ap-noforward.service")
@@ -60,9 +48,6 @@ case "$*" in
 esac
 EOF
 
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS"/*
-chmod +x "$STUBS"/*
-export PATH="$STUBS:$PATH"
 printf 'PHONE_SOCKS_PASS=pass\nPHONE_PIN=1234\nPHONE_AP_PASS=ap-secret\n' >"$PHONE_SECRETS"
 chmod 600 "$PHONE_SECRETS"
 
@@ -247,5 +232,4 @@ grep -q 'no local profile to create or refresh' "$LOG/out" \
 # 10. --help.
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

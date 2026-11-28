@@ -6,7 +6,7 @@ set -u
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 . "$ROOT/tests/lib/harness.sh"
-tmpdir TMP
+suite
 
 # A throwaway checkout: the generator imports the package from this copy too,
 # so check-registry resolves its root and bins from the copy, exactly as it

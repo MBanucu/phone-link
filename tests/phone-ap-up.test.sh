@@ -9,9 +9,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/bin/phone-ap-up
 
 . "$ROOT/tests/lib/harness.sh"
-tmpdir TMP
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
-mkdir -p "$LOG" "$STUBS"
+suite
 
 stub_cmd id "$STUBS" <<'EOF'
 printf '0\n'
@@ -69,7 +67,6 @@ stub_cmd sudo "$STUBS" <<'EOF'
 exec "$@"
 EOF
 
-export PATH="$STUBS:$PATH"
 export PHONE_AP_DECLARATIVE=$TMP/ap-profile
 export PHONE_AP_REJOIN_STATE=$TMP/ap-rejoin.last
 

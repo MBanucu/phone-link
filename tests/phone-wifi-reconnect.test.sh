@@ -6,27 +6,15 @@ set -u
 BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/bin/phone-wifi-reconnect
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
+. "$ROOT/tests/lib/harness.sh"
+suite
 # Never consult a real phone or avahi in the sandbox.
 export PHONE_ADB_MDNS=0
 unset PHONE_SERIAL
-mkdir -p "$LOG" "$STUBS"
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
-cat >"$STUBS/adb" <<'EOF'
-#!/usr/bin/env bash
+stub adb
+answer adb <<'EOF'
 printf '%s\n' "$*" >>"$LOG/adb.log"
 args=("$@")
 if [ "${args[0]:-}" = "-s" ]; then args=("${args[@]:2}"); fi
@@ -40,9 +28,6 @@ case "$cmd" in
   "shell settings put global wifi_always_requested "*) printf '%s\n' "$last" >"$LOG/always" ;;
 esac
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/adb"
-chmod +x "$STUBS/adb"
-export PATH="$STUBS:$PATH"
 
 run() {
   "$BASH_BIN" "$SCRIPT" "$@" >"$LOG/out" 2>&1
@@ -109,5 +94,4 @@ fresh
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 if run --bogus; then bad "unknown argument exits 1"; else ok "unknown argument exits 1"; fi
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

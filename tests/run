@@ -1,0 +1,249 @@
+#!/usr/bin/env bash
+# Run the hermetic suites, all of them or exactly the ones a pattern names.
+#
+#   tests/run                       every tests/*.test.sh
+#   tests/run 'phone-ap-*'          the AP suites
+#   tests/run phone-ap-up phone-doctor
+#   tests/run --parallel 4          four at a time
+#   tests/run --timings             print the slowest suites too
+#
+# A pattern is a shell glob matched against the suite's file name and its name
+# without `.test.sh`, so both `phone-ap-*` and `phone-ap-up` work.  Quoting the
+# pattern keeps the shell from expanding it against the current directory.
+#
+# Each suite runs from the checkout root with its own temporary directory and
+# its output is printed once it finishes, followed by a PASS/FAIL line and the
+# seconds it took.  The exit status is non-zero when any suite failed.
+#
+# `--parallel N` keeps N suites in flight; the output is still printed in suite
+# order, so a parallel run reads like a serial one.  `--timings` adds the same
+# slowest-first table the flake check prints.  `PHONE_RUN_TIMINGS=FILE` writes a
+# `suite,part,ms` file for `tests/check-timings.sh`; a suite's own part rows
+# (`PHONE_TEST_TIMINGS`) are folded in there, never emitted twice.
+set -u
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd) || exit 1
+cd "$ROOT" || exit 1
+
+parallel=1
+show_timings=0
+timings_file=${PHONE_RUN_TIMINGS:-}
+patterns=()
+
+usage() {
+  cat <<'EOF'
+usage: tests/run [pattern...] [--parallel N] [--timings] [--timings-file FILE]
+
+  pattern...          shell globs matched against tests/*.test.sh; default all
+  --parallel N        run up to N suites at once (default 1)
+  --timings           print each suite's seconds and the slowest five
+  --timings-file FILE write suite,part,ms rows to FILE
+  --list              print the suites the patterns select, run none
+  --help              this text
+
+  PHONE_RUN_TIMINGS=FILE is the same as --timings-file FILE.
+EOF
+}
+
+list_only=0
+
+while [ "$#" -gt 0 ]; do
+  case $1 in
+    --parallel)
+      if [ "$#" -lt 2 ]; then
+        printf 'tests/run: --parallel needs a count\n' >&2
+        exit 2
+      fi
+      parallel=$2
+      shift 2
+      ;;
+    --parallel=*)
+      parallel=${1#*=}
+      shift
+      ;;
+    --timings)
+      show_timings=1
+      shift
+      ;;
+    --timings-file)
+      if [ "$#" -lt 2 ]; then
+        printf 'tests/run: --timings-file needs a path\n' >&2
+        exit 2
+      fi
+      timings_file=$2
+      shift 2
+      ;;
+    --timings-file=*)
+      timings_file=${1#*=}
+      shift
+      ;;
+    --list)
+      list_only=1
+      shift
+      ;;
+    --help | -h)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      while [ "$#" -gt 0 ]; do
+        patterns+=("$1")
+        shift
+      done
+      ;;
+    -*)
+      printf 'tests/run: unknown option: %s\n\n' "$1" >&2
+      usage >&2
+      exit 2
+      ;;
+    *)
+      patterns+=("$1")
+      shift
+      ;;
+  esac
+done
+
+case $parallel in
+  '' | *[!0-9]* | 0)
+    printf 'tests/run: --parallel needs a positive number\n' >&2
+    exit 2
+    ;;
+esac
+
+matches() {
+  local suite=$1 stem=${1%.test.sh} pattern
+  for pattern in "${patterns[@]}"; do
+    # shellcheck disable=SC2254 # the pattern is the point
+    case $suite in $pattern) return 0 ;; esac
+    # shellcheck disable=SC2254
+    case $stem in $pattern) return 0 ;; esac
+  done
+  return 1
+}
+
+suites=()
+for file in tests/*.test.sh; do
+  [ -e "$file" ] || continue
+  name=${file#tests/}
+  if [ "${#patterns[@]}" -eq 0 ] || matches "$name"; then
+    suites+=("$name")
+  fi
+done
+
+if [ "${#suites[@]}" -eq 0 ]; then
+  printf 'tests/run: no suite matches' >&2
+  printf ' %s' "${patterns[@]}" >&2
+  printf '\n' >&2
+  exit 2
+fi
+
+if [ "$list_only" -eq 1 ]; then
+  printf '%s\n' "${suites[@]}"
+  exit 0
+fi
+
+TMP=$(mktemp -d) || exit 1
+trap 'rm -rf -- "$TMP"' EXIT
+mkdir -p "$TMP/out" "$TMP/parts" "$TMP/status" "$TMP/ms"
+
+now_ms() {
+  date +%s%N | awk '{ printf "%d", $1 / 1000000 }'
+}
+
+# run_suite INDEX — run one suite, keeping its output, exit status, time and
+# its own part rows under $TMP, keyed by index so parallel runs cannot collide.
+run_suite() {
+  local index=$1 suite=${suites[$1]} started finished status parts
+  parts=$TMP/parts/$index.csv
+  started=$(now_ms)
+  if PHONE_TEST_TIMINGS=$parts bash "tests/$suite" >"$TMP/out/$index" 2>&1; then
+    status=0
+  else
+    status=$?
+  fi
+  finished=$(now_ms)
+  printf '%s\n' "$status" >"$TMP/status/$index"
+  printf '%s\n' "$((finished - started))" >"$TMP/ms/$index"
+  return 0
+}
+
+failed=0
+total_ms=0
+rows=()
+slowest=()
+
+# report_suite INDEX — print one finished suite and fold its time and part rows
+# into the summary.  Serial runs call it as each suite ends, so a long run shows
+# progress; a parallel run calls it in suite order once all have finished.
+report_suite() {
+  local index=$1 suite=${suites[$1]} status ms parts row
+  status=$(cat "$TMP/status/$index" 2>/dev/null || printf 1)
+  ms=$(cat "$TMP/ms/$index" 2>/dev/null || printf 0)
+  total_ms=$((total_ms + ms))
+
+  printf '\n==> %s\n' "$suite"
+  cat "$TMP/out/$index"
+  if [ "$status" -eq 0 ]; then
+    printf 'PASS %s (%d.%03d s)\n' "$suite" "$((ms / 1000))" "$((ms % 1000))"
+  else
+    printf 'FAIL %s (%d.%03d s)\n' "$suite" "$((ms / 1000))" "$((ms % 1000))"
+    failed=$((failed + 1))
+  fi
+
+  rows+=("$suite,total,$ms")
+  parts=$TMP/parts/$index.csv
+  if [ -s "$parts" ]; then
+    while IFS= read -r row; do
+      [ -n "$row" ] || continue
+      rows+=("$suite,$row")
+    done <"$parts"
+  fi
+  slowest+=("$ms $suite")
+}
+
+if [ "$parallel" -le 1 ]; then
+  for index in "${!suites[@]}"; do
+    run_suite "$index"
+    report_suite "$index"
+  done
+else
+  running=0
+  for index in "${!suites[@]}"; do
+    run_suite "$index" &
+    running=$((running + 1))
+    if [ "$running" -ge "$parallel" ]; then
+      wait -n || true
+      running=$((running - 1))
+    fi
+  done
+  wait || true
+  for index in "${!suites[@]}"; do
+    report_suite "$index"
+  done
+fi
+
+printf '\n%d suite(s): %d passed, %d failed in %d.%03d s\n' \
+  "${#suites[@]}" "$((${#suites[@]} - failed))" "$failed" \
+  "$((total_ms / 1000))" "$((total_ms % 1000))"
+
+if [ "$show_timings" -eq 1 ] || [ -n "$timings_file" ]; then
+  printf '\nslowest suites:\n'
+  printf '%s\n' "${slowest[@]}" |
+    sort -rn |
+    head -5 |
+    while read -r ms suite; do
+      printf '%8d.%03d s  %s\n' "$((ms / 1000))" "$((ms % 1000))" "$suite"
+    done
+fi
+
+if [ -n "$timings_file" ]; then
+  mkdir -p "$(dirname "$timings_file")" || exit 1
+  {
+    printf 'suite,part,ms\n'
+    printf '%s\n' "${rows[@]}"
+  } >"$timings_file" || exit 1
+  printf '\ntimings: %s\n' "$timings_file"
+fi
+
+[ "$failed" -eq 0 ]

@@ -9,21 +9,20 @@
 set -uo pipefail
 
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+ROOT=$(cd -- "$here/.." && pwd)
 SCRIPT=${SCRIPT:-$here/../bin/phone-proxy-uninstall}
 [ -f "$SCRIPT" ] || {
   echo "no script at $SCRIPT" >&2
   exit 2
 }
 
-WORK=$(mktemp -d)
-trap 'rm -rf "$WORK"' EXIT
-export LOG="$WORK"
-mkdir -p "$WORK/stub" "$WORK/home"
+. "$ROOT/tests/lib/harness.sh"
+suite WORK --log . --stubs stub --home home
 
 # adb stub: pm path answers only while the marker file exists; uninstall removes
 # it and prints Success.
-cat > "$WORK/stub/adb" <<'ADB'
-#!/usr/bin/env bash
+stub adb
+answer adb <<'ADB'
 printf '%s\n' "$*" >> "$LOG/adb.log"
 [ "${1:-}" = "devices" ] && { printf 'List of devices attached\nTESTPHONE\tdevice\n\n'; exit 0; }
 [ "${1:-}" = "-s" ] && shift 2
@@ -45,13 +44,9 @@ case "${1:-}" in
 esac
 exit 0
 ADB
-chmod 755 "$WORK/stub/adb"
-
-# Build sandboxes have no /usr/bin/env, so point the stub at this bash.
-sed -i "1s|.*|#!${BASH}|" "$WORK/stub/adb"
 
 run() {
-  HOME="$WORK/home" PATH="$WORK/stub:$PATH" bash "$SCRIPT" "$@" 2>&1
+  bash "$SCRIPT" "$@" 2>&1
 }
 
 # Every case starts from "installed" with an empty call log.
@@ -59,11 +54,6 @@ installed() {
   : > "$LOG/installed"
   : > "$LOG/adb.log"
 }
-
-pass=0
-fail=0
-ok() { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf 'FAIL %s%s\n' "$1" "${2:+ — $2}"; }
 
 expect_exit() {
   local name=$1 want=$2 out rc
@@ -151,5 +141,4 @@ installed
 expect_exit "unknown argument is rejected" 1 --bogus
 expect_exit "--help exits 0" 0 --help
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

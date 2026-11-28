@@ -6,24 +6,12 @@ set -u
 BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/bin/phone-proxy-stop
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
-mkdir -p "$LOG" "$STUBS"
+. "$ROOT/tests/lib/harness.sh"
+suite
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
-cat >"$STUBS/adb" <<'EOF'
-#!/usr/bin/env bash
+stub adb
+answer adb <<'EOF'
 args=("$@")
 if [ "${args[0]:-}" = "-s" ]; then args=("${args[@]:2}"); fi
 cmd="${args[*]}"
@@ -40,9 +28,6 @@ case $cmd in
     ;;
 esac
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/adb"
-chmod +x "$STUBS"/*
-export PATH="$STUBS:$PATH"
 
 run() {
   "$BASH_BIN" "$SCRIPT" "$@" >"$LOG/out" 2>&1
@@ -83,8 +68,8 @@ if run; then ok "stopping a stopped proxy exits 0"; else bad "stopping a stopped
 
 # 5. A proxy the app keeps running is a failure, not a silent success.
 fresh
-cat >"$STUBS/adb" <<'EOF'
-#!/usr/bin/env bash
+stub adb
+answer adb <<'EOF'
 args=("$@")
 if [ "${args[0]:-}" = "-s" ]; then args=("${args[@]:2}"); fi
 cmd="${args[*]}"
@@ -95,8 +80,6 @@ case $cmd in
   "shell am start-foreground-service "*) printf '%s\n' "$cmd" >>"$LOG/actions" ;;
 esac
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/adb"
-chmod +x "$STUBS/adb"
 if run; then bad "a proxy that keeps listening exits 1"; else ok "a proxy that keeps listening exits 1"; fi
 grep -q 'proxy did not stop' "$LOG/out" && ok "says it did not stop" \
   || bad "says it did not stop" "$(cat "$LOG/out")"
@@ -113,5 +96,4 @@ fresh
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 if run --bogus; then bad "unknown argument exits 1"; else ok "unknown argument exits 1"; fi
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

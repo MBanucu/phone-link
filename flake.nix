@@ -289,7 +289,7 @@
                 nativeBuildInputs = [ pkgs.shellcheck ];
               }
               ''
-                shellcheck -S warning ${./bin}/* ${./lib}/*.sh ${
+                shellcheck -S warning ${./bin}/* ${./lib}/*.sh ${./tests/run} ${
                   lib.escapeShellArgs (
                     lib.filter (path: lib.hasSuffix ".sh" (toString path)) (lib.filesystem.listFilesRecursive ./tests)
                   )
@@ -359,33 +359,15 @@
                 ];
               }
               ''
-                timings=$TMPDIR/timings.csv
-                printf 'suite,part,ms\n' >"$timings"
-                # Run every suite from the flake source root, so each test's
-                # ../bin and ../lib lookups resolve; interpolating ./bin alone
-                # would give a store path without its siblings.
-                for t in ${self.outPath}/tests/*.test.sh; do
-                  suite=$(basename "$t")
-                  parts=$TMPDIR/parts.csv
-                  rm -f "$parts"
-                  started=$(date +%s%N)
-                  PHONE_TEST_TIMINGS=$parts bash "$t"
-                  finished=$(date +%s%N)
-                  printf '%s,total,%s\n' "$suite" "$(((finished - started) / 1000000))" >>"$timings"
-                  # A suite's own rows are `part,ms`; the suite column is added
-                  # here, so a suite cannot claim another's time.
-                  if [ -s "$parts" ]; then
-                    # Rows are `part,ms` with no header, so nothing is skipped.
-                    gawk -F, -v suite="$suite" 'NF >= 2 { print suite "," $0 }' "$parts" >>"$timings"
-                  fi
-                done
+                # One runner for the flake and for `tests/run` on a checkout:
+                # it selects every tests/*.test.sh, runs each from the source
+                # root (so ../bin and ../lib resolve), prints PASS/FAIL with the
+                # seconds, and writes the same suite,part,ms rows this check
+                # keeps. The timings file is the runner's only side output.
+                PHONE_RUN_TIMINGS=$TMPDIR/timings.csv \
+                  bash ${self.outPath}/tests/run --timings
                 mkdir -p $out
-                cp "$timings" $out/timings.csv
-                echo
-                echo "slowest suites:"
-                gawk -F, '$2 == "total" { printf "%8.2f s  %s\n", $3 / 1000, $1 }' "$timings" |
-                  sort -rn | head -5
-                gawk -F, '$2 == "total" { ms += $3; n += 1 } END { printf "total: %.2f s over %d suites\n", ms / 1000, n }' "$timings"
+                cp "$TMPDIR/timings.csv" $out/timings.csv
                 touch $out
               '';
         }

@@ -8,28 +8,16 @@ set -u
 BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/bin/phone-proxy-switch
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
-mkdir -p "$LOG" "$STUBS"
+. "$ROOT/tests/lib/harness.sh"
+suite
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
 # The app: a START adds a `running` line for its port (a profile's own port when
 # --es profile is given), a STOP removes one, and every intent is logged so the
 # order is testable. $LOG/start_fails keeps the dump unchanged, the way a proxy
 # whose SSID gate is closed never binds.
-cat >"$STUBS/adb" <<'EOF'
-#!/usr/bin/env bash
+stub adb
+answer adb <<'EOF'
 args=("$@")
 if [ "${args[0]:-}" = "-s" ]; then args=("${args[@]:2}"); fi
 cmd="${args[*]}"
@@ -60,14 +48,14 @@ case $cmd in
 esac
 EOF
 
-cat >"$STUBS/curl" <<'EOF'
-#!/usr/bin/env bash
+stub curl
+answer curl <<'EOF'
 printf 'curl %s\n' "$*" >>"$LOG/actions"
 printf '%s' "$(cat "$LOG/code")"
 EOF
 
-cat >"$STUBS/systemctl" <<'EOF'
-#!/usr/bin/env bash
+stub systemctl
+answer systemctl <<'EOF'
 case "${1:-}" in
   is-active)
     case "${2:-}" in
@@ -80,19 +68,16 @@ case "${1:-}" in
 esac
 EOF
 
-cat >"$STUBS/id" <<'EOF'
-#!/usr/bin/env bash
+stub id
+answer id <<'EOF'
 printf '0\n'
 EOF
 
-cat >"$STUBS/sudo" <<'EOF'
-#!/usr/bin/env bash
+stub sudo
+answer sudo <<'EOF'
 exec "$@"
 EOF
 
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS"/*
-chmod +x "$STUBS"/*
-export PATH="$STUBS:$PATH"
 
 export PHONE_SECRETS=$TMP/secrets
 export PHONE_RUNTIME_PORT_FILE=$TMP/run/proxy-port
@@ -295,5 +280,4 @@ if run --port http; then bad "a non-numeric port exits 1"; else ok "a non-numeri
 if run --bogus; then bad "an unknown argument exits 1"; else ok "an unknown argument exits 1"; fi
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

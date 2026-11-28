@@ -5,15 +5,13 @@
 set -u
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-STUBS=$TMP/bin
-mkdir -p "$STUBS"
+. "$ROOT/tests/lib/harness.sh"
+suite --no-home
 export ESCALATION_LOG=$TMP/log
 export ESCALATION_STAMP=$TMP/stamp
 
-cat >"$STUBS/sudo" <<'EOF'
-#!/usr/bin/env bash
+stub sudo
+answer sudo <<'EOF'
 # -n true: succeed only after something authenticated; -A: ask once, then
 # remember, which is what sudo's own timestamp does.
 printf 'sudo %s\n' "$*" >>"$ESCALATION_LOG"
@@ -36,31 +34,17 @@ if [ "$mode" = -A ]; then
 fi
 exec "${cmd[@]}"
 EOF
-cat >"$STUBS/pkexec" <<'EOF'
-#!/usr/bin/env bash
+stub pkexec
+answer pkexec <<'EOF'
 printf 'prompt pkexec\n' >>"$ESCALATION_LOG"
 exec "$@"
 EOF
-cat >"$STUBS/askpass" <<'EOF'
-#!/usr/bin/env bash
+stub askpass
+answer askpass <<'EOF'
 printf 'secret\n'
 EOF
-BASH=$(command -v bash)
-for stub in "$STUBS"/*; do sed -i "1s|.*|#!$BASH|" "$stub"; done
-chmod +x "$STUBS"/*
-export PATH="$STUBS:$PATH"
 export ASKPASS=$STUBS/askpass
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
 # 1. A user action never escalates, so it can never open the dialog.
 if PYTHONPATH="$ROOT/lib/python" python3 - <<'PY'
@@ -133,5 +117,4 @@ assert argv.index("PHONE_PIN=1234") < len(argv) - 1, argv
 PY
 then ok "the PHONE_* overrides are passed through"; else bad "the PHONE_* overrides are passed through"; fi
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

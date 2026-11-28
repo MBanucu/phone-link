@@ -5,28 +5,17 @@ set -u
 BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/bin/phone-unlock
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP PHONE_SECRETS=$TMP/secrets
+. "$ROOT/tests/lib/harness.sh"
+suite
+export PHONE_SECRETS=$TMP/secrets
 # The waits being tested are waits for a phone; here the phone is a stub,
 # so the polls are as short as the environment allows them to be.
 export PHONE_UNLOCK_POLL=0
-mkdir -p "$LOG" "$STUBS"
 printf 'PHONE_SOCKS_PASS=unused\n' >"$PHONE_SECRETS"
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
-cat >"$STUBS/adb" <<'EOF'
-#!/usr/bin/env bash
+stub adb
+answer adb <<'EOF'
 args=("$@")
 if [ "${args[0]:-}" = "-s" ]; then args=("${args[@]:2}"); fi
 screen() { cat "$LOG/screen" 2>/dev/null || printf 'on\n'; }
@@ -62,10 +51,7 @@ case "${args[0]:-}" in
     ;;
 esac
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/adb"
-chmod +x "$STUBS/adb"
 export PHONE_TEST_PIN=2468
-export PATH="$STUBS:$PATH"
 
 run() {
   PHONE_PIN="${PIN-}" "$BASH_BIN" "$SCRIPT" "$@" >"$LOG/out" 2>&1
@@ -166,5 +152,4 @@ else
   bad "PIN from PHONE_SECRETS works" "$(cat "$LOG/out")"
 fi
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

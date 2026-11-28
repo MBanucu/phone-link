@@ -4,29 +4,16 @@
 # the resolved serial inserted. Stub adb, no phone, no network.
 set -u
 
-BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
+. "$ROOT/tests/lib/harness.sh"
+suite
 # Never consult a real phone or avahi in the sandbox.
 export PHONE_ADB_MDNS=0
 unset PHONE_SERIAL PHONE_PROXY_HOST PHONE_AP_IP
-mkdir -p "$LOG" "$STUBS"
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
-cat >"$STUBS/adb" <<'EOF'
-#!/usr/bin/env bash
+stub adb
+answer adb <<'EOF'
 printf '%s\n' "$*" >>"$LOG/calls"
 case "${1:-}" in
   devices) cat "$LOG/devices" ;;
@@ -41,9 +28,6 @@ case "${1:-}" in
     ;;
 esac
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/adb"
-chmod +x "$STUBS/adb"
-export PATH="$STUBS:$PATH"
 
 py() {
   PYTHONPATH="$ROOT/lib/python" python3 -c "$1"
@@ -195,5 +179,4 @@ print(" ".join(adb.prepare(["adb", "devices"])))')
 [ "$out" = "adb devices" ] && ok "adb devices stays a server command" \
   || bad "adb devices stays a server command" "$out"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

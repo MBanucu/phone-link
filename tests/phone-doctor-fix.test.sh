@@ -6,25 +6,13 @@ set -u
 BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/bin/phone-doctor-fix
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
-mkdir -p "$LOG" "$STUBS"
+. "$ROOT/tests/lib/harness.sh"
+suite
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
 # The doctor stub prints the queued problems once, then reports clean.
-cat >"$STUBS/phone-doctor" <<'EOF'
-#!/usr/bin/env bash
+stub phone-doctor
+answer phone-doctor <<'EOF'
 [ "${1:-}" = "--analyze" ] || exit 2
 if [ -s "$LOG/problems" ]; then
   cat "$LOG/problems"
@@ -48,14 +36,11 @@ make_stub phone-ap-create
 make_stub phone-ap-up
 make_stub phone-wifi-connect
 
-cat >"$STUBS/phone-proxy-install" <<'EOF'
-#!/usr/bin/env bash
+stub phone-proxy-install
+answer phone-proxy-install <<'EOF'
 printf 'phone-proxy-install %s\n' "$*" >>"$LOG/actions"
 EOF
 
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS"/*
-chmod +x "$STUBS"/*
-export PATH="$STUBS:$PATH"
 export PHONE_APK_CACHE=$TMP/cache
 mkdir -p "$PHONE_APK_CACHE"
 : >"$PHONE_APK_CACHE/com.tokyoxpa3.androidproxy-test.apk"
@@ -67,7 +52,7 @@ run() {
 # Without PHONE_DOCTOR the fixer reads problems from the doctor beside it — the
 # checkout's — not the one first on PATH, which is the deployed copy.
 run_own_doctor() {
-  env -u PHONE_DOCTOR PATH="$STUBS:$PATH" "$BASH_BIN" "$SCRIPT" "$@" \
+  env -u PHONE_DOCTOR "$BASH_BIN" "$SCRIPT" "$@" \
     >"$LOG/out" 2>&1
 }
 
@@ -207,5 +192,4 @@ grep -q "doctor: $STUBS/phone-doctor" "$LOG/out" && ok "a run names its doctor" 
 if run --help; then ok "--help exits 0"; else bad "--help exits 0"; fi
 if run --bogus; then bad "unknown argument exits 1"; else ok "unknown argument exits 1"; fi
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

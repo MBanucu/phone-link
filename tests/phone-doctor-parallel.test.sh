@@ -5,21 +5,10 @@
 set -u
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export HOME=$TMP
+. "$ROOT/tests/lib/harness.sh"
+suite
 export PYTHONPATH="$ROOT/lib/python"
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
 # 1. A fast module's result is announced while the slow module is still
 #    running, the returned sections keep the module order, and nothing is
@@ -244,5 +233,4 @@ PY
 [ "$out" = jobs-ok ] && ok "--jobs auto and an explicit count parse" \
   || bad "--jobs auto and an explicit count parse" "$out"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

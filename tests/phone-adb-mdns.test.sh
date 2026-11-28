@@ -5,26 +5,13 @@
 # went away. Stub adb and avahi-browse, no phone, no network.
 set -u
 
-BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
-mkdir -p "$LOG" "$STUBS"
+. "$ROOT/tests/lib/harness.sh"
+suite
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
-cat >"$STUBS/adb" <<'EOF'
-#!/usr/bin/env bash
+stub adb
+answer adb <<'EOF'
 printf '%s\n' "$*" >>"$LOG/calls"
 args=("$@")
 serial=""
@@ -66,16 +53,12 @@ case "${args[0]:-}" in
     ;;
 esac
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/adb"
 
-cat >"$STUBS/avahi-browse" <<'EOF'
-#!/usr/bin/env bash
+stub avahi-browse
+answer avahi-browse <<'EOF'
 printf '%s\n' "$*" >>"$LOG/avahi_calls"
 cat "$LOG/avahi"
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/avahi-browse"
-chmod +x "$STUBS"/*
-export PATH="$STUBS:$PATH"
 
 # The suites run offline in the sandbox; a checkout machine may have a real
 # phone on the network and a real avahi, which must not be consulted here.
@@ -282,5 +265,4 @@ print(phone.phone_serial() or "none")')
 [ ! -s "$LOG/connect.log" ] && ok "nothing is connected to when off" \
   || bad "nothing is connected to when off" "$(cat "$LOG/connect.log")"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish

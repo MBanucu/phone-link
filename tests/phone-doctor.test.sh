@@ -6,27 +6,15 @@ set -u
 BASH_BIN=$(command -v bash)
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCRIPT=$ROOT/bin/phone-doctor
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-export LOG=$TMP/log STUBS=$TMP/bin HOME=$TMP
+. "$ROOT/tests/lib/harness.sh"
+suite
 # The doctor caches the newest release under the cache directory for a day,
 # so the suite keeps that inside its sandbox too.
 export XDG_CACHE_HOME=$TMP/cache
-mkdir -p "$LOG" "$STUBS"
 
-pass=0
-fail=0
-ok() {
-  pass=$((pass + 1))
-  printf 'ok   %s\n' "$*"
-}
-bad() {
-  fail=$((fail + 1))
-  printf 'FAIL %s%s\n' "$*" "${2:+ ($2)}"
-}
 
-cat >"$STUBS/adb" <<'EOF'
-#!/usr/bin/env bash
+stub adb
+answer adb <<'EOF'
 target=""
 args=("$@")
 if [ "${args[0]:-}" = "-s" ]; then target=${args[1]}; args=("${args[@]:2}"); fi
@@ -68,37 +56,32 @@ case "${args[0]:-}" in
     ;;
 esac
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/adb"
 
-cat >"$STUBS/avahi-browse" <<'EOF'
-#!/usr/bin/env bash
+stub avahi-browse
+answer avahi-browse <<'EOF'
 cat "$LOG/avahi"
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/avahi-browse"
 
-cat >"$STUBS/ip" <<'EOF'
-#!/usr/bin/env bash
+stub ip
+answer ip <<'EOF'
 case "$*" in
   "-4 -br addr show "*) cat "$LOG/ap_addr" ;;
   "rule show") cat "$LOG/rules" ;;
 esac
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/ip"
 
-cat >"$STUBS/nmcli" <<'EOF'
-#!/usr/bin/env bash
+stub nmcli
+answer nmcli <<'EOF'
 cat "$LOG/nmcli_cons"
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/nmcli"
 
-cat >"$STUBS/sysctl" <<'EOF'
-#!/usr/bin/env bash
+stub sysctl
+answer sysctl <<'EOF'
 cat "$LOG/forward"
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/sysctl"
 
-cat >"$STUBS/systemctl" <<'EOF'
-#!/usr/bin/env bash
+stub systemctl
+answer systemctl <<'EOF'
 case "$*" in
   "is-active phone-tun.service")
     cat "$LOG/tunnel"
@@ -114,30 +97,27 @@ case "$*" in
     [ "$(cat "$LOG/tunnel")" = active ] ;;
 esac
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/systemctl"
 
-cat >"$STUBS/nft" <<'EOF'
-#!/usr/bin/env bash
+stub nft
+answer nft <<'EOF'
 case "$*" in
   "list table inet phone_link_ap")
     [ -f "$LOG/nft" ] && cat "$LOG/nft" ;;
   *) exit 1 ;;
 esac
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/nft"
 
-cat >"$STUBS/iw" <<'EOF'
-#!/usr/bin/env bash
+stub iw
+answer iw <<'EOF'
 case "$*" in
   "dev wlp110s0 station dump") cat "$LOG/iw_station" 2>/dev/null ;;
   "dev wlp110s0 info") cat "$LOG/iw_info" 2>/dev/null ;;
   "dev wlp110s0 link") cat "$LOG/iw_link" 2>/dev/null ;;
 esac
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/iw"
 
-cat >"$STUBS/curl" <<'EOF'
-#!/usr/bin/env bash
+stub curl
+answer curl <<'EOF'
 case "$*" in
   *--socks5-hostname*) printf '%s' "$(cat "$LOG/proxy_code")" ;;
   # The release check: no file queued means "could not ask", which is what an
@@ -146,10 +126,9 @@ case "$*" in
   *) printf '%s' "$(cat "$LOG/internet_code")" ;;
 esac
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/curl"
 
-cat >"$STUBS/git" <<'EOF'
-#!/usr/bin/env bash
+stub git
+answer git <<'EOF'
 while [ "${1:-}" = "-C" ]; do shift 2; done
 case "$*" in
   "rev-parse HEAD") cat "$LOG/local_head" ;;
@@ -168,10 +147,7 @@ case "$*" in
     ;;
 esac
 EOF
-sed -i "1s|.*|#!$BASH_BIN|" "$STUBS/git"
 
-chmod +x "$STUBS"/*
-export PATH="$STUBS:$PATH"
 export PHONE_SECRETS=$TMP/secrets
 export PHONE_DOCTOR_RESOLV=$LOG/resolv.conf
 # phoneLink.ap's marker: absent means hotspot mode, so the AP checks are skipped
@@ -1002,5 +978,4 @@ grep -q 'run phone-proxy-install --release' "$LOG/out" && ok "says how to get it
   || bad "says how to get it" "$(cat "$LOG/out")"
 rm -f "$release_cache" "$LOG/release_json"
 
-printf '\n%d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ]
+finish
