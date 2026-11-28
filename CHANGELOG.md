@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The NixOS module is split into `modules/phone-link/`: `options/` has one file
+  per option group (tunnel, proxy/relay, AP, secrets, packaging), `config/` one
+  file per group of units or generated configuration, `derived.nix` holds the
+  values both sides share, and `default.nix` is the five-line import list. Every
+  `phoneLink.*` option path, default and description, every unit name and every
+  generated file path is unchanged; the fail-open module is not split.
+
 ## [0.20.1] - 2026-11-27
 
 ### Fixed

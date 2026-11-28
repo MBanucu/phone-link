@@ -332,8 +332,8 @@ adb shell 'grep -n 10323 /data/local/tmp/conn.txt'
 3. **DHCP to the AP client is firewalled.** `nixos-fw` ends in
    `nixos-fw-log-refuse` and had no `udp/67` rule, so the phone associated
    (`Supplicant state: COMPLETED`, RSSI -36) but stayed at `IP: null`, with no
-   `DHCPDISCOVER` in the laptop's journal. `modules/phone-link.nix` adds UDP 67
-   (DHCP only; the AP serves no DNS).
+   `DHCPDISCOVER` in the laptop's journal. `modules/phone-link/config/firewall.nix`
+   adds UDP 67 (DHCP only; the AP serves no DNS).
 4. **A single radio cannot be client and AP on different channels.** `iw list`
    reports `managed + AP` only for `#channels <= 1`, so starting the AP drops the
    client link to the phone's hotspot. AP mode therefore has no uplink of its own.
@@ -352,9 +352,9 @@ adb shell 'grep -n 10323 /data/local/tmp/conn.txt'
    phone's default network; under the old shared AP that was the `PhoneLink`
    Wi-Fi whose DNS was the laptop (`192.168.77.1`), and the lookup came straight
    back. Result: every name lookup fails and every `curl` exits `000` even
-   though raw IPs work. `modules/phone-link.nix` avoids this by pinning
-   `/etc/resolv.conf` to `1.1.1.1`/`9.9.9.9`, and the AP no longer advertises
-   the laptop as a DNS server either.
+   though raw IPs work. `modules/phone-link/config/resolver.nix` avoids this by
+   pinning `/etc/resolv.conf` to `1.1.1.1`/`9.9.9.9`, and the AP no longer
+   advertises the laptop as a DNS server either.
 7. **Policy routing is not obvious.** sing-box (gvisor stack) installs
    `ip rule` entries with fwmark 2022 and a table 2022 route, so
    `ip route get 1.1.1.1` shows `via 172.19.0.2 dev phone-tun table 2022`.

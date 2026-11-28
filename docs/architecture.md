@@ -12,9 +12,11 @@ flake.nix  →  modules/*.nix  →  lib/python/* + lib/*.sh  →  bin/*  →  te
 
 - `flake.nix` — the only entry point: `packages`, `nixosModules` (its `default`
   imports both modules below), `checks`, `apps`, `devShells` and `formatter`.
-- `modules/` — `phone-link.nix` declares the options, systemd units and the
-  generated sing-box config; `phone-link-failopen.nix` adds the fail-open
-  watchdog. Neither contains a shell implementation.
+- `modules/` — `phone-link/` declares the options, systemd units and the
+  generated sing-box config; `options/` holds one file per option group,
+  `config/` one file per group of units or generated configuration, and
+  `derived.nix` the values both sides share. `phone-link-failopen.nix` adds the
+  fail-open watchdog. Neither contains a shell implementation.
 - `lib/` — `python/phone_link/` is the action registry and the command bodies,
   `python/phone_doctor/` the checker (one module per symptom group),
   `python/phone_link_gui/` the GTK4 panel; `lib/*.sh` are the helpers the units
@@ -32,11 +34,11 @@ flake.nix  →  modules/*.nix  →  lib/python/* + lib/*.sh  →  bin/*  →  te
 
 | Task | First file | Test to run |
 |---|---|---|
-| Change the tunnel | `modules/phone-link.nix` (`phone-tun`, `phone-tun-toggle`, generated config) | `nix build .#checks.x86_64-linux.module` and `bash tests/phone-tun-toggle.test.sh` |
-| Change the AP profile | `modules/phone-link.nix` (`networking.networkmanager.ensureProfiles`); the imperative path is `lib/python/phone_link/commands/network.py` | `nix build .#checks.x86_64-linux.module` and `bash tests/phone-ap-create.test.sh` |
-| Change the hairpin or fail-open | `modules/phone-link.nix` (`ap.uplink`, the `ap.*Rules` values); `modules/phone-link-failopen.nix` + `lib/phone-ap-failopen.sh` for the watchdog | `nix build .#checks.x86_64-linux.module` and `bash tests/phone-ap-failopen.test.sh` |
+| Change the tunnel | `modules/phone-link/config/tunnel.nix` (`phone-tun`, `phone-tun-toggle`) and `modules/phone-link/derived.nix` (generated config) | `nix build .#checks.x86_64-linux.module` and `bash tests/phone-tun-toggle.test.sh` |
+| Change the AP profile | `modules/phone-link/config/networkmanager.nix` (`networking.networkmanager.ensureProfiles`); the imperative path is `lib/python/phone_link/commands/network.py` | `nix build .#checks.x86_64-linux.module` and `bash tests/phone-ap-create.test.sh` |
+| Change the hairpin or fail-open | `modules/phone-link/options/ap.nix` (`ap.uplink`, the `ap.*Rules` values) and `derived.nix` (the rulesets); `modules/phone-link-failopen.nix` + `lib/phone-ap-failopen.sh` for the watchdog | `nix build .#checks.x86_64-linux.module` and `bash tests/phone-ap-failopen.test.sh` |
 | Change or add a command | `lib/python/phone_link/commands/<group>.py`, then its entry in `commands/__init__.py` and `actions.py`; the matching `bin/<name>` is only the shim. Full recipe in [commands](commands.md) | `bash tests/<name>.test.sh`, plus `nix build .#checks.x86_64-linux.registry` |
-| Change a module option | `modules/phone-link.nix`; document it in the [options table](options.md) | `nix build .#checks.x86_64-linux.module` |
+| Change a module option | `modules/phone-link/options/<group>.nix` (or `options/ap.nix` for `ap.*` and its rulesets); document it in the [options table](options.md) | `nix build .#checks.x86_64-linux.module` |
 | Add or change a test | `tests/<name>.test.sh` | `bash tests/<name>.test.sh`; then `bash tests/check.sh fast` for the cheap set |
 | Change the GUI | `lib/python/phone_link_gui/app.py` (pages beside it); argv still comes from `lib/python/phone_link/actions.py` | `nix build .#checks.x86_64-linux.gui` and `.#checks.x86_64-linux.gui-registry` |
 | Change the proxy install | `lib/python/phone_link/commands/phone.py` (`phone_proxy_install`); the app itself is `MBanucu/phone-link-proxy` | `bash tests/phone-proxy-install.test.sh` |
@@ -47,17 +49,44 @@ flake.nix  →  modules/*.nix  →  lib/python/* + lib/*.sh  →  bin/*  →  te
 runs through the `script` check inside `nix flake check`; [checks.md](checks.md)
 has the full table and how to run one target.
 
+## Module layout
+
+`modules/phone-link/` is split by responsibility, not by line count:
+
+| Path | Holds |
+|---|---|
+| `default.nix` | the imports; the module the flake exposes |
+| `derived.nix` | values shared by options and units: runtime paths, generated sing-box config, unit scripts, nftables rulesets |
+| `options/tunnel.nix` | `enable`, `interfaceName`, `tunAddress`, `logLevel`, `manageResolver`, `configFile` |
+| `options/proxy.nix` | `proxyHost`, `proxyHosts`, `effectiveProxyHosts`, `proxyPort`, `enableRelay`, `relaySocksPort`, `relayHttpPort` |
+| `options/ap.nix` | `apInterface`, `ap.*` including the read-only rule values, `openApFirewall` |
+| `options/secrets.nix` | `proxyUser`, `secretsFile` |
+| `options/packaging.nix` | `cacheProxyApk` |
+| `config/base.nix` | `ap.country` kernel parameter and the assertions |
+| `config/tunnel.nix` | `phone-tun.service`, `phone-tun-toggle.service` + `.timer`, tmpfiles and `/etc/phone-link/env` |
+| `config/networkmanager.nix` | the AP profile, its migration `preStart` and `/etc/phone-link/ap-profile` |
+| `config/ap-dhcp.nix` | `phone-link-ap-dhcp.service` and the hairpin's `ip_forward` |
+| `config/firewall.nix` | `phone-link-ap-noforward.service` and the DHCP firewall hole |
+| `config/rejoin.nix` | `phone-link-ap-rejoin.service` + `.timer` |
+| `config/relay.nix` | `phone-socks-relay.service` |
+| `config/resolver.nix` | `/etc/resolv.conf` and resolver pinning |
+| `config/packaging.nix` | `system.activationScripts.phone-apk-cache` |
+
+`phone-link-failopen.nix` stays a separate top-level module; the flake imports
+it next to `phone-link/` for `nixosModules.default` and
+`nixosModules.phone-link`.
+
 ## Module options and the units they create
 
 All option defaults and descriptions are in the [options table](options.md).
 
 | Group | Options | Units and generated files |
 |---|---|---|
-| Tunnel | `enable`, `proxyHost`, `proxyHosts`, `proxyPort`, `proxyUser`, `interfaceName`, `tunAddress`, `logLevel`, `manageResolver`, `enableRelay`, `relaySocksPort`, `relayHttpPort` | `phone-tun.service`, `phone-tun-toggle.service` + `.timer`, `phone-socks-relay.service` (with `enableRelay`); `/etc/phone-link/env` and the `/run/phone-link` tmpfiles — in `modules/phone-link.nix` |
-| AP | `apInterface`, `ap.role`, `ap.*`, `openApFirewall` | with `ap.role = "local"`: the `NetworkManager-ensure-profiles` AP profile, `phone-link-ap-dhcp.service`, `phone-link-ap-noforward.service` and the DHCP firewall hole; `phone-link-ap-rejoin.service` + `.timer` in both roles — in `modules/phone-link.nix` |
+| Tunnel | `enable`, `proxyHost`, `proxyHosts`, `proxyPort`, `proxyUser`, `interfaceName`, `tunAddress`, `logLevel`, `manageResolver`, `enableRelay`, `relaySocksPort`, `relayHttpPort` | `phone-tun.service`, `phone-tun-toggle.service` + `.timer`, `phone-socks-relay.service` (with `enableRelay`); `/etc/phone-link/env` and the `/run/phone-link` tmpfiles — in `modules/phone-link/config/tunnel.nix` and `config/relay.nix` |
+| AP | `apInterface`, `ap.role`, `ap.*`, `openApFirewall` | with `ap.role = "local"`: the `NetworkManager-ensure-profiles` AP profile, `phone-link-ap-dhcp.service`, `phone-link-ap-noforward.service` and the DHCP firewall hole; `phone-link-ap-rejoin.service` + `.timer` in both roles — in `modules/phone-link/config/networkmanager.nix`, `ap-dhcp.nix`, `firewall.nix` and `rejoin.nix` |
 | Fail-open | `apFailOpen.enable`, `apFailOpen.client`, `apFailOpen.grace`, `apFailOpen.throttle`, `apFailOpen.nat` | `phone-link-ap-failopen.service` + `.timer` — in `modules/phone-link-failopen.nix` |
-| Packaging | `cacheProxyApk` | `system.activationScripts.phone-apk-cache` (an activation script, not a unit) — in `modules/phone-link.nix` |
-| Secrets | `secretsFile`, `proxyUser` | no unit of its own: the file is the `EnvironmentFile` of `phone-tun`, `phone-socks-relay` and `phone-link-ap-rejoin`, and supplies the AP profile's PSK placeholder |
+| Packaging | `cacheProxyApk` | `system.activationScripts.phone-apk-cache` (an activation script, not a unit) — in `modules/phone-link/config/packaging.nix` |
+| Secrets | `secretsFile`, `proxyUser` | no unit of its own: the file is the `EnvironmentFile` of `phone-tun`, `phone-socks-relay` and `phone-link-ap-rejoin`, and supplies the AP profile's PSK placeholder — options in `modules/phone-link/options/secrets.nix` |
 
 `configFile`, `effectiveProxyHosts` and `ap.noForwardRules` / `forwardRules` /
 `hairpinRules` / `ruleset` are read-only generated values, not settings.

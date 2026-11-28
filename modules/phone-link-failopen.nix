@@ -2,7 +2,7 @@
 #
 # Kept in its own module so the hairpin change stays additive and so the
 # watchdog is easy to review on its own: import it next to
-# `modules/phone-link.nix` (the flake's default module does) and enable it.  It
+# `modules/phone-link/` (the flake's default module does) and enable it.  It
 # only touches the two tables in the #42 interface contract: `inet
 # phone_link_ap` and `ip phone_link_hairpin`.  It does not own the AP profile,
 # the DHCP unit or the rules; it renders the merged `ap.ruleset` and

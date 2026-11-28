@@ -1,6 +1,6 @@
 # Module options
 
-Every public `phoneLink` option with its default. `modules/phone-link.nix` is
+Every public `phoneLink` option with its default. `modules/phone-link/` is
 authoritative: this table is a hand-maintained copy, and the module wins when
 they disagree. The fail-open options are declared in
 `modules/phone-link-failopen.nix`.
