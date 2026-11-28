@@ -68,6 +68,26 @@ grep -q 'Wi-Fi is free for NetworkManager to scan and join' "$LOG/out" \
   && ok "--client reports the free radio" \
   || bad "--client reports the free radio" "$(cat "$LOG/out")"
 
+# 2b. A runtime 2.4 GHz fallback is undone while the profile is down, so the
+#     next phone-ap-up tries 5 GHz again.
+rm -f "$LOG/nmcli"
+export PHONE_AP_FALLBACK=1
+export PHONE_AP_FALLBACK_STATE=$TMP/fallback.state
+export PHONE_AP_BAND=a PHONE_AP_CHANNEL=149 PHONE_AP_CHANNEL_WIDTH=80
+printf 'attempted=now\n' >"$PHONE_AP_FALLBACK_STATE"
+if run --client; then ok "a fallback run still stops the AP"; else
+  bad "a fallback run still stops the AP" "$(cat "$LOG/out")"
+fi
+grep -qx 'connection modify phonelink 802-11-wireless.band a 802-11-wireless.channel 149 802-11-wireless.channel-width 80' "$LOG/nmcli" \
+  && ok "down restores the declared band and channel" \
+  || bad "down restores the declared band and channel" "$(cat "$LOG/nmcli" 2>/dev/null)"
+[ -e "$PHONE_AP_FALLBACK_STATE" ] && bad "down clears the fallback state" \
+  || ok "down clears the fallback state"
+grep -q 'next phone-ap-up tries 5 GHz again' "$LOG/out" \
+  && ok "down says the next up retries 5 GHz" \
+  || bad "down says the next up retries 5 GHz" "$(cat "$LOG/out")"
+unset PHONE_AP_FALLBACK PHONE_AP_FALLBACK_STATE PHONE_AP_BAND PHONE_AP_CHANNEL PHONE_AP_CHANNEL_WIDTH
+
 # 3. A failed AP stop is reported and exits non-zero; nothing else runs.
 rm -f "$LOG/nmcli"
 if FAIL_DOWN=1 run --client; then bad "a failed AP stop exits non-zero"; else

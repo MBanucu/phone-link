@@ -8,6 +8,8 @@ let
     apOn
     apNamed
     apAutoconnect
+    apFallback
+    apFallbackNoAutoconnect
     apCountry
     apNoRejoin
     apNoFirewall
@@ -131,6 +133,49 @@ assert lib.assertMsg (
 assert lib.assertMsg (
   apAutoconnect.networking.networkmanager.ensureProfiles.profiles.phonelink.ipv4.method == "manual"
 ) "ap.autoconnect must not change the link-only IPv4 method";
+assert lib.assertMsg (lib.hasInfix "PHONE_AP_FALLBACK=1"
+  apFallback.environment.etc."phone-link/env".text
+) "ap.fallback.enable must reach the module configuration";
+assert lib.assertMsg (lib.hasInfix "PHONE_AP_FALLBACK_CHANNEL=6"
+  apFallback.environment.etc."phone-link/env".text
+) "ap.fallback.channel must reach the module configuration";
+assert lib.assertMsg (lib.hasInfix "PHONE_AP_FALLBACK_WIDTH=40"
+  apFallback.environment.etc."phone-link/env".text
+) "ap.fallback.channelWidth must reach the module configuration";
+assert lib.assertMsg (lib.hasInfix "PHONE_AP_FALLBACK_DELAY=45"
+  apFallback.environment.etc."phone-link/env".text
+) "ap.fallback.delay must reach the module configuration";
+assert lib.assertMsg (
+  apFallback.phoneLink.ap.fallback.enable && !apOn.phoneLink.ap.fallback.enable
+) "the fallback must stay off by default";
+assert lib.assertMsg (
+  apFallback.networking.networkmanager.ensureProfiles.profiles.phonelink.wifi.band == "a"
+  && apFallback.networking.networkmanager.ensureProfiles.profiles.phonelink.wifi.channel == 149
+) "the fallback must not change the declared 5 GHz profile";
+assert lib.assertMsg (
+  apFallback.environment.etc ? "phone-link/ap-fallback.sh"
+) "the fallback script must be installed for phone-ap-up";
+assert lib.assertMsg (
+  apFallback.environment.etc."phone-link/ap-fallback.sh".mode == "0755"
+) "the fallback script must be executable by the root command";
+assert lib.assertMsg (
+  apFallback.systemd.services ? phone-link-ap-fallback
+) "fallback + autoconnect must define the boot unit";
+assert lib.assertMsg (
+  apFallback.systemd.services.phone-link-ap-fallback.serviceConfig.Type == "oneshot"
+) "the boot fallback must be a oneshot";
+assert lib.assertMsg (
+  apFallback.systemd.services.phone-link-ap-fallback.serviceConfig.TimeoutStartSec == "105s"
+) "the boot fallback must allow the configured delay";
+assert lib.assertMsg (
+  !(apFallbackNoAutoconnect.systemd.services ? phone-link-ap-fallback)
+) "the boot fallback must not exist when the AP is not set to autoconnect";
+assert lib.assertMsg (
+  apFallbackNoAutoconnect.environment.etc ? "phone-link/ap-fallback.sh"
+) "phone-ap-up must have the fallback script without autoconnect";
+assert lib.assertMsg (
+  !(apOn.systemd.services ? phone-link-ap-fallback)
+) "the boot fallback must be opt-in";
 assert lib.assertMsg (lib.elem "cfg80211.ieee80211_regdom=DE" apCountry.boot.kernelParams)
   "ap.country must reach the kernel command line";
 assert lib.assertMsg (lib.elem "quiet" apCountry.boot.kernelParams)

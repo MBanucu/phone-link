@@ -27,6 +27,14 @@ in
       message = "phoneLink.ap.channelWidth must be 0, 20 or 40 when phoneLink.ap.band is bg";
     }
     {
+      assertion = !cfg.ap.fallback.enable || cfg.ap.band == "a";
+      message = "phoneLink.ap.fallback.enable requires phoneLink.ap.band = \"a\"; a 2.4 GHz AP cannot fall back to 2.4 GHz";
+    }
+    {
+      assertion = !cfg.ap.fallback.enable || cfg.ap.role == "local";
+      message = "phoneLink.ap.fallback.enable requires phoneLink.ap.role = \"local\"; an external AP has no local profile to fall back from";
+    }
+    {
       assertion = cfg.ap.role == "local" || cfg.ap.uplink == "none";
       message = "phoneLink.ap.role = \"external\" requires phoneLink.ap.uplink = \"none\"";
     }

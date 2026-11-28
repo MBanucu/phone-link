@@ -11,11 +11,14 @@ they disagree. The fail-open options are declared in
 | `phoneLink.apInterface` | `wlp110s0` | interface of the laptop access point, or the client interface with `ap.role = "external"` |
 | `phoneLink.ap.role` | `local` | `local` declares and owns the laptop AP; `external` means an always-on AP elsewhere (no local profile, DHCP, nftables rules or firewall hole; the laptop is a client) |
 | `phoneLink.ap.enable` | `false` | declare the AP profile from `PHONE_AP_PASS` (requires `phoneLink.enable`); with `role = "external"` it only gates the profile this host does not own, so the rejoin watchdog runs without it |
-| `phoneLink.ap.autoconnect` | `false` | let NetworkManager activate the local AP at boot (reserves the radio; a failed 5 GHz activation leaves no link); ignored with an external AP |
+| `phoneLink.ap.autoconnect` | `false` | let NetworkManager activate the local AP at boot (reserves the radio; a failed 5 GHz activation leaves no link unless `ap.fallback.enable` is set); ignored with an external AP |
 | `phoneLink.ap.rejoin` | `true` | re-assert the phone's association over USB adb after an AP restart (30 s timer, 5 min throttle; requires `ap.enable`) |
 | `phoneLink.ap.name` | `phonelink` | NetworkManager connection name |
 | `phoneLink.ap.ssid` | `PhoneLink` | SSID of the laptop access point; with `role = "external"` the external AP's SSID the rejoin watchdog nudges to |
 | `phoneLink.ap.band` / `channel` / `channelWidth` | `a` / `149` / `80` | 802.11 band, channel and AP channel width (5 GHz, non-DFS); local role only |
+| `phoneLink.ap.fallback.enable` | `false` | after a failed 5 GHz activation, try the 2.4 GHz settings once instead of leaving no link; `phone-ap-up` falls back at once, and with `ap.autoconnect` a boot unit waits `delay` first. Local role and `ap.band = "a"` only |
+| `phoneLink.ap.fallback.channel` / `channelWidth` | `1` / `20` | fallback channel (1, 6 or 11) and width (20 or 40); only with `fallback.enable` |
+| `phoneLink.ap.fallback.delay` | `30` | seconds the boot unit waits for the 5 GHz AP before falling back; `phone-ap-up` does not wait |
 | `phoneLink.ap.country` | `null` | uppercase ISO 3166-1 alpha-2 code (e.g. `"DE"`) added to `boot.kernelParams` as `cfg80211.ieee80211_regdom`; `null` leaves the domain alone. Takes effect on the next boot; without it a fresh boot in `country 00` cannot use 149 for AP mode |
 | `phoneLink.ap.address` | `192.168.77.1/24` | IPv4 address of the local AP interface; local role only |
 | `phoneLink.ap.uplink` | `none` | `none` keeps the AP link-only; `tunnel` hairpins one client through `phone-tun` so the AP can validate; must stay `none` with `role = "external"` |

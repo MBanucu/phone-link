@@ -51,6 +51,19 @@ PHONE_AP_BAND = _env("PHONE_AP_BAND", "a")
 PHONE_AP_CHANNEL = _env("PHONE_AP_CHANNEL", "149")
 PHONE_AP_CHANNEL_WIDTH = _env("PHONE_AP_CHANNEL_WIDTH", "80")
 PHONE_AP_DECLARATIVE = _env("PHONE_AP_DECLARATIVE", "/etc/phone-link/ap-profile")
+# The optional one-shot 2.4 GHz fallback: the script, the profile's fallback
+# channel/width/delay, and the per-boot state file both the command and the
+# boot unit share.  `PHONE_AP_FALLBACK` is "1" only when the module enabled it.
+PHONE_AP_FALLBACK = _env("PHONE_AP_FALLBACK", "0")
+PHONE_AP_FALLBACK_TOOL = _env(
+    "PHONE_AP_FALLBACK_TOOL", "/etc/phone-link/ap-fallback.sh"
+)
+PHONE_AP_FALLBACK_STATE = _env(
+    "PHONE_AP_FALLBACK_STATE", "/run/phone-link/ap-fallback"
+)
+PHONE_AP_FALLBACK_CHANNEL = _env("PHONE_AP_FALLBACK_CHANNEL", "1")
+PHONE_AP_FALLBACK_WIDTH = _env("PHONE_AP_FALLBACK_WIDTH", "20")
+PHONE_AP_FALLBACK_DELAY = _env("PHONE_AP_FALLBACK_DELAY", "30")
 PHONE_AP_ENSURE_UNIT = _env(
     "PHONE_AP_ENSURE_UNIT", "NetworkManager-ensure-profiles.service"
 )

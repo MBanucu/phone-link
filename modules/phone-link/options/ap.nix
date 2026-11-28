@@ -132,6 +132,58 @@ in
         '';
       };
 
+      fallback = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = ''
+            Try a one-shot 2.4 GHz fallback when the 5 GHz AP cannot start.
+
+            A failed 5 GHz activation leaves no link at all: no adb, no sshfs
+            and no proxy.  With this on, `phone-ap-up` (and the boot unit when
+            `ap.autoconnect` is set) tries the configured 2.4 GHz channel once
+            instead of failing.  It is an availability trade, not a throughput
+            gain: 2.4 GHz is limited to 40 MHz and is slower.  One attempt per
+            boot; the declared 5 GHz profile is unchanged, so the next boot (or
+            `phone-ap-down`) retries 5 GHz first.  Requires `ap.band = "a"` and
+            the local role.
+          '';
+        };
+
+        channel = lib.mkOption {
+          type = lib.types.ints.between 1 11;
+          default = 1;
+          description = ''
+            2.4 GHz channel for the fallback: 1, 6 or 11 are the
+            non-overlapping choices.  Only used when `fallback.enable` is set.
+          '';
+        };
+
+        channelWidth = lib.mkOption {
+          type = lib.types.enum [
+            20
+            40
+          ];
+          default = 20;
+          description = ''
+            Fallback channel width in MHz.  20 is the most robust; 40 only
+            helps in a clean band.  Only used when `fallback.enable` is set.
+          '';
+        };
+
+        delay = lib.mkOption {
+          type = lib.types.ints.between 0 300;
+          default = 30;
+          description = ''
+            Seconds the boot unit waits for the 5 GHz AP to appear before it
+            falls back.  The default covers the ~25 s wpa_supplicant timeout
+            this host shows when a 5 GHz AP cannot start.  `phone-ap-up` does
+            not wait: it falls back as soon as its own attempt fails.  Only
+            used when `fallback.enable` and `ap.autoconnect` are set.
+          '';
+        };
+      };
+
       country = lib.mkOption {
         type = lib.types.nullOr (lib.types.strMatching "[A-Z]{2}");
         default = null;

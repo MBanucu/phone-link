@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- An optional 2.4 GHz AP fallback (#7).  A 5 GHz activation failure used to
+  leave no link at all; with `phoneLink.ap.fallback.enable = true`,
+  `phone-ap-up` makes one attempt on 2.4 GHz channel 1 at 20 MHz
+  (`fallback.channel`/`channelWidth`), and with `ap.autoconnect` a boot unit
+  waits `fallback.delay` (30 s) for 5 GHz and then makes the same attempt.  The
+  declared 5 GHz profile is untouched, so the next boot or `phone-ap-down`
+  retries 5 GHz.  This is availability, not throughput: 2.4 GHz is capped at
+  40 MHz and is slower.  Local role and `ap.band = "a"` only.
+
 ### Changed
 
 - The NixOS module is split into `modules/phone-link/`: `options/` has one file
