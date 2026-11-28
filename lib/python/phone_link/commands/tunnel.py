@@ -148,11 +148,9 @@ def phone_tunnel_run(args: list[str]) -> int:
     # A config built before the placeholder existed still has a number.
     rewritten = re.sub(r'"server_port":\s*\d+', f'"server_port": {port}', rewritten)
 
-    handle, temporary = tempfile.mkstemp(
-        prefix="phone-tun.", suffix=".json", dir="/run"
-    )
+    fd, temporary = tempfile.mkstemp(prefix="phone-tun.", suffix=".json", dir="/run")
     try:
-        with os.fdopen(handle, "w", encoding="utf-8") as out:
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
             out.write(rewritten)
         os.chmod(temporary, 0o600)
 
@@ -160,15 +158,14 @@ def phone_tunnel_run(args: list[str]) -> int:
             serial = phone.phone_serial()
             if not serial:
                 die("no phone attached (see adb devices)")
-            if status(
-                ["adb", "-s", serial, "reverse", f"tcp:{port}", f"tcp:{port}"]
-            ) != 0:
+            if (
+                status(["adb", "-s", serial, "reverse", f"tcp:{port}", f"tcp:{port}"])
+                != 0
+            ):
                 die("adb reverse failed (is adb connected?)")
             with open(temporary, encoding="utf-8") as source:
                 rewritten = source.read()
-            rewritten = re.sub(
-                r'"server": "[^"]*"', '"server": "127.0.0.1"', rewritten
-            )
+            rewritten = re.sub(r'"server": "[^"]*"', '"server": "127.0.0.1"', rewritten)
             with open(temporary, "w", encoding="utf-8") as out:
                 out.write(rewritten)
             log(f"tunnel upstream: 127.0.0.1:{port} (adb reverse)")

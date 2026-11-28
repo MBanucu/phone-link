@@ -118,13 +118,14 @@ def phone_proxy_data_clear(args: list[str]) -> int:
             break
         time.sleep(1)
 
-    log(
-        f"cleared {package} data "
-        "(port back to 1080, auth disabled, auto-start off)"
-    )
+    log(f"cleared {package} data (port back to 1080, auth disabled, auto-start off)")
     if left:
-        log("warning: a LAN address still accepts connections; the app may have restarted")
-    log("the proxy is gone: the tunnel stops within 5 s; run phone-proxy-setup to restore it")
+        log(
+            "warning: a LAN address still accepts connections; the app may have restarted"
+        )
+    log(
+        "the proxy is gone: the tunnel stops within 5 s; run phone-proxy-setup to restore it"
+    )
     return 0
 
 
@@ -301,9 +302,8 @@ def phone_proxy_install(args: list[str]) -> int:
     def cache_dir() -> str:
         return os.environ.get("PHONE_APK_DIR") or (
             os.path.join(
-                os.environ.get("XDG_CACHE_HOME") or os.path.join(
-                    os.environ.get("HOME", ""), ".cache"
-                ),
+                os.environ.get("XDG_CACHE_HOME")
+                or os.path.join(os.environ.get("HOME", ""), ".cache"),
                 "phone-link",
             )
         )
@@ -356,7 +356,9 @@ def phone_proxy_install(args: list[str]) -> int:
         # A release carries the checksum beside the APK; without one there is
         # nothing to compare, which is said rather than passed over.
         expected = ""
-        code, sums = run_text(["curl", "-fsSL", "--max-time", "30", apk_url + ".sha256"], timeout=40)
+        code, sums = run_text(
+            ["curl", "-fsSL", "--max-time", "30", apk_url + ".sha256"], timeout=40
+        )
         if code == 0 and sums.strip():
             expected = sums.split()[0]
         with open(f"{file}.part", "rb") as handle:
@@ -364,7 +366,9 @@ def phone_proxy_install(args: list[str]) -> int:
         if expected:
             if digest != expected:
                 os.unlink(f"{file}.part")
-                die(f"checksum mismatch for {name}: downloaded {digest}, release says {expected}")
+                die(
+                    f"checksum mismatch for {name}: downloaded {digest}, release says {expected}"
+                )
             log(f"checksum: {digest} matches the release")
         else:
             log("warning: the release carries no .sha256; the download is unchecked")
@@ -385,14 +389,14 @@ def phone_proxy_install(args: list[str]) -> int:
             rf'"versionName":"([^"]*)","versionCode":{version_code}', body
         )
         name = name_match.group(1) if name_match else ""
-        log(f"F-Droid: {name or 'versionCode ' + version_code} (versionCode {version_code})")
+        log(
+            f"F-Droid: {name or 'versionCode ' + version_code} (versionCode {version_code})"
+        )
 
         cache = cache_dir()
         # Keyed by versionCode too: a rebuild can keep versionName and still
         # be new.
-        file = os.path.join(
-            cache, f"{package}-{name or 'unknown'}-{version_code}.apk"
-        )
+        file = os.path.join(cache, f"{package}-{name or 'unknown'}-{version_code}.apk")
         if os.path.isfile(file) and os.path.getsize(file) > 0:
             log(f"cached: {file}")
         else:
@@ -487,7 +491,9 @@ def phone_proxy_install(args: list[str]) -> int:
                 "wireless-debugging switch will not work"
             )
             return
-        log("granted WRITE_SECURE_SETTINGS: the app can turn wireless debugging back on")
+        log(
+            "granted WRITE_SECURE_SETTINGS: the app can turn wireless debugging back on"
+        )
         # The device-idle allowlist is kept by package and goes away with the
         # uninstall, so an app put back is not yet the app that came back after
         # a reboot. Put the entry back with the install rather than leaving it
@@ -505,7 +511,9 @@ def phone_proxy_install(args: list[str]) -> int:
         if status(argv) == 0:
             log("on the battery allowlist: the app can come back after a reboot")
         else:
-            log("warning: cannot add the app to the battery allowlist (run phone-proxy-boot)")
+            log(
+                "warning: cannot add the app to the battery allowlist (run phone-proxy-boot)"
+            )
 
     if mode == "status":
         return show_status()
@@ -582,9 +590,7 @@ def phone_proxy_install(args: list[str]) -> int:
         # The app is back and empty; put its saved proxies back and prove the
         # proxy that was in use answers on the port it had before.
         log("importing the saved proxies after the install")
-        proxy_commands.restore(
-            serial, restore_document, settings.PHONE_PROXY_BACKUP
-        )
+        proxy_commands.restore(serial, restore_document, settings.PHONE_PROXY_BACKUP)
     show_status()
     if restore_document is not None:
         log("the app's saved proxies are back; phone-proxy-check reports the link")

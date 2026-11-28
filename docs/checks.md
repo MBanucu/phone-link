@@ -11,6 +11,7 @@ Run every target with `nix flake check`; run one with
 | `package` | every script in the flake exists, is executable, kept its wrapped `PATH`, and `phone-net-status` prints a status |
 | `shellcheck` | `bin/`, `lib/*.sh` and every tracked `*.sh` under `tests/` — the suites, the shared harness, `check-timings.sh` and the live scripts — are clean at shellcheck warning level |
 | `python` | every module under `lib/python/` compiles without being imported; GTK is not loaded |
+| `python-lint` | `ruff check` and `ruff format --check` over the tree, and `mypy` over `lib/python/` with the rule set in `pyproject.toml`; the GUI is checked too, with GTK's missing stubs ignored |
 | `format` | `flake.nix`, every `.nix` under `modules/` and `tests/module/` discovered from the directories is nixfmt-clean |
 | `module` | the module generates the expected sing-box config and units (5 s probe, 20 s first run, AP DHCP hole, a DHCP-only AP with no router/DNS option, an nftables forward drop that also works with the firewall off, an opt-in hairpin with one accepted client, a scoped masquerade and DHCP router/DNS, a default-on fail-open watchdog with that hairpin and an explicit off switch, an opt-in AP autoconnect that leaves the profile link-only, an opt-in rejoin watchdog, an optional `cfg80211.ieee80211_regdom` kernel parameter that merges with existing ones, pinned resolver, never started at boot) and defines nothing when disabled |
 | `script` | every `tests/*.test.sh` suite runs hermetically with stub `adb`/`curl`/`avahi-browse`; [architecture](architecture.md#i-want-to) shows how to run one suite |
@@ -33,12 +34,12 @@ before any activation when the channel is passive-only.
 none of them.
 
 ```sh
-bash tests/check.sh fast     # format, shellcheck, python, module, script
+bash tests/check.sh fast     # format, shellcheck, python, python-lint, module, script
 bash tests/check.sh all      # nix flake check, the gate
 bash tests/check.sh --list   # every target, one line each
 ```
 
-`fast` runs the five cheap targets one after another and stops at the first
+`fast` runs the six cheap targets one after another and stops at the first
 failure, naming it. Any single target also works (`bash tests/check.sh module`),
 and `SYSTEM=` selects another system. CI is unchanged: it still runs
 `nix flake check`.

@@ -101,7 +101,9 @@ def phone_net_status(args: list[str]) -> int:
     )
     say(
         "wifi address",
-        _field(3, capture(["ip", "-4", "-br", "addr", "show", settings.PHONE_AP_IF]), 2),
+        _field(
+            3, capture(["ip", "-4", "-br", "addr", "show", settings.PHONE_AP_IF]), 2
+        ),
     )
     say(
         "tether address",
@@ -310,8 +312,7 @@ def phone_usb_tether_check(args: list[str]) -> int:
         (
             match.group(1)
             for match in (
-                re.match(r" *rndis0 - ([^ ]*)", line)
-                for line in tethering.splitlines()
+                re.match(r" *rndis0 - ([^ ]*)", line) for line in tethering.splitlines()
             )
             if match
         ),
@@ -342,10 +343,7 @@ def phone_usb_tether_check(args: list[str]) -> int:
         log(f"host:     no route to {phone_ip}")
         log("verdict:  the phone tethers, but this host has no USB tether route")
         return 1
-    log(
-        f"host:     {interface.group(1)} with {source.group(1)}, "
-        f"route via {phone_ip}"
-    )
+    log(f"host:     {interface.group(1)} with {source.group(1)}, route via {phone_ip}")
 
     code = capture(
         [
@@ -368,7 +366,9 @@ def phone_usb_tether_check(args: list[str]) -> int:
     if code == "200":
         log("verdict:  USB tethering is active and reaches the internet")
         return 0
-    log(f"verdict:  USB tethering is up, but no internet over it (HTTP {code or '000'})")
+    log(
+        f"verdict:  USB tethering is up, but no internet over it (HTTP {code or '000'})"
+    )
     return 1
 
 
@@ -447,8 +447,7 @@ def phone_wifi_concurrency(args: list[str]) -> int:
     log(f"phone:     {model or 'unknown'} (Android {release or '?'}, sdk {sdk or '?'})")
     log(
         "framework: STA + AP concurrency = "
-        f"{sta_ap or 'unknown'}"
-        + (f" (STA + STA = {sta_sta})" if sta_sta else "")
+        f"{sta_ap or 'unknown'}" + (f" (STA + STA = {sta_sta})" if sta_sta else "")
     )
     log(
         f"driver:    AP_STA feature = {str(has_ap_sta).lower()}, "
@@ -472,11 +471,7 @@ def phone_wifi_concurrency(args: list[str]) -> int:
 
     # No framework line (older builds): fall back to the driver feature and
     # what the managers are doing right now.
-    if (
-        has_ap_sta
-        and (client_managers or 0) >= 1
-        and (softap_managers or 0) >= 1
-    ):
+    if has_ap_sta and (client_managers or 0) >= 1 and (softap_managers or 0) >= 1:
         log(
             "verdict:   both managers are up, so concurrency is working "
             "despite no framework line"

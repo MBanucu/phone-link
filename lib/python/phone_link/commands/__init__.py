@@ -12,7 +12,18 @@ from __future__ import annotations
 
 import sys
 
-from . import adb, ap, device, doctor_fix, install, maintenance, proxy, repair, status, tunnel, usb, wifi
+from . import adb
+from . import ap
+from . import device
+from . import doctor_fix
+from . import install
+from . import maintenance
+from . import proxy
+from . import repair
+from . import status
+from . import tunnel
+from . import usb
+from . import wifi
 
 COMMANDS = {
     "phone-net-status": status.phone_net_status,

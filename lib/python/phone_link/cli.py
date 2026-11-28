@@ -115,9 +115,7 @@ def _run(args: list[str]) -> int:
         print(f"error: {action.id} has no --check", file=sys.stderr)
         return 2
 
-    argv = actions.plan(
-        action, args=tuple(rest), check=check, assume_yes=assume_yes
-    )
+    argv = actions.plan(action, args=tuple(rest), check=check, assume_yes=assume_yes)
     print(f"$ {shlex.join(argv)}", file=sys.stderr)
     outcome = stream(argv, on_line=lambda line: print(line, flush=True))
     return outcome.exit_code

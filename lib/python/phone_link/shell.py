@@ -81,9 +81,7 @@ def run_text(
     return status_code, output
 
 
-def capture(
-    argv: Sequence[str], *, timeout: float = DEFAULT_TIMEOUT
-) -> str:
+def capture(argv: Sequence[str], *, timeout: float = DEFAULT_TIMEOUT) -> str:
     """Run a command and return its stdout, without its trailing newline.
 
     A missing binary, a timeout or a non-zero exit yields "" rather than an
@@ -116,14 +114,14 @@ def run(argv: Sequence[str], *, timeout: float | None = None) -> int:
     # a noisy command would print its failure twice for a recovery the caller
     # may not want. The transport is still resolved before it runs.
     try:
-        return subprocess.run(
-            _prepare(argv), timeout=timeout, check=False
-        ).returncode
+        return subprocess.run(_prepare(argv), timeout=timeout, check=False).returncode
     except (OSError, subprocess.TimeoutExpired):
         return 127
 
 
-def run_both(argv: Sequence[str], *, timeout: float = DEFAULT_TIMEOUT) -> tuple[int, str]:
+def run_both(
+    argv: Sequence[str], *, timeout: float = DEFAULT_TIMEOUT
+) -> tuple[int, str]:
     """Run a command and return (status, stdout and stderr together).
 
     Unlike `run_text` there is no retry and nothing is dropped: the caller needs

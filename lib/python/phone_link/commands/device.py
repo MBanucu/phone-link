@@ -242,7 +242,9 @@ def phone_reboot_unlock(args: list[str]) -> int:
     # The old session still reports device and boot_completed for a moment
     # after `adb reboot`, so the new boot id is what proves the phone actually
     # restarted.
-    boot_id = _phone_shell(serial, "cat", "/proc/sys/kernel/random/boot_id") or "unknown"
+    boot_id = (
+        _phone_shell(serial, "cat", "/proc/sys/kernel/random/boot_id") or "unknown"
+    )
 
     log(f"rebooting {serial}")
     must(["adb", "-s", serial, "reboot"])
@@ -250,10 +252,11 @@ def phone_reboot_unlock(args: list[str]) -> int:
     log("waiting for the phone to come back")
     waited = 0.0
     while True:
-        current = _phone_shell(
-            serial, "cat", "/proc/sys/kernel/random/boot_id"
-        )
-        if capture(["adb", "-s", serial, "get-state"]) == "device" and current != boot_id:
+        current = _phone_shell(serial, "cat", "/proc/sys/kernel/random/boot_id")
+        if (
+            capture(["adb", "-s", serial, "get-state"]) == "device"
+            and current != boot_id
+        ):
             break
         time.sleep(poll)
         waited += poll
@@ -357,9 +360,7 @@ def phone_tether_cycle(args: list[str]) -> int:
                 ]
             )
             status(["adb", "-s", serial, "shell", "svc", "usb", "setFunctions"])
-            status(
-                ["adb", "-s", serial, "shell", "input", "keyevent", "KEYCODE_SLEEP"]
-            )
+            status(["adb", "-s", serial, "shell", "input", "keyevent", "KEYCODE_SLEEP"])
             waited = 0
             while not ui.keyguard(serial) and waited < 5:
                 time.sleep(1)

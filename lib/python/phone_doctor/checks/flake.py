@@ -103,8 +103,9 @@ def _pinned_commit(ctx: Context, remote: str, ref: str) -> tuple[str, str]:
         # refs/tags/<ref>^{}; a lightweight tag prints only the commit.
         peeled = refs.get(f"refs/tags/{ref}^{{}}")
         tag = refs.get(f"refs/tags/{ref}")
-        if peeled or tag:
-            return TAG, peeled or tag
+        resolved = peeled or tag
+        if resolved:
+            return TAG, resolved
         branch = refs.get(f"refs/heads/{ref}")
         if branch:
             return BRANCH, branch
@@ -148,18 +149,13 @@ def _check_pin(
             warn(
                 "flake_update",
                 "flake update",
-                f"the lock pins {ref}, which origin does not have "
-                "(re-pin the input)",
+                f"the lock pins {ref}, which origin does not have (re-pin the input)",
             )
         ]
     if target == locked_rev:
         if kind == BRANCH and src:
             head = _local_head(ctx, src)
-            if (
-                head
-                and head != target
-                and not _is_ancestor(ctx, src, target, head)
-            ):
+            if head and head != target and not _is_ancestor(ctx, src, target, head):
                 return [
                     warn(
                         "flake_update",

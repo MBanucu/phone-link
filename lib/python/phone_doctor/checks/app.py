@@ -158,7 +158,9 @@ def check(ctx: Context) -> list[Result]:
         results.append(fail("app_boot", "restarts at boot", detail))
     elif unknown:
         results.append(
-            warn("app_boot", "restarts at boot", "allowlisted, but " + "; ".join(unknown))
+            warn(
+                "app_boot", "restarts at boot", "allowlisted, but " + "; ".join(unknown)
+            )
         )
     else:
         results.append(ok("app_boot", "restarts at boot", _ok_detail(dump, sdk)))

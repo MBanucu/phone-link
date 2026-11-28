@@ -187,7 +187,9 @@ def phone_wifi_connect(args: list[str]) -> int:
         line.startswith("Wifi is enabled")
         for line in phone_shell("cmd", "wifi", "status").splitlines()
     ):
-        status(["adb", "-s", serial, "shell", "cmd", "wifi", "set-wifi-enabled", "enabled"])
+        status(
+            ["adb", "-s", serial, "shell", "cmd", "wifi", "set-wifi-enabled", "enabled"]
+        )
 
     if not password:
         password = phone.ap_pass()
@@ -256,9 +258,7 @@ def phone_wifi_reconnect(args: list[str]) -> int:
                 ]
             )
 
-    values = {
-        name: current(name) for name, _ in phone.WIFI_RECONNECT_GLOBALS
-    }
+    values = {name: current(name) for name, _ in phone.WIFI_RECONNECT_GLOBALS}
     mismatched = []
     for name, wanted in phone.WIFI_RECONNECT_GLOBALS:
         value = values[name] or "unset"
@@ -278,5 +278,7 @@ def phone_wifi_reconnect(args: list[str]) -> int:
                 + " (does the phone accept settings put global?)"
             )
         return 1
-    log("Wi-Fi reconnect globals match" if check_only else "Wi-Fi reconnect globals set")
+    log(
+        "Wi-Fi reconnect globals match" if check_only else "Wi-Fi reconnect globals set"
+    )
     return 0

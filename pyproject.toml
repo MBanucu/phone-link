@@ -1,0 +1,33 @@
+# Tooling only: the packages under lib/python/ are imported through PYTHONPATH
+# by the bin/ shims and the Nix wrappers, not installed from a wheel. This file
+# exists so ruff and mypy have one configuration, and so `nix flake check` runs
+# exactly what a maintainer runs by hand.
+
+[tool.ruff]
+target-version = "py313"
+
+[tool.ruff.lint]
+# The checks a missing import, an undefined name or a dead value would fail;
+# deliberately not the style rules ruff format already decides.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# The GTK modules must call gi.require_version() before importing gi.repository,
+# so those imports cannot move to the top.
+"lib/python/phone_link_gui/app.py" = ["E402"]
+"gui/screenshot.py" = ["E402"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.13"
+mypy_path = "lib/python"
+files = [
+  "lib/python/phone_link",
+  "lib/python/phone_doctor",
+  "lib/python/phone_link_gui",
+]
+# GTK has no type stubs; the import is real at runtime and only the stubs are
+# missing. Everything else is checked, including the GUI.
+ignore_missing_imports = true

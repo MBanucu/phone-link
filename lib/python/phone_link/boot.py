@@ -31,9 +31,7 @@ NOTIFICATIONS = "POST_NOTIFICATIONS"
 BOOT_PERMISSION = "RECEIVE_BOOT_COMPLETED"
 
 LOCKED_BOOT = "android.intent.action.LOCKED_BOOT_COMPLETED"
-DIRECT_BOOT_FLAGS = re.compile(
-    r"(?<![A-Z_])(?:PARTIALLY_)?DIRECT_BOOT_AWARE(?![A-Z_])"
-)
+DIRECT_BOOT_FLAGS = re.compile(r"(?<![A-Z_])(?:PARTIALLY_)?DIRECT_BOOT_AWARE(?![A-Z_])")
 
 _DENIED = {
     "ACCESS_COARSE_LOCATION": "coarse location is not granted",
@@ -151,7 +149,7 @@ def locked_boot_receiver(dumpsys: str) -> str:
     match = re.search(r"^Receiver Resolver Table:[ \t]*$", dumpsys, re.MULTILINE)
     if not match:
         return ""
-    rest = dumpsys[match.end():]
+    rest = dumpsys[match.end() :]
     end = re.search(r"^\S.*Resolver Table:[ \t]*$", rest, re.MULTILINE)
     block = rest[: end.start()] if end else rest
     entry = re.search(

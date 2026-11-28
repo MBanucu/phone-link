@@ -108,7 +108,6 @@ SCRIPTS: tuple[Action, ...] = (
         module="phone_link.commands.status",
         function="phone_net_status",
     ),
-
     # Read-only, but its secrets and proxy_request checks read the root-only
     # secrets file and probe through the authenticated proxy, so the run
     # escalates: otherwise every report is incomplete.
@@ -131,9 +130,9 @@ SCRIPTS: tuple[Action, ...] = (
             "`_adb-tls-connect._tcp` mDNS record, and reports the pinned port first when "
             "the phone answers there; it reports the two Wi-Fi reconnect globals as an "
             "optional line and names `phone-wifi-connect PhoneLink` when the AP is on air "
-            "with no station; with `ap.role = \"external\"` it reports the external role, "
+            'with no station; with `ap.role = "external"` it reports the external role, '
             "the laptop's client link and whether the phone holds `proxyHost`, instead of "
-            "\"AP is down\"; `--analyze` prints one `fail`/`warn` line with a stable "
+            '"AP is down"; `--analyze` prints one `fail`/`warn` line with a stable '
             "problem id for scripts; `--json` prints the whole report as one document, "
             "and `--json-stream` prints `section`, `result` and `done` events as NDJSON, "
             "one flushed line each, sharing `--jobs` so a finished check's result arrives "
@@ -146,7 +145,6 @@ SCRIPTS: tuple[Action, ...] = (
         function="main",
         root=True,
     ),
-
     Action(
         "net-check",
         "status",
@@ -161,7 +159,6 @@ SCRIPTS: tuple[Action, ...] = (
         module="phone_link.commands.status",
         function="net_check",
     ),
-
     Action(
         "phone-proxy-check",
         "status",
@@ -176,7 +173,6 @@ SCRIPTS: tuple[Action, ...] = (
         function="phone_proxy_check",
         root=True,
     ),
-
     Action(
         "phone-usb-tether-check",
         "status",
@@ -191,7 +187,6 @@ SCRIPTS: tuple[Action, ...] = (
         module="phone_link.commands.status",
         function="phone_usb_tether_check",
     ),
-
     Action(
         "phone-wifi-concurrency",
         "status",
@@ -206,7 +201,6 @@ SCRIPTS: tuple[Action, ...] = (
         module="phone_link.commands.status",
         function="phone_wifi_concurrency",
     ),
-
     # -- tunnel ----------------------------------------------------
     Action(
         "phone-fix-tunnel",
@@ -224,7 +218,6 @@ SCRIPTS: tuple[Action, ...] = (
         root=True,
         supports_check=True,
     ),
-
     Action(
         "phone-tunnel-run",
         "tunnel",
@@ -245,7 +238,6 @@ SCRIPTS: tuple[Action, ...] = (
             ),
         ),
     ),
-
     # -- access point ----------------------------------------------
     Action(
         "phone-ap-up",
@@ -253,7 +245,7 @@ SCRIPTS: tuple[Action, ...] = (
         "Bring the access point up",
         (
             "Preflight the radio, then activate the phonelink AP profile; with ap.role = "
-            "\"external\" this only nudges the phone back over USB."
+            '"external" this only nudges the phone back over USB.'
         ),
         doc=(
             "preflight the radio and the configured channel's regulatory state "
@@ -263,7 +255,7 @@ SCRIPTS: tuple[Action, ...] = (
             "at a stale wpa_supplicant and `systemctl restart NetworkManager`; with "
             "`ap.fallback.enable` either failure makes one 2.4 GHz attempt at "
             "`ap.fallback.channel`/`channelWidth` instead of leaving no link; with "
-            "`ap.role = \"external\"` it says the AP is external, runs no `iw`/`nmcli`, and "
+            '`ap.role = "external"` it says the AP is external, runs no `iw`/`nmcli`, and '
             "only asks the rejoin watchdog to nudge the phone back over USB"
         ),
         usage="usage: phone-ap-up",
@@ -271,7 +263,6 @@ SCRIPTS: tuple[Action, ...] = (
         function="phone_ap_up",
         root=True,
     ),
-
     Action(
         "phone-ap-down",
         "ap",
@@ -284,7 +275,7 @@ SCRIPTS: tuple[Action, ...] = (
             "drop the AP and rejoin the phone's hotspot; `--client` stops the AP and "
             "leaves the radio free for NetworkManager, without joining anything; a "
             "runtime 2.4 GHz fallback is undone while the profile is down, so the next "
-            "up tries 5 GHz again; with `ap.role = \"external\"` it is a no-op and says "
+            'up tries 5 GHz again; with `ap.role = "external"` it is a no-op and says '
             "the external AP stays up"
         ),
         usage="usage: phone-ap-down [--client] [--help]",
@@ -294,11 +285,8 @@ SCRIPTS: tuple[Action, ...] = (
         root=True,
         destructive=True,
         confirm="The phone leaves the laptop's access point.",
-        variants=(
-            Variant("Leave Wi-Fi free for a normal network", ("--client",)),
-        ),
+        variants=(Variant("Leave Wi-Fi free for a normal network", ("--client",)),),
     ),
-
     Action(
         "phone-ap-create",
         "ap",
@@ -307,7 +295,7 @@ SCRIPTS: tuple[Action, ...] = (
         doc=(
             "create the `phonelink` AP profile on 5 GHz channel 149 at 80 MHz from the "
             "root-only `PHONE_AP_PASS` secret (`--refresh` rewrites it after a PSK "
-            "change, `--check` reports); a no-op with `ap.role = \"external\"` because "
+            'change, `--check` reports); a no-op with `ap.role = "external"` because '
             "there is no local profile to create"
         ),
         usage="usage: phone-ap-create [--refresh] [--check]",
@@ -316,11 +304,8 @@ SCRIPTS: tuple[Action, ...] = (
         function="phone_ap_create",
         root=True,
         supports_check=True,
-        variants=(
-            Variant("Rewrite profile and PSK", ("--refresh",)),
-        ),
+        variants=(Variant("Rewrite profile and PSK", ("--refresh",)),),
     ),
-
     Action(
         "phone-ap-delete",
         "ap",
@@ -329,7 +314,7 @@ SCRIPTS: tuple[Action, ...] = (
         doc=(
             "delete the `phonelink` AP profile from NetworkManager, bringing it down "
             "first if active (`--check` reports, `--yes` skips the prompt; a declared "
-            "profile returns at the next boot); a no-op with `ap.role = \"external\"`"
+            'profile returns at the next boot); a no-op with `ap.role = "external"`'
         ),
         usage="usage: phone-ap-delete [--yes] [--check]",
         usage_const="USAGE_AP_DELETE",
@@ -341,7 +326,6 @@ SCRIPTS: tuple[Action, ...] = (
         destructive=True,
         confirm="Delete the AP profile? A declared profile comes back at boot.",
     ),
-
     Action(
         "phone-fix-forwarding",
         "ap",
@@ -355,7 +339,6 @@ SCRIPTS: tuple[Action, ...] = (
         root=True,
         supports_check=True,
     ),
-
     Action(
         "phone-wifi-connect",
         "ap",
@@ -372,7 +355,6 @@ SCRIPTS: tuple[Action, ...] = (
         root=True,
         supports_check=True,
     ),
-
     Action(
         "phone-wifi-reconnect",
         "ap",
@@ -389,7 +371,6 @@ SCRIPTS: tuple[Action, ...] = (
         function="phone_wifi_reconnect",
         supports_check=True,
     ),
-
     Action(
         "phone-wifi-enable",
         "ap",
@@ -402,7 +383,6 @@ SCRIPTS: tuple[Action, ...] = (
         function="phone_wifi_enable",
         supports_check=True,
     ),
-
     Action(
         "phone-wifi-forget",
         "ap",
@@ -418,7 +398,6 @@ SCRIPTS: tuple[Action, ...] = (
         destructive=True,
         confirm="The phone forgets the saved PhoneLink network.",
     ),
-
     # -- phone and adb ---------------------------------------------
     Action(
         "phone-adb-wifi",
@@ -440,7 +419,6 @@ SCRIPTS: tuple[Action, ...] = (
             Variant("Wireless debugging only", ("--tls",)),
         ),
     ),
-
     Action(
         "adb-wifi-connect",
         "phone",
@@ -458,7 +436,6 @@ SCRIPTS: tuple[Action, ...] = (
             ),
         ),
     ),
-
     Action(
         "phone-unlock",
         "phone",
@@ -475,7 +452,6 @@ SCRIPTS: tuple[Action, ...] = (
         root=True,
         supports_check=True,
     ),
-
     Action(
         "phone-reboot-unlock",
         "phone",
@@ -492,7 +468,6 @@ SCRIPTS: tuple[Action, ...] = (
         long_running=True,
         confirm="Reboot the phone now? adb and the tether drop until it is back.",
     ),
-
     Action(
         "phone-usb-tether-default",
         "phone",
@@ -508,7 +483,6 @@ SCRIPTS: tuple[Action, ...] = (
         function="phone_usb_tether_default",
         supports_check=True,
     ),
-
     Action(
         "phone-tether-cycle",
         "phone",
@@ -529,7 +503,6 @@ SCRIPTS: tuple[Action, ...] = (
         long_running=True,
         confirm="Lock and unlock the phone to restore the tether?",
     ),
-
     Action(
         "phone-fix-mobile-data",
         "phone",
@@ -545,7 +518,6 @@ SCRIPTS: tuple[Action, ...] = (
         function="phone_fix_mobile_data",
         supports_check=True,
     ),
-
     Action(
         "phone-fix-internet",
         "phone",
@@ -564,7 +536,6 @@ SCRIPTS: tuple[Action, ...] = (
         supports_check=True,
         long_running=True,
     ),
-
     # -- proxy app -------------------------------------------------
     Action(
         "phone-proxy-install",
@@ -595,7 +566,6 @@ SCRIPTS: tuple[Action, ...] = (
             Variant("Only report the installed version", ("--status",)),
         ),
     ),
-
     Action(
         "phone-proxy-uninstall",
         "proxy",
@@ -614,7 +584,6 @@ SCRIPTS: tuple[Action, ...] = (
         destructive=True,
         confirm="Uninstall the proxy app from the phone?",
     ),
-
     Action(
         "phone-proxy-setup",
         "proxy",
@@ -636,7 +605,6 @@ SCRIPTS: tuple[Action, ...] = (
         supports_check=True,
         long_running=True,
     ),
-
     Action(
         "phone-proxy-switch",
         "proxy",
@@ -665,7 +633,6 @@ SCRIPTS: tuple[Action, ...] = (
         supports_check=True,
         long_running=True,
     ),
-
     Action(
         "phone-proxy-start",
         "proxy",
@@ -683,7 +650,6 @@ SCRIPTS: tuple[Action, ...] = (
         root=True,
         supports_check=True,
     ),
-
     Action(
         "phone-proxy-stop",
         "proxy",
@@ -700,7 +666,6 @@ SCRIPTS: tuple[Action, ...] = (
         root=True,
         supports_check=True,
     ),
-
     Action(
         "phone-proxy-export",
         "proxy",
@@ -720,7 +685,6 @@ SCRIPTS: tuple[Action, ...] = (
         function="phone_proxy_export",
         root=True,
     ),
-
     Action(
         "phone-proxy-import",
         "proxy",
@@ -738,7 +702,6 @@ SCRIPTS: tuple[Action, ...] = (
         function="phone_proxy_import",
         root=True,
     ),
-
     Action(
         "phone-proxy-data-clear",
         "proxy",
@@ -757,7 +720,6 @@ SCRIPTS: tuple[Action, ...] = (
         destructive=True,
         confirm="Clear the proxy app's data? Port and credentials are lost.",
     ),
-
     Action(
         "phone-proxy-boot",
         "proxy",
@@ -772,7 +734,7 @@ SCRIPTS: tuple[Action, ...] = (
             "`location` one (`--check` names every missing input and says which one needs "
             "a reinstall). DokeOS Auto Start Management is a separate gate behind a "
             "signature permission: it names the screen and the app's dated \"likely "
-            "blocked\" fact, and never claims the gate is open"
+            'blocked" fact, and never claims the gate is open'
         ),
         usage="usage: phone-proxy-boot [--check]",
         usage_const="USAGE_BOOT",
@@ -780,7 +742,6 @@ SCRIPTS: tuple[Action, ...] = (
         function="phone_proxy_boot",
         supports_check=True,
     ),
-
     Action(
         "phone-proxy-battery-whitelist",
         "proxy",
@@ -796,7 +757,6 @@ SCRIPTS: tuple[Action, ...] = (
         function="phone_proxy_battery_whitelist",
         supports_check=True,
     ),
-
     # -- maintenance -----------------------------------------------
     Action(
         "phone-doctor-fix",
@@ -819,11 +779,8 @@ SCRIPTS: tuple[Action, ...] = (
         supports_yes=True,
         long_running=True,
         confirm="Apply the fixes the doctor reports?",
-        variants=(
-            Variant("Only required problems", ("--required",)),
-        ),
+        variants=(Variant("Only required problems", ("--required",)),),
     ),
-
     Action(
         "phone-fix-apk",
         "maintenance",
@@ -845,11 +802,8 @@ SCRIPTS: tuple[Action, ...] = (
         root=True,
         supports_check=True,
         long_running=True,
-        variants=(
-            Variant("Always download the newest", ("--refresh",)),
-        ),
+        variants=(Variant("Always download the newest", ("--refresh",)),),
     ),
-
     Action(
         "phone-link-uninstall",
         "maintenance",
@@ -868,11 +822,8 @@ SCRIPTS: tuple[Action, ...] = (
         supports_yes=True,
         destructive=True,
         confirm="Remove the AP profile and the cached APKs?",
-        variants=(
-            Variant("Keep the APK caches", ("--keep-cache",)),
-        ),
+        variants=(Variant("Keep the APK caches", ("--keep-cache",)),),
     ),
-
     # -- entry points that are not actions ----------------------------
     # Listed explicitly so the shims, the package and the registry check all
     # know about them: `phone-link` is the shared CLI, `phone-link-gui` the
@@ -996,9 +947,7 @@ def escalation_prefix(env: dict[str, str] | None = None) -> list[str]:
     values = env if env is not None else os.environ
     sudo = shutil.which("sudo")
     if sudo:
-        cached = subprocess.run(
-            [sudo, "-n", "true"], capture_output=True, check=False
-        )
+        cached = subprocess.run([sudo, "-n", "true"], capture_output=True, check=False)
         if cached.returncode == 0:
             return [sudo, "-n", "env"]
         askpass = values.get("SUDO_ASKPASS")
@@ -1091,11 +1040,11 @@ def validate(expected: tuple[str, ...] | list[str] = ()) -> list[str]:
         ("phone-link-gui", "gui"),
         ("phone-link-gui-screenshots", "tool"),
     ):
-        script = SCRIPT_BY_ID.get(name)
-        if script is None:
+        entry = SCRIPT_BY_ID.get(name)
+        if entry is None:
             problems.append(f"missing entry point: {name}")
-        elif script.kind != kind:
-            problems.append(f"{name}: expected kind {kind}, found {script.kind}")
+        elif entry.kind != kind:
+            problems.append(f"{name}: expected kind {kind}, found {entry.kind}")
 
     # The checked-in shims, commands/__init__.py and the docs table are
     # generated from this table; the same check runs in the flake against the

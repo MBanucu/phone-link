@@ -44,8 +44,15 @@ def capture(name: str, out: str) -> None:
     raw = os.path.join(out, name + ".raw.png")
     final = os.path.join(out, name + ".png")
     subprocess.run(
-        ["import", "-display", os.environ["DISPLAY"], "-window", "root",
-         "-silent", raw],
+        [
+            "import",
+            "-display",
+            os.environ["DISPLAY"],
+            "-window",
+            "root",
+            "-silent",
+            raw,
+        ],
         check=False,
     )
     subprocess.run([MAGICK, raw, "-trim", "+repage", final], check=False)
@@ -95,8 +102,10 @@ def build_steps(window: Window) -> None:
     STEPS.append(("search-none", lambda: window.search("zzzznothing")))
     STEPS.append(("search-closed", lambda: window._search_button.set_active(False)))
     STEPS.append(
-        ("narrow", lambda: (window.set_default_size(430, 780),
-                            window.show_page("doctor")))
+        (
+            "narrow",
+            lambda: (window.set_default_size(430, 780), window.show_page("doctor")),
+        )
     )
     STEPS.append(("wide", lambda: window.set_default_size(1000, 720)))
 
@@ -104,9 +113,12 @@ def build_steps(window: Window) -> None:
         state["run"] = RunWindow(
             window,
             "Restart the tunnel",
-            ["sh", "-c",
-             "echo 'restarting the USB tunnel'; sleep 0.4; "
-             "echo 'error: adb: no devices/emulators found'; exit 3"],
+            [
+                "sh",
+                "-c",
+                "echo 'restarting the USB tunnel'; sleep 0.4; "
+                "echo 'error: adb: no devices/emulators found'; exit 3",
+            ],
         )
         state["run"].present()
 
@@ -142,8 +154,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"missing {', '.join(missing)} (ImageMagick)", file=sys.stderr)
         return 2
     if not os.environ.get("DISPLAY"):
-        print("DISPLAY is unset: run this under bin/phone-link-gui-screenshots",
-              file=sys.stderr)
+        print(
+            "DISPLAY is unset: run this under bin/phone-link-gui-screenshots",
+            file=sys.stderr,
+        )
         return 2
 
     out = os.path.abspath(args.out)

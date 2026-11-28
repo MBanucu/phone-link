@@ -32,9 +32,7 @@ BAND_LABELS = {"a": "5 GHz", "bg": "2.4 GHz"}
 
 _COUNTRY_RE = re.compile(r"^country\s+([0-9A-Z]{2}):")
 _SECTION_RE = re.compile(r"^(global|phy#\d+)\b")
-_RANGE_RE = re.compile(
-    r"\(\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*@\s*\d+\)(.*)$"
-)
+_RANGE_RE = re.compile(r"\(\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*@\s*\d+\)(.*)$")
 _PHY_CHANNEL_RE = re.compile(r"^\s*\*\s*\d+(?:\.\d+)?\s*MHz\s*\[(\d+)\](.*)$")
 _WIPHY_RE = re.compile(r"^Wiphy\s+(phy\d+)", re.MULTILINE)
 _WIPHY_ID_RE = re.compile(r"^\s*wiphy\s+(\d+)\s*$", re.MULTILINE)
@@ -198,9 +196,7 @@ def _reason_from_reg(
         return None
     center = _center_mhz(band, channel)
     containers = [
-        reason
-        for start, end, reason in section.ranges
-        if start <= center <= end
+        reason for start, end, reason in section.ranges if start <= center <= end
     ]
     if not containers:
         return "not listed"
@@ -224,6 +220,7 @@ def evaluate(
     country = _country_for(sections, phy)
     listed = parse_phy_channels(phy_channels) if phy_channels else {}
 
+    reason: str | None
     if listed:
         if channel in listed:
             reason = listed[channel]

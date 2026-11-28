@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `lib/python/` is gated on ruff and mypy: the new `python-lint` check runs
+  `ruff check`, `ruff format --check` and `mypy` (the GUI included, with GTK's
+  missing stubs ignored) from one `pyproject.toml`, and both tools are in the
+  dev shell and in `tests/check.sh fast`. The tree is `ruff format`-clean (#115).
 - The NixOS module is split into `modules/phone-link/`: `options/` has one file
   per option group (tunnel, proxy/relay, AP, secrets, packaging), `config/` one
   file per group of units or generated configuration, `derived.nix` holds the

@@ -45,8 +45,12 @@ def phone_usb_tether_default(args: list[str]) -> int:
     default = is_rndis(unlocked)
 
     if check_only:
-        log(f"current:  {config or 'unknown'} (USB tethering {'active' if current else 'no'})")
-        log(f"default:  {unlocked or 'unknown'} (tether on unlock {'enabled' if default else 'no'})")
+        log(
+            f"current:  {config or 'unknown'} (USB tethering {'active' if current else 'no'})"
+        )
+        log(
+            f"default:  {unlocked or 'unknown'} (tether on unlock {'enabled' if default else 'no'})"
+        )
         if current and default:
             log("verdict:  USB tethering is the default USB action")
             return 0
@@ -55,7 +59,9 @@ def phone_usb_tether_default(args: list[str]) -> int:
 
     if not current:
         log("setting current USB functions to rndis,adb")
-        status(["adb", "-s", serial, "shell", "svc", "usb", "setFunctions", "rndis,adb"])
+        status(
+            ["adb", "-s", serial, "shell", "svc", "usb", "setFunctions", "rndis,adb"]
+        )
     if not default:
         log("setting screen-unlocked USB functions to rndis,adb")
         status(
@@ -85,7 +91,16 @@ def phone_usb_tether_default(args: list[str]) -> int:
             break
         if not current:
             status(
-                ["adb", "-s", serial, "shell", "svc", "usb", "setFunctions", "rndis,adb"]
+                [
+                    "adb",
+                    "-s",
+                    serial,
+                    "shell",
+                    "svc",
+                    "usb",
+                    "setFunctions",
+                    "rndis,adb",
+                ]
             )
         if not default:
             status(

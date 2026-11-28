@@ -94,15 +94,12 @@ def _station(ctx: Context) -> Result:
     # link and the quickest recovery is the existing connect command, not a
     # reboot. Only claim that when the interface really advertises the SSID.
     info = ctx.text(["iw", "dev", ctx.ap_if, "info"])
-    ssid_up = any(
-        line.strip() == f"ssid {ctx.ap_ssid}" for line in info.splitlines()
-    )
+    ssid_up = any(line.strip() == f"ssid {ctx.ap_ssid}" for line in info.splitlines())
     if ssid_up:
         return warn(
             cid,
             label,
-            f"no phone associated on {ctx.ap_if}; "
-            f"run phone-wifi-connect {ctx.ap_ssid}",
+            f"no phone associated on {ctx.ap_if}; run phone-wifi-connect {ctx.ap_ssid}",
         )
     return fail(cid, label, f"no phone associated on {ctx.ap_if}")
 

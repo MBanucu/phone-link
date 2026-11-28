@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import threading
+from collections.abc import Sequence
 from pathlib import Path
 
 # The doctor shares the adb transport fallback with the commands: a phone that
@@ -189,7 +190,7 @@ class Context:
             return None
 
     def run(
-        self, argv: list[str], timeout: float | None = None
+        self, argv: Sequence[str], timeout: float | None = None
     ) -> subprocess.CompletedProcess[str] | None:
         try:
             # prepare() can discover and connect to a rotated wireless port.
@@ -210,7 +211,7 @@ class Context:
             return proc
         return self._spawn(recovered, timeout)
 
-    def text(self, argv: list[str], timeout: float | None = None) -> str:
+    def text(self, argv: Sequence[str], timeout: float | None = None) -> str:
         """stdout even on a non-zero exit (systemctl is-active does that)."""
         proc = self.run(argv, timeout)
         return proc.stdout if proc is not None else ""
@@ -268,9 +269,7 @@ class Context:
         same to a reader that only takes the resolved lines, and they are fixed
         differently.
         """
-        output = self.text(
-            ["avahi-browse", "-rtp", "_adb-tls-connect._tcp"], timeout
-        )
+        output = self.text(["avahi-browse", "-rtp", "_adb-tls-connect._tcp"], timeout)
         announced = False
         for line in output.splitlines():
             if line.startswith("+"):
@@ -338,7 +337,11 @@ class Context:
                         key, _, value = line.partition("=")
                         key = key.strip().removeprefix("export ").strip()
                         value = value.strip()
-                        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                        if (
+                            len(value) >= 2
+                            and value[0] == value[-1]
+                            and value[0] in "\"'"
+                        ):
                             value = value[1:-1]
                         if key:
                             values[key] = value

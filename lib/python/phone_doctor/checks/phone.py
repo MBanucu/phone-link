@@ -61,7 +61,9 @@ def check(ctx: Context) -> list[Result]:
     if showing == "false":
         results.append(ok("phone_unlocked", "phone unlocked", "yes"))
     elif showing == "true":
-        results.append(warn("phone_unlocked", "phone unlocked", "no (run phone-unlock)"))
+        results.append(
+            warn("phone_unlocked", "phone unlocked", "no (run phone-unlock)")
+        )
     else:
         results.append(warn("phone_unlocked", "phone unlocked", "unknown"))
 
