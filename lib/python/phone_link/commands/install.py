@@ -308,7 +308,7 @@ def phone_proxy_install(args: list[str]) -> int:
             log(f"the proxy is listening{on_port} ({state})")
         elif proxy_commands._gated(state):
             log(
-                f"the proxy is up but its port is closed{on_port} ({state}); "
+                f"the proxy is up but not listening{on_port} ({state}); "
                 "phone-proxy-check reports why"
             )
         else:

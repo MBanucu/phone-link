@@ -369,6 +369,10 @@ case $out in
     ;;
   *) failed "the restored proxy answers on its old port" "$out" ;;
 esac
+case $out in
+  *"the proxy is listening"*) passed "the restore reports the observed listener" ;;
+  *) failed "the restore reports the observed listener" "$out" ;;
+esac
 
 # 6. A different signer with an app that cannot export is not uninstalled:
 #    losing the proxies silently is the failure this feature removes.

@@ -384,6 +384,39 @@ else
   ok "auto_start off starts nothing"
 fi
 
+# 30d. No state.txt yet: a fresh install or a stale file from an older app.
+#      The install stays non-fatal, reports the stopped service and does not
+#      wait or fall back to START because auto_start is unknown.
+: >"$WORK/listener/state"
+: >"$WORK/listener/down"
+rm -f "$WORK/listener/started"
+: > "$WORK/adb.log"
+out=$(listener_run "$WORK/local.apk")
+rc=$?
+[ "$rc" = 0 ] && ok "an update without state.txt exits 0" \
+  || bad "an update without state.txt exits 0" "exit $rc: $out"
+case $out in
+  *"the proxy is not running"*)
+    ok "a missing state.txt reports the stopped listener" ;;
+  *) bad "a missing state.txt reports the stopped listener" "$out" ;;
+esac
+case $out in
+  *Traceback*|*"did not come back"*)
+    bad "a missing state.txt has no traceback or wait" "$out" ;;
+  *) ok "a missing state.txt has no traceback or wait" ;;
+esac
+if grep -q 'action.START' "$WORK/adb.log"; then
+  bad "a missing state.txt starts nothing" "$(grep action "$WORK/adb.log")"
+else
+  ok "a missing state.txt starts nothing"
+fi
+polls=$(grep -c 'dumpsys activity service' "$WORK/adb.log" || true)
+if [ "$polls" -le 2 ]; then
+  ok "a missing state.txt is observed without polling"
+else
+  bad "a missing state.txt is observed without polling" "$polls dumpsys calls"
+fi
+
 expect_exit "--release --status is rejected" 1 --release --status
 expect_exit "--fdroid --release is rejected" 1 --fdroid --release
 expect_exit "--release with two tags is rejected" 1 --release v0.5.0 v0.4.0
