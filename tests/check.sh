@@ -6,8 +6,8 @@
 #   tests/check.sh all
 #   tests/check.sh --list
 #
-# `fast` builds format, shellcheck, python, python-lint, module and script in
-# that order and stops at the first failure, naming it. `all` is
+# `fast` builds format, shellcheck, python, python-lint, python-tests, module
+# and script in that order and stops at the first failure, naming it. `all` is
 # `nix flake check`, the gate CI runs. Each target is one
 # `nix build .#checks.x86_64-linux.<name>`, so there is one definition of every
 # check and nothing extra to install but nix.
@@ -16,13 +16,13 @@ set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd) || exit 1
 cd "$ROOT" || exit 1
 SYSTEM=${SYSTEM:-x86_64-linux}
-FAST=(format shellcheck python python-lint module script)
+FAST=(format shellcheck python python-lint python-tests module script)
 
 usage() {
   cat <<'EOF'
 usage: tests/check.sh <target>
 
-  fast           format, shellcheck, python, python-lint, module and script
+  fast           format, shellcheck, python, python-lint, python-tests, module and script
   all            nix flake check, the full gate (includes the GUI)
   --list         every target with a one-line description
   --help         this text
@@ -46,7 +46,7 @@ EOF
 
 list_targets() {
   printf '%-14s %s\n' \
-    fast 'format, shellcheck, python, python-lint, module and script' \
+    fast 'format, shellcheck, python, python-lint, python-tests, module and script' \
     all 'nix flake check, the full gate (includes the GUI)' \
     format 'nixfmt-clean flake.nix, modules/*.nix and tests/module/*.nix' \
     shellcheck 'bin/, lib/*.sh and every *.sh under tests/ at warning level' \
