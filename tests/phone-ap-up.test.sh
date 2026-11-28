@@ -253,6 +253,8 @@ cat >"$TMP/ap-fallback" <<'EOF'
 printf '%s\n' "$*" >>"$LOG/fallback"
 exit "${FALLBACK_EXIT:-0}"
 EOF
+# Nix builds have no /usr/bin/env; use the bash this suite runs under.
+sed -i "1s|^#!.*|#!$BASH_BIN|" "$TMP/ap-fallback"
 chmod +x "$TMP/ap-fallback"
 export PHONE_AP_FALLBACK=1
 export PHONE_AP_FALLBACK_TOOL=$TMP/ap-fallback

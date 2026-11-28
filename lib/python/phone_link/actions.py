@@ -261,6 +261,8 @@ SCRIPTS: tuple[Action, ...] = (
             "passive-only or disabled channel exits before the supplicant timeout with "
             "the country and the fixes, and a failure while the channel is allowed hints "
             "at a stale wpa_supplicant and `systemctl restart NetworkManager`; with "
+            "`ap.fallback.enable` either failure makes one 2.4 GHz attempt at "
+            "`ap.fallback.channel`/`channelWidth` instead of leaving no link; with "
             "`ap.role = \"external\"` it says the AP is external, runs no `iw`/`nmcli`, and "
             "only asks the rejoin watchdog to nudge the phone back over USB"
         ),
@@ -280,8 +282,10 @@ SCRIPTS: tuple[Action, ...] = (
         ),
         doc=(
             "drop the AP and rejoin the phone's hotspot; `--client` stops the AP and "
-            "leaves the radio free for NetworkManager, without joining anything; with "
-            "`ap.role = \"external\"` it is a no-op and says the external AP stays up"
+            "leaves the radio free for NetworkManager, without joining anything; a "
+            "runtime 2.4 GHz fallback is undone while the profile is down, so the next "
+            "up tries 5 GHz again; with `ap.role = \"external\"` it is a no-op and says "
+            "the external AP stays up"
         ),
         usage="usage: phone-ap-down [--client] [--help]",
         usage_const="USAGE_AP_DOWN",
