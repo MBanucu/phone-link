@@ -1,10 +1,9 @@
 """The doctor suite, case for case with tests/phone-doctor.test.sh.
 
-Each method is one numbered section of the shell suite; ``CASES`` names the
-section, the shell file's line and how many assertions it made, and
-``test_case_inventory`` refuses to run if the two inventories disagree.  The
-shell suite stays in place until this one is accepted, so a reviewer can run
-both.
+Each method is one numbered section of the shell suite this replaced
+(``tests/phone-doctor.test.sh``, removed in #117); ``CASES`` names the section
+and how many assertions it made, and ``test_case_inventory`` refuses to run if
+a method is unmapped or an assertion total drifts.
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ from dataclasses import dataclass
 
 from . import fixtures
 from .fixtures import DUMPSYS
-from .harness import BASH, ROOT, SHELL_SUITE, Case
+from .harness import BASH, ROOT, Case
 
 
 @dataclass(frozen=True)
@@ -24,68 +23,66 @@ class ShellCase:
     """One numbered section of the shell suite and its Python replacement."""
 
     section: str
-    shell_line: int
     test: str
     assertions: int
 
 
 CASES: tuple[ShellCase, ...] = (
-    ShellCase("1", 224, "test_case_01_ready_setup", 15),
-    ShellCase("1b", 257, "test_case_01b_stock_wifi_globals", 3),
-    ShellCase("2", 267, "test_case_02_no_phone", 5),
-    ShellCase("3", 277, "test_case_03_locked_phone", 3),
-    ShellCase("4", 284, "test_case_04_forwarding_off", 4),
-    ShellCase("5", 295, "test_case_05_hotspot_mode", 5),
-    ShellCase("6", 310, "test_case_06_dead_proxy", 2),
-    ShellCase("6b", 317, "test_case_06b_listening_port_mismatch", 3),
-    ShellCase("7", 328, "test_case_07_missing_secrets", 3),
-    ShellCase("7b", 335, "test_case_07b_open_secrets_file", 2),
-    ShellCase("8", 343, "test_case_08_inactive_tunnel", 3),
-    ShellCase("9", 350, "test_case_09_usb_tether_off", 2),
-    ShellCase("10", 356, "test_case_10_ap_down", 3),
-    ShellCase("10b", 365, "test_case_10b_ap_units_stopped", 4),
-    ShellCase("10c", 377, "test_case_10c_nft_drop", 4),
-    ShellCase("10c2", 389, "test_case_10c2_module_nft_path", 5),
-    ShellCase("10d", 419, "test_case_10d_no_station", 3),
-    ShellCase("10d2", 432, "test_case_10d2_hint_needs_ssid", 3),
-    ShellCase("10d3", 444, "test_case_10d3_external_role", 6),
-    ShellCase("10d4", 472, "test_case_10d4_external_phone_away", 4),
-    ShellCase("10d5", 495, "test_case_10d5_external_no_link", 5),
-    ShellCase("10e", 520, "test_case_10e_missing_tools", 1),
-    ShellCase("11", 549, "test_case_11_doze_allowlist", 3),
-    ShellCase("12", 559, "test_case_12_auto_start_off", 2),
-    ShellCase("12b", 566, "test_case_12b_state_file", 6),
-    ShellCase("12c", 585, "test_case_12c_boot_set", 2),
-    ShellCase("12c-2", 592, "test_case_12c2_battery_vs_oem", 4),
-    ShellCase("12c-3", 605, "test_case_12c3_old_app_unknown", 2),
-    ShellCase("12c-4", 614, "test_case_12c4_likely_blocked", 6),
-    ShellCase("12c-5", 637, "test_case_12c5_old_blocked_line", 3),
-    ShellCase("12d", 650, "test_case_12d_denied_grants", 16),
-    ShellCase("12e", 673, "test_case_12e_undeclared_grant", 2),
-    ShellCase("12f", 681, "test_case_12f_manifest_facts", 6),
-    ShellCase("12g", 704, "test_case_12g_notifications_target", 2),
-    ShellCase("13", 714, "test_case_13_missing_apk", 4),
-    ShellCase("12-installed", 727, "test_case_12_installed", 5),
-    ShellCase("14", 744, "test_case_14_old_lock", 2),
-    ShellCase("14b", 767, "test_case_14b_matching_tag", 3),
-    ShellCase("14c", 784, "test_case_14c_moved_tag", 3),
-    ShellCase("14d", 798, "test_case_14d_branch_ahead", 2),
-    ShellCase("14e", 811, "test_case_14e_lock_behind", 2),
-    ShellCase("14f", 824, "test_case_14f_matching_branch", 2),
-    ShellCase("14g", 837, "test_case_14g_checkout_ahead", 3),
-    ShellCase("14h", 854, "test_case_14h_peeled_tag", 2),
-    ShellCase("14i", 865, "test_case_14i_remote_only", 6),
-    ShellCase("15", 890, "test_case_15_analyze", 9),
-    ShellCase("16", 913, "test_case_16_mdns_reconnect", 3),
-    ShellCase("17", 926, "test_case_17_refused_connect", 2),
-    ShellCase("18", 936, "test_case_18_wireless_debugging_off", 3),
-    ShellCase("19", 950, "test_case_19_pinned_port", 3),
-    ShellCase("20", 964, "test_case_20_help", 1),
-    ShellCase("release", 967, "test_case_99_release", 2),
+    ShellCase("1", "test_case_01_ready_setup", 15),
+    ShellCase("1b", "test_case_01b_stock_wifi_globals", 3),
+    ShellCase("2", "test_case_02_no_phone", 5),
+    ShellCase("3", "test_case_03_locked_phone", 3),
+    ShellCase("4", "test_case_04_forwarding_off", 4),
+    ShellCase("5", "test_case_05_hotspot_mode", 5),
+    ShellCase("6", "test_case_06_dead_proxy", 2),
+    ShellCase("6b", "test_case_06b_listening_port_mismatch", 3),
+    ShellCase("7", "test_case_07_missing_secrets", 3),
+    ShellCase("7b", "test_case_07b_open_secrets_file", 2),
+    ShellCase("8", "test_case_08_inactive_tunnel", 3),
+    ShellCase("9", "test_case_09_usb_tether_off", 2),
+    ShellCase("10", "test_case_10_ap_down", 3),
+    ShellCase("10b", "test_case_10b_ap_units_stopped", 4),
+    ShellCase("10c", "test_case_10c_nft_drop", 4),
+    ShellCase("10c2", "test_case_10c2_module_nft_path", 5),
+    ShellCase("10d", "test_case_10d_no_station", 3),
+    ShellCase("10d2", "test_case_10d2_hint_needs_ssid", 3),
+    ShellCase("10d3", "test_case_10d3_external_role", 6),
+    ShellCase("10d4", "test_case_10d4_external_phone_away", 4),
+    ShellCase("10d5", "test_case_10d5_external_no_link", 5),
+    ShellCase("10e", "test_case_10e_missing_tools", 1),
+    ShellCase("11", "test_case_11_doze_allowlist", 3),
+    ShellCase("12", "test_case_12_auto_start_off", 2),
+    ShellCase("12b", "test_case_12b_state_file", 6),
+    ShellCase("12c", "test_case_12c_boot_set", 2),
+    ShellCase("12c-2", "test_case_12c2_battery_vs_oem", 4),
+    ShellCase("12c-3", "test_case_12c3_old_app_unknown", 2),
+    ShellCase("12c-4", "test_case_12c4_likely_blocked", 6),
+    ShellCase("12c-5", "test_case_12c5_old_blocked_line", 3),
+    ShellCase("12d", "test_case_12d_denied_grants", 16),
+    ShellCase("12e", "test_case_12e_undeclared_grant", 2),
+    ShellCase("12f", "test_case_12f_manifest_facts", 6),
+    ShellCase("12g", "test_case_12g_notifications_target", 2),
+    ShellCase("13", "test_case_13_missing_apk", 4),
+    ShellCase("12-installed", "test_case_12_installed", 5),
+    ShellCase("14", "test_case_14_old_lock", 2),
+    ShellCase("14b", "test_case_14b_matching_tag", 3),
+    ShellCase("14c", "test_case_14c_moved_tag", 3),
+    ShellCase("14d", "test_case_14d_branch_ahead", 2),
+    ShellCase("14e", "test_case_14e_lock_behind", 2),
+    ShellCase("14f", "test_case_14f_matching_branch", 2),
+    ShellCase("14g", "test_case_14g_checkout_ahead", 3),
+    ShellCase("14h", "test_case_14h_peeled_tag", 2),
+    ShellCase("14i", "test_case_14i_remote_only", 6),
+    ShellCase("15", "test_case_15_analyze", 9),
+    ShellCase("16", "test_case_16_mdns_reconnect", 3),
+    ShellCase("17", "test_case_17_refused_connect", 2),
+    ShellCase("18", "test_case_18_wireless_debugging_off", 3),
+    ShellCase("19", "test_case_19_pinned_port", 3),
+    ShellCase("20", "test_case_20_help", 1),
+    ShellCase("release", "test_case_99_release", 2),
 )
 
 SHELL_ASSERTIONS = 199
-SHELL_SECTIONS = 51
 
 
 class DoctorCase(Case):
@@ -1262,7 +1259,13 @@ class DoctorCase(Case):
 
     # -- parity --------------------------------------------------------
     def test_case_inventory(self) -> None:
-        """Every shell section has one Python test, and the counts agree."""
+        """Every ported section has one Python test and its assertions.
+
+        The shell suite this replaced has been deleted, so its 51 numbered
+        sections and the unnumbered release check are frozen here: a case that
+        disappears, a section mapped twice, or an assertion count that no
+        longer totals 199 fails before anything is trusted.
+        """
         names = {
             name
             for name in dir(type(self))
@@ -1276,18 +1279,6 @@ class DoctorCase(Case):
         self.assertEqual(len(CASES), 52)
         self.assertEqual(len({case.section for case in CASES}), 52)
         self.assertEqual(sum(case.assertions for case in CASES), SHELL_ASSERTIONS)
-        text = SHELL_SUITE.read_text(encoding="utf-8")
-        sections = {
-            number
-            for number, line in enumerate(text.splitlines(), 1)
-            if re.match(r"^# [0-9][0-9a-z-]*\.", line)
-        }
-        self.assertEqual(len(sections), SHELL_SECTIONS, "the shell suite changed shape")
-        self.assertEqual(
-            sections,
-            {case.shell_line for case in CASES if case.section != "release"},
-            "a shell section is not mapped to a Python test",
-        )
 
 
 if __name__ == "__main__":

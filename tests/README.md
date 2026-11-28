@@ -5,10 +5,12 @@ The suites in this directory are hermetic: they stub `adb`, `curl`, `iw`,
 exceptions are `tests/live/`, which drive real hardware and are never part of
 `nix flake check`.
 
-Every suite is a `tests/*.test.sh` file. `tests/run` finds them, and the flake's
-`script` check calls the same runner over the same glob, so a suite outside
-`tests/*.test.sh` does not run in CI. `tests/run --list` prints what a selection
-would run.
+Every shell suite is a `tests/*.test.sh` file. `tests/run` finds them, and the
+flake's `script` check calls the same runner over the same glob, so a shell
+suite outside `tests/*.test.sh` does not run in CI. `tests/run --list` prints
+what a selection would run. The suites already ported live under
+`tests/python/` and run as the `python-tests` check; `phone-doctor` is the
+first, and its section below says so.
 
 ## Which suite for this change?
 
@@ -72,9 +74,12 @@ command is usually the first one to run.
 
 ### Doctor
 
+`phone-doctor`'s own suite is Python now:
+`tests/python/phone_link_tests/test_doctor.py` (the `python-tests` check). The
+shell suites below cover the parts that still run in shell.
+
 | Suite | Proves | Guards |
 | --- | --- | --- |
-| `phone-doctor` | every check reads the stubbed phone and reports the documented sections and counts | `bin/phone-doctor` |
 | `phone-doctor-fix` | the doctor's problems become ordered fixes, and one failed fix does not stop the rest | `bin/phone-doctor-fix` |
 | `phone-doctor-context` | the secrets parser matches `read_secrets` and PHONE_PROXY_PORT is validated | `lib/python/phone_doctor/context.py` |
 | `phone-doctor-parallel` | fast results stream before a slow one, order is canonical and caches initialise once | `lib/python/phone_doctor/parallel.py` |

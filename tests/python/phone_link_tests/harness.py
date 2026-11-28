@@ -33,7 +33,6 @@ from typing import ClassVar
 # tests/python/phone_link_tests/harness.py -> the checkout (or the store copy).
 ROOT = Path(__file__).resolve().parents[3]
 DOCTOR = ROOT / "bin" / "phone-doctor"
-SHELL_SUITE = ROOT / "tests" / "phone-doctor.test.sh"
 
 BASH = os.environ.get("BASH") or shutil.which("bash") or "/bin/bash"
 

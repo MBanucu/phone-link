@@ -45,7 +45,7 @@ flake.nix  →  modules/*.nix  →  lib/python/* + lib/*.sh  →  bin/*  →  te
 | Change the hairpin or fail-open | `modules/phone-link/options/ap.nix` (`ap.uplink`, the `ap.*Rules` values) and `derived.nix` (the rulesets); `modules/phone-link-failopen.nix` + `lib/phone-ap-failopen.sh` for the watchdog | `nix build .#checks.x86_64-linux.module` and `bash tests/phone-ap-failopen.test.sh` |
 | Change or add a command | `lib/python/phone_link/commands/<group>.py`, then one `Action` in `actions.py` (its `module:function`, usage, docs row and flags); `registry_gen --write` writes the shim, `COMMANDS` entry and docs row. Full recipe in [commands](commands.md) | `bash tests/<name>.test.sh`, plus `nix build .#checks.x86_64-linux.registry` |
 | Change a module option | `modules/phone-link/options/<group>.nix` (or `options/ap.nix` for `ap.*` and its rulesets); document it in the [options table](options.md) | `nix build .#checks.x86_64-linux.module` |
-| Add or change a test | `tests/<name>.test.sh`, or `tests/python/phone_link_tests/test_<name>.py` once migrated | `bash tests/<name>.test.sh`; then `bash tests/check.sh fast` for the cheap set |
+| Add or change a test | `tests/python/phone_link_tests/test_<name>.py` for a suite already ported (`test_doctor.py`), otherwise `tests/<name>.test.sh` until it is | the suite itself; then `bash tests/check.sh fast` for the cheap set |
 | Change the GUI | `lib/python/phone_link_gui/app.py` (pages beside it); argv still comes from `lib/python/phone_link/actions.py` | `nix build .#checks.x86_64-linux.gui` and `.#checks.x86_64-linux.gui-registry` |
 | Change the proxy install | `lib/python/phone_link/commands/install.py` (`phone_proxy_install`); the app itself is `MBanucu/phone-link-proxy` | `bash tests/phone-proxy-install.test.sh` |
 
@@ -59,15 +59,14 @@ has the full table and how to run one target.
 
 ## Add a case to the Python doctor suite
 
-`tests/python/phone_link_tests/test_doctor.py` mirrors one numbered section of
-`tests/phone-doctor.test.sh` per test method. To add a case: write
-`test_case_NN_*`, use `self.sandbox` (the fixtures come from
-`fixtures.fresh_state`) and the `assert_*` helpers on the run it returns, then
-add a `ShellCase` row to `CASES` naming the shell section, the shell file's
-line and how many assertions it makes. Run one with
+`tests/python/phone_link_tests/test_doctor.py` holds one test method per case
+of the shell suite it replaced. To add a case: write `test_case_NN_*`, use
+`self.sandbox` (the fixtures come from `fixtures.fresh_state`) and the
+`assert_*` helpers on the run it returns, then add a `ShellCase` row to `CASES`
+with the section label and how many assertions it makes. Run one with
 `python3 -m unittest discover -s tests/python -t . -k test_case_NN`; the
-`test_case_inventory` case fails if a numbered shell section has no row, or if
-the declared count no longer totals 199.
+`test_case_inventory` case fails if a method has no row, or if the declared
+counts no longer total 199.
 
 ## Module layout
 
